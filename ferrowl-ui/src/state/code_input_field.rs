@@ -10,8 +10,9 @@ use crate::traits::{HandleEvents, IsFocus, SetFocus};
 
 /// Whether a yank/delete register holds a run of whole lines or a span of characters,
 /// which decides whether `p`/`P` insert new lines or splice into the current one.
+/// `pub(crate)`: only `MarkdownInputFieldState`'s own tests, in the same crate, read it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RegisterKind {
+pub(crate) enum RegisterKind {
     Linewise,
     Charwise,
 }
@@ -178,7 +179,12 @@ impl CodeInputFieldState {
     }
 
     /// The current register contents and the kind of the yank/delete that filled it.
-    pub fn register(&self) -> Option<(&str, RegisterKind)> {
+    /// `pub(crate)`: only `MarkdownInputFieldState`'s own tests, in the same crate, read it.
+    #[allow(
+        dead_code,
+        reason = "read only by markdown_input_field.rs's #[cfg(test)] assertions"
+    )]
+    pub(crate) fn register(&self) -> Option<(&str, RegisterKind)> {
         self.register
             .as_ref()
             .map(|(text, kind)| (text.as_str(), *kind))

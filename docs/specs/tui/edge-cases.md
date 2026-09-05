@@ -78,7 +78,7 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-069** | Width too narrow for a list item's or block quote's hanging indent (UI-R-132) | the hanging indent is dropped and continuation rows start at column zero |
 | **UI-E-070** | Single word longer than the available width (UI-R-131) | broken mid-word at a character boundary; never truncated, never overflowed |
 | **UI-E-071** | Cursor line revealed as source in `Normal` (UI-R-126) | cursor column is a source column; no mapping between rendered and source columns is kept, so the reveal is the only place the cursor is positioned against markup |
-| **UI-E-072** | `h`, `l`, `0`, `$`, `w`, `b`, `e` in a read-only markdown input field | consumed and ignored; only line-wise navigation and yank act (UI-R-139) |
+| **UI-E-072** | `h`, `l`, `0`, `$`, `w`, `b`, `e` in a read-only markdown input field | consumed and ignored; only line/display-row navigation (`j`, `k`, `gg`, `G`, `Ctrl+D`, `Ctrl+U`) and yank act (UI-R-139) |
 | **UI-E-073** | Fence opened and never closed before the end of the buffer (UI-R-121) | every following line stays fence body to the last line of the buffer |
 | **UI-E-076** | `Ctrl+D` / `Ctrl+U` near the first or last display row (UI-R-136) | movement clamps to the first/last row; no wrap-around |
 
@@ -138,6 +138,10 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 ### Nested inline emphasis is best-effort
 
 **UI-E-075** — Nested inline markers are resolved best-effort rather than by a full CommonMark inline parser: `***x***` yields bold and italic together, but unusual or ambiguous nestings may leave a marker visible or drop a style.
+
+### Intraword underscore never opens italic
+
+**UI-E-078** — A `_` preceded by a word character (letter, digit or `_`) never opens italic, so `snake_case_word` keeps its underscores visible instead of hiding a spurious pair as markers.
 
 ### Markdown input field has no consumer in the application
 

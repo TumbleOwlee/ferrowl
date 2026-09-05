@@ -310,6 +310,9 @@ impl HandleEvents for MarkdownInputFieldState {
             }
             let half = (self.visible_rows / 2).max(1) as isize;
             let dir = if code == KeyCode::Char('d') { 1 } else { -1 };
+            let total = self.total_display_rows();
+            let max_scroll = total.saturating_sub(self.visible_rows) as isize;
+            self.row_scroll = (self.row_scroll as isize + dir * half).clamp(0, max_scroll) as usize;
             self.step_display_row(dir * half);
             return EventResult::Consumed;
         }
@@ -462,6 +465,23 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-136 — `Ctrl+D`/`Ctrl+U` also scroll the view by the same half-screen of display
+    /// rows the cursor moves, not just follow the cursor into view.
+    fn ut_ctrl_d_and_ctrl_u_scroll_the_view_by_half_a_screen() {
+        let mut s = state_with("a\nb\nc\nd\ne\nf\ng\nh");
+        s.sync_layout(vec![1, 1, 1, 1, 1, 1, 1, 1], 4);
+        ctrl(&mut s, 'd');
+        assert_eq!(s.row_scroll(), 2);
+        assert_eq!(s.cursor_display_row(), 2);
+        ctrl(&mut s, 'd');
+        assert_eq!(s.row_scroll(), 4);
+        assert_eq!(s.cursor_display_row(), 4);
+        ctrl(&mut s, 'u');
+        assert_eq!(s.row_scroll(), 2);
+        assert_eq!(s.cursor_display_row(), 2);
+    }
+
+    #[test]
     /// UI-E-076 — `Ctrl+D`/`Ctrl+U` clamp at the first/last display row, no wrap-around.
     fn ut_ctrl_d_and_ctrl_u_clamp_at_the_first_and_last_display_row() {
         let mut s = state_with("a\nb\nc");
@@ -520,6 +540,25 @@ mod tests {
         key(&mut s, '0');
         key(&mut s, 'j');
         assert_eq!(s.active_line(), 10);
+    }
+
+    #[test]
+    /// UI-R-139 — read-only, `gg`/`G`/`Ctrl+D`/`Ctrl+U` remain available for line and
+    /// display-row navigation, alongside `j`/`k`, counts and `yy`.
+    fn ut_read_only_keeps_gg_g_ctrl_d_and_ctrl_u() {
+        let mut s = state_with("a\nb\nc\nd\ne\nf\ng\nh");
+        s.sync_layout(vec![1, 1, 1, 1, 1, 1, 1, 1], 4);
+        s.set_read_only(true);
+        key(&mut s, 'j');
+        key(&mut s, 'G');
+        assert_eq!(s.active_line(), 7);
+        key(&mut s, 'g');
+        key(&mut s, 'g');
+        assert_eq!(s.active_line(), 0);
+        ctrl(&mut s, 'd');
+        assert_eq!(s.cursor_display_row(), 2);
+        ctrl(&mut s, 'u');
+        assert_eq!(s.cursor_display_row(), 0);
     }
 
     #[test]

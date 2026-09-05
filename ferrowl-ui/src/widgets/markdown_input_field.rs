@@ -243,7 +243,6 @@ impl StatefulWidget for &MarkdownInputField {
         let mut rows_per_line = Vec::with_capacity(line_count);
         let mut rows_data: Vec<Vec<Vec<(String, Style)>>> = Vec::with_capacity(line_count);
         let mut is_source_line: Vec<bool> = Vec::with_capacity(line_count);
-        let mut is_rule_line: Vec<bool> = Vec::with_capacity(line_count);
 
         for (line_idx, line) in lines.iter().enumerate() {
             let (block, next_block_state) = block_line(line, &block_state);
@@ -262,11 +261,8 @@ impl StatefulWidget for &MarkdownInputField {
             fence_carry = next_carry;
 
             let source_flag = reveal_as_source(line_idx, active, focused, disabled, mode);
-            let rule_flag = !source_flag && rendered.rule;
             let rows = if source_flag {
                 wrap_line(&self.styled_source_line(line), content_width)
-            } else if rule_flag {
-                wrap_line(&rendered, area.width as usize)
             } else {
                 wrap_line(&rendered, content_width)
             };
@@ -274,7 +270,6 @@ impl StatefulWidget for &MarkdownInputField {
             rows_per_line.push(rows.len());
             rows_data.push(rows);
             is_source_line.push(source_flag);
-            is_rule_line.push(rule_flag);
         }
 
         let cursor_position = if active < is_source_line.len() && is_source_line[active] {
@@ -305,9 +300,7 @@ impl StatefulWidget for &MarkdownInputField {
         {
             let y = area.y + (row - row_scroll) as u16;
 
-            let on_rule_row = is_rule_line[line_idx];
-
-            if gutter_width > 0 && !on_rule_row {
+            if gutter_width > 0 {
                 let gutter_str = if sub_row == 0 {
                     format!(
                         "{:>width$}",
@@ -322,11 +315,7 @@ impl StatefulWidget for &MarkdownInputField {
                     .render(gutter_rect, buf);
             }
 
-            let content_rect = if on_rule_row {
-                Rect::new(area.x, y, area.width, 1)
-            } else {
-                Rect::new(content_x, y, content_width as u16, 1)
-            };
+            let content_rect = Rect::new(content_x, y, content_width as u16, 1);
             let row_spans = &rows_data[line_idx][sub_row];
             let line_spans: Vec<Span> = row_spans
                 .iter()

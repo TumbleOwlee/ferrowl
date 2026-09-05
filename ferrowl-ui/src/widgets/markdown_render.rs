@@ -15,7 +15,8 @@ pub(crate) struct RenderedLine {
     pub hanging_indent: usize,
     /// Fence delimiter/body: wrap at a character boundary, no hanging indent (UI-R-133).
     pub char_wrap: bool,
-    /// Horizontal rule: fill the widget width with the rule style (UI-R-148).
+    /// Horizontal rule: fill the text width, after the gutter when enabled, with the rule
+    /// style (UI-R-140, UI-R-148).
     pub rule: bool,
 }
 
@@ -276,7 +277,10 @@ fn inline_render(
         };
         for p in s.content.0..s.content.1 {
             if p >= from && p < len {
-                style_at[p - from] = Some(style);
+                style_at[p - from] = Some(match style_at[p - from] {
+                    Some(existing) => existing.patch(style),
+                    None => style,
+                });
             }
         }
     }
@@ -476,6 +480,23 @@ mod tests {
 
     fn text(rl: &RenderedLine) -> String {
         rl.spans.iter().map(|(t, _)| t.as_str()).collect()
+    }
+
+    #[test]
+    /// UI-E-075 — `***x***` renders with bold and italic merged over the same text, not one
+    /// style overwriting the other.
+    fn ut_triple_marker_merges_bold_and_italic_over_the_same_text() {
+        let rl = render("***x***");
+        assert_eq!(text(&rl), "x");
+        let style = rl.spans[0].1;
+        assert!(
+            style.add_modifier.contains(Modifier::BOLD),
+            "expected bold in {style:?}"
+        );
+        assert!(
+            style.add_modifier.contains(Modifier::ITALIC),
+            "expected italic in {style:?}"
+        );
     }
 
     #[test]
@@ -825,7 +846,7 @@ mod tests {
         assert_eq!(
             row_text(&rows[0]).chars().count(),
             8,
-            "rule row must span the full widget width"
+            "rule row must span the full text width"
         );
     }
 

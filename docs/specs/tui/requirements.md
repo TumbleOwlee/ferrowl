@@ -206,7 +206,7 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-138** — Read-only, the display row range of the cursor's source line is drawn in the theme's highlighted-row style, so line navigation is visible without a text cursor.
 
-**UI-R-139** — Read-only, `j`, `k`, their count prefixes and `yy` (with its count prefix) remain available, so a reader can navigate lines and yank them.
+**UI-R-139** — Read-only, `j`, `k`, their count prefixes, `yy` (with its count prefix), `gg`, `G`, `Ctrl+D` and `Ctrl+U` remain available, so a reader can navigate lines and display rows and yank them.
 
 **UI-R-140** — An optional line-number gutter, off by default and selected on the widget builder, prints the source line number on the first display row of each source line and leaves continuation rows blank.
 
@@ -224,7 +224,7 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-147** — A block-quote line replaces each `>` marker with a `▎` bar in the theme's quote-bar color for that nesting depth and draws the quoted text dimmed and italic.
 
-**UI-R-148** — A horizontal rule (`---` or `***`) is drawn as a rule line spanning the full widget width in the theme's rule style.
+**UI-R-148** — A horizontal rule (`---` or `***`) is drawn as a rule line spanning the full text width, after the gutter when enabled, in the theme's rule style.
 
 **UI-R-149** — A fence delimiter line hides its backticks and info string, rendering as an empty line in the theme's code style, so the one-line-per-source-line invariant of UI-R-142 holds.
 

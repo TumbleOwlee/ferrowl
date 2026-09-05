@@ -23,7 +23,8 @@ pub struct InlineSpan {
     pub content: (usize, usize),
 }
 
-/// Inline constructs of one source line, sorted by content start, non-overlapping.
+/// Inline constructs of one source line, sorted by content start, non-overlapping except for
+/// the deliberate Bold/Italic pair `***x***` resolves to over the same text (UI-E-075).
 pub fn inline_spans(line: &str) -> Vec<InlineSpan> {
     let chars: Vec<char> = line.chars().collect();
     let escaped = escaped_positions(&chars);
@@ -104,6 +105,7 @@ pub fn inline_spans(line: &str) -> Vec<InlineSpan> {
         }
 
         if chars[i] == '_'
+            && !(i > 0 && is_word_char(chars[i - 1]))
             && let Some(span) = try_delim(&chars, i, &['_'], InlineKind::Italic, &escaped)
         {
             i = span.markers[1].1;
@@ -123,6 +125,10 @@ pub fn inline_spans(line: &str) -> Vec<InlineSpan> {
 pub fn escape_markers(line: &str) -> Vec<usize> {
     let chars: Vec<char> = line.chars().collect();
     backslash_positions(&chars)
+}
+
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
 }
 
 fn backslash_positions(chars: &[char]) -> Vec<usize> {
@@ -593,6 +599,17 @@ mod tests {
             let spans = inline_spans(case);
             assert!(spans.is_empty(), "unexpected span in {case:?}: {spans:?}");
         }
+    }
+
+    #[test]
+    /// UI-E-078 — `_` preceded by a word character never opens italic, so an identifier's
+    /// underscores stay visible instead of a spurious pair hiding as markers.
+    fn ut_intraword_underscore_does_not_open_italic() {
+        let spans = inline_spans("snake_case_word");
+        assert!(
+            spans.is_empty(),
+            "intraword underscores must not be treated as emphasis markers: {spans:?}"
+        );
     }
 
     #[test]

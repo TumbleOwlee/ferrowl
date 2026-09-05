@@ -302,8 +302,10 @@ The widget uses the mode transitions, motions, edits and Insert-mode keys of the
 |---|---|---|---|
 | `gj` | Normal / Visual | Down one display row | UI-R-135 |
 | `gk` | Normal / Visual | Up one display row | UI-R-135 |
-| `Ctrl+D` | Normal / Visual | Half a screen of display rows down, cursor moved the same number of rows | UI-R-136 |
-| `Ctrl+U` | Normal / Visual | Half a screen of display rows up, cursor moved the same number of rows | UI-R-136 |
+| `gg` | Normal / Visual / read-only | First source line, first column | UI-R-139 |
+| `G` | Normal / Visual / read-only | Last source line, first column | UI-R-139 |
+| `Ctrl+D` | Normal / Visual / read-only | Half a screen of display rows down, cursor moved the same number of rows | UI-R-136, UI-R-139 |
+| `Ctrl+U` | Normal / Visual / read-only | Half a screen of display rows up, cursor moved the same number of rows | UI-R-136, UI-R-139 |
 | `j` / `k` | Normal / Visual / read-only | Down / up one source line, wrapping ignored | UI-R-134 |
 | `yy` | Normal / read-only | Yank current source line | UI-R-134, UI-R-139 |
 | `h` / `l` / `0` / `$` / `w` / `b` / `e` | read-only | Consumed, no movement | UI-E-072 |

@@ -267,9 +267,9 @@ fn it_gutter_is_off_by_default_and_numbers_only_first_display_rows() {
 }
 
 #[test]
-/// UI-R-148 — a horizontal rule spans the full widget width, including the gutter column,
-/// not just the content area to its right.
-fn it_horizontal_rule_spans_the_full_widget_width_with_the_gutter_on() {
+/// UI-R-140, UI-R-148 — a horizontal rule row keeps its line number in the gutter and the
+/// rule itself spans the full text width to the right of the gutter, not the gutter columns.
+fn it_horizontal_rule_keeps_the_gutter_and_spans_the_text_width_after_it() {
     let w = MarkdownInputFieldBuilder::default()
         .line_numbers(true)
         .build()
@@ -278,14 +278,24 @@ fn it_horizontal_rule_spans_the_full_widget_width_with_the_gutter_on() {
     SetFocus::set_focused(&mut s, false);
     let mut b = buffer(10, 3);
     StatefulWidget::render(&w, Rect::new(0, 0, 10, 3), &mut b, &mut s);
+    assert_eq!(
+        row_text(&b, 1, 2).trim_end(),
+        "2",
+        "the rule row's gutter still shows its line number"
+    );
     let rule_style = *w.markdown_theme().rule();
-    for x in 0..10 {
+    for x in 2..10 {
         assert_eq!(
             b[(x, 1)].fg,
             rule_style.fg.unwrap(),
-            "column {x} of the rule row must be filled, gutter included"
+            "column {x} of the rule row's text width must be filled"
         );
     }
+    assert_ne!(
+        b[(0, 1)].fg,
+        rule_style.fg.unwrap(),
+        "the gutter column must not carry the rule style"
+    );
 }
 
 #[test]
