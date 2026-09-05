@@ -8,6 +8,14 @@ use super::vim::{VimMode, emit_osc52, word_backward, word_end_forward, word_forw
 use crate::EventResult;
 use crate::traits::{HandleEvents, IsFocus, SetFocus};
 
+/// Whether a yank/delete register holds a run of whole lines or a span of characters,
+/// which decides whether `p`/`P` insert new lines or splice into the current one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegisterKind {
+    Linewise,
+    Charwise,
+}
+
 /// State of a multi-line [`CodeInputField`](crate::widgets::CodeInputField)
 /// editor: line buffer, cursor (line + column), and scroll offsets.
 #[derive(Builder, Debug, Clone, Getters, Setters, CopyGetters)]
@@ -67,7 +75,7 @@ pub struct CodeInputFieldState {
     visual_anchor: Option<(usize, usize)>,
     #[getset(skip)]
     #[builder(setter(skip), default)]
-    register: Option<(String, bool)>,
+    register: Option<(String, RegisterKind)>,
     #[getset(skip)]
     #[builder(setter(skip), default)]
     undo: Option<(Vec<String>, usize, usize)>,
@@ -169,6 +177,51 @@ impl CodeInputFieldState {
         }
     }
 
+    /// The current register contents and the kind of the yank/delete that filled it.
+    pub fn register(&self) -> Option<(&str, RegisterKind)> {
+        self.register
+            .as_ref()
+            .map(|(text, kind)| (text.as_str(), *kind))
+    }
+
+    /// Yanks `count` source lines starting at the active line into the register, linewise
+    /// (`count` clamped to the buffer end; `0` is treated as `1`).
+    pub fn yank_lines(&mut self, count: usize) {
+        let count = count.max(1);
+        let end = (self.active_line + count - 1).min(self.lines.len() - 1);
+        let text = self.lines[self.active_line..=end].join("\n");
+        self.set_register(text, RegisterKind::Linewise);
+    }
+
+    /// Clears a lone pending `g`/`d`/`y` chord press without performing its action.
+    pub(crate) fn cancel_pending_chord(&mut self) {
+        self.pending = None;
+    }
+
+    /// Deletes `count` source lines starting at the active line into the register, linewise
+    /// (`count` clamped to the buffer end; `0` is treated as `1`); UI-R-134.
+    pub fn delete_lines(&mut self, count: usize) {
+        if self.disabled {
+            return;
+        }
+        let count = count.max(1);
+        let end = (self.active_line + count - 1).min(self.lines.len() - 1);
+        self.snapshot_undo();
+        let text = self.lines[self.active_line..=end].join("\n");
+        self.set_register(text, RegisterKind::Linewise);
+        if self.active_line == 0 && end == self.lines.len() - 1 {
+            self.lines = vec![String::new()];
+            self.active_line = 0;
+        } else {
+            self.lines.drain(self.active_line..=end);
+            if self.active_line >= self.lines.len() {
+                self.active_line = self.lines.len() - 1;
+            }
+        }
+        self.cursor_col = 0;
+        self.clamp_normal();
+    }
+
     fn clamp_cursor(&mut self) {
         let line_len = self.lines[self.active_line].chars().count();
         if self.cursor_col > line_len {
@@ -227,9 +280,9 @@ impl CodeInputFieldState {
         self.undo = Some((self.lines.clone(), self.active_line, self.cursor_col));
     }
 
-    fn set_register(&mut self, text: String, linewise: bool) {
+    fn set_register(&mut self, text: String, kind: RegisterKind) {
         emit_osc52(&text);
-        self.register = Some((text, linewise));
+        self.register = Some((text, kind));
     }
 
     /// Extracts the inclusive charwise span `start..=end` (document order) as
@@ -257,7 +310,7 @@ impl CodeInputFieldState {
 
     fn yank_current_line(&mut self) {
         let text = self.lines[self.active_line].clone();
-        self.set_register(text, true);
+        self.set_register(text, RegisterKind::Linewise);
     }
 
     fn yank_selection(&mut self) {
@@ -270,7 +323,12 @@ impl CodeInputFieldState {
         } else {
             self.extract_charwise(start, end)
         };
-        self.set_register(text, linewise);
+        let kind = if linewise {
+            RegisterKind::Linewise
+        } else {
+            RegisterKind::Charwise
+        };
+        self.set_register(text, kind);
     }
 
     fn delete_current_line(&mut self) {
@@ -279,7 +337,7 @@ impl CodeInputFieldState {
         }
         self.snapshot_undo();
         let text = self.lines[self.active_line].clone();
-        self.set_register(text, true);
+        self.set_register(text, RegisterKind::Linewise);
         if self.lines.len() == 1 {
             self.lines[0] = String::new();
         } else {
@@ -306,7 +364,12 @@ impl CodeInputFieldState {
         } else {
             self.extract_charwise(start, end)
         };
-        self.set_register(text, linewise);
+        let kind = if linewise {
+            RegisterKind::Linewise
+        } else {
+            RegisterKind::Charwise
+        };
+        self.set_register(text, kind);
         if linewise {
             if start.0 == 0 && end.0 == self.lines.len() - 1 {
                 self.lines = vec![String::new()];
@@ -347,9 +410,10 @@ impl CodeInputFieldState {
     }
 
     fn paste(&mut self, after: bool) {
-        let Some((text, linewise)) = self.register.clone() else {
+        let Some((text, kind)) = self.register.clone() else {
             return;
         };
+        let linewise = kind == RegisterKind::Linewise;
         self.snapshot_undo();
         if linewise {
             let new_lines: Vec<String> = text
@@ -563,7 +627,7 @@ impl CodeInputFieldState {
                             self.cursor_col,
                             self.cursor_col + 1,
                         );
-                        self.set_register(removed, false);
+                        self.set_register(removed, RegisterKind::Charwise);
                         self.clamp_normal();
                     }
                 }
@@ -1789,5 +1853,64 @@ mod tests {
         type_char(&mut s, 'b');
         assert_eq!(s.content(), "ab");
         assert_eq!(s.vim_mode(), VimMode::Normal); // vim state unused, stays default
+    }
+
+    #[test]
+    /// `yank_lines(0)` is treated as `yank_lines(1)`, yanking one line linewise.
+    fn ut_yank_lines_zero_is_treated_as_one() {
+        let mut s = CodeInputFieldStateBuilder::default().build().unwrap();
+        s.set_content("one\ntwo\nthree");
+        s.set_active_line(0);
+        s.yank_lines(0);
+        assert_eq!(s.register(), Some(("one", RegisterKind::Linewise)));
+    }
+
+    #[test]
+    /// `yank_lines` clamps its count to the end of the buffer.
+    fn ut_yank_lines_clamps_to_buffer_end() {
+        let mut s = CodeInputFieldStateBuilder::default().build().unwrap();
+        s.set_content("one\ntwo\nthree");
+        s.set_active_line(0);
+        s.yank_lines(10);
+        assert_eq!(
+            s.register(),
+            Some(("one\ntwo\nthree", RegisterKind::Linewise))
+        );
+    }
+
+    #[test]
+    /// UI-R-134 — `delete_lines` removes `count` source lines starting at the active line and
+    /// yanks them into the register linewise.
+    fn ut_delete_lines_removes_count_lines_and_registers_them() {
+        let mut s = CodeInputFieldStateBuilder::default().build().unwrap();
+        s.set_content("one\ntwo\nthree\nfour");
+        s.set_active_line(1);
+        s.delete_lines(2);
+        assert_eq!(s.content(), "one\nfour");
+        assert_eq!(s.register(), Some(("two\nthree", RegisterKind::Linewise)));
+    }
+
+    #[test]
+    /// `delete_lines(0)` is treated as `delete_lines(1)`.
+    fn ut_delete_lines_zero_is_treated_as_one() {
+        let mut s = CodeInputFieldStateBuilder::default().build().unwrap();
+        s.set_content("one\ntwo\nthree");
+        s.set_active_line(0);
+        s.delete_lines(0);
+        assert_eq!(s.content(), "two\nthree");
+    }
+
+    #[test]
+    /// `delete_lines` clamps its count to the end of the buffer.
+    fn ut_delete_lines_clamps_to_buffer_end() {
+        let mut s = CodeInputFieldStateBuilder::default().build().unwrap();
+        s.set_content("one\ntwo\nthree");
+        s.set_active_line(0);
+        s.delete_lines(10);
+        assert_eq!(s.content(), "");
+        assert_eq!(
+            s.register(),
+            Some(("one\ntwo\nthree", RegisterKind::Linewise))
+        );
     }
 }
