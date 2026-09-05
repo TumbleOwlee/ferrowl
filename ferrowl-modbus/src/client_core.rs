@@ -227,6 +227,39 @@ impl ClientTiming for crate::udp::Config {
 pub(crate) type BoxedConnect<'a, S, F> =
     Pin<Box<dyn Future<Output = Result<ClientCore<S, F>, Error>> + Send + 'a>>;
 
+/// Spawns a TCP-family client's reconnect loop: the `connect_tcp_family` counterpart to
+/// `spawn_client_task`, pinning the socket type so `Tcp`, `RtuOverTcp` and `Ascii` over a socket
+/// differ only in `F`.
+pub(crate) fn spawn_tcp_family_client<T, F, L, St>(
+    config: Arc<RwLock<crate::tcp::Config>>,
+    operations: Arc<RwLock<Vec<Operation>>>,
+    memory: Arc<MemLock<Memory<Key<T>>>>,
+    cache: SelfSignedCache,
+    receiver: Receiver<Command>,
+    log: L,
+    status: St,
+) -> (JoinHandle<Result<(), Error>>, crate::ConnectedCell)
+where
+    T: KeyParams,
+    F: Framing + ClientFraming + Send + Sync + 'static,
+    F::Header: Send + Sync,
+    L: LogFn + Clone,
+    St: LogFn + Clone,
+{
+    spawn_client_task(
+        config,
+        operations,
+        memory,
+        receiver,
+        log,
+        status,
+        move |cfg: &crate::tcp::Config| -> BoxedConnect<'_, FrameTransport<ClientStream, F>, F> {
+            let cache = cache.clone();
+            Box::pin(async move { connect_tcp_family::<F>(cfg, &cache).await })
+        },
+    )
+}
+
 /// Spawns a client's reconnect loop as a tokio task and hands back its handle and
 /// [`ConnectedCell`]. `connect` is the only per-transport part: it receives the config under the
 /// read guard held for the whole attempt and yields a connected [`ClientCore`], exactly as each

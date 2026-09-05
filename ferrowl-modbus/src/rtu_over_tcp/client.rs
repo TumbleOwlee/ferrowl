@@ -1,4 +1,4 @@
-use crate::client_core::{BoxedConnect, ClientCore, connect_tcp_family, spawn_client_task};
+use crate::client_core::{ClientCore, connect_tcp_family, spawn_tcp_family_client};
 use crate::tcp::Config;
 use crate::tcp::tls::{ClientStream, SelfSignedCache};
 use crate::{Command, ConnectedCell, Error, Key, KeyParams, LogFn, Operation};
@@ -55,24 +55,14 @@ impl<T: KeyParams> ClientBuilder<T> {
         L: LogFn + Clone,
         S: LogFn + Clone,
     {
-        let cache = self.cache.clone();
-        Ok(spawn_client_task(
+        Ok(spawn_tcp_family_client::<T, rust_modbus::RtuOverTcp, L, S>(
             self.config.clone(),
             self.operations.clone(),
             self.memory.clone(),
+            self.cache.clone(),
             receiver,
             log,
             status,
-            move |cfg: &Config| -> BoxedConnect<
-                '_,
-                FrameTransport<ClientStream, rust_modbus::RtuOverTcp>,
-                rust_modbus::RtuOverTcp,
-            > {
-                let cache = cache.clone();
-                Box::pin(
-                    async move { Client::connect(cfg, &cache).await.map(|client| client.core) },
-                )
-            },
         ))
     }
 }
