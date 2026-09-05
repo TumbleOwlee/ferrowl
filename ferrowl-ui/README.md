@@ -7,5 +7,6 @@ Currently the crate provides the following widgets:
 * Input Field
 * Selection
 * Table
+* Vertical Tabs
 
 Please refer to the example for some demonstrations.

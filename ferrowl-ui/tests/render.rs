@@ -15,7 +15,7 @@ use ferrowl_syntax::{Language, SyntaxKind};
 use ferrowl_ui::Border;
 use ferrowl_ui::state::{
     ButtonStateBuilder, CodeInputFieldStateBuilder, InputFieldStateBuilder, ScrollingTabsState,
-    SelectionStateBuilder, SuggestInputStateBuilder, TableStateBuilder,
+    SelectionStateBuilder, SuggestInputStateBuilder, TableStateBuilder, VerticalTabsState,
 };
 use ferrowl_ui::style::{
     ButtonStyle, InputFieldStyle, ScrollingTabsStyle, SelectionStyle, SuggestInputStyle,
@@ -24,7 +24,8 @@ use ferrowl_ui::style::{
 use ferrowl_ui::traits::{Init, Suggestion, SuggestionProvider, ToLabel};
 use ferrowl_ui::widgets::{
     ButtonBuilder, CodeInputFieldBuilder, Header, InputFieldBuilder, ScrollingTabsBuilder,
-    SelectionBuilder, SuggestInputBuilder, TableBuilder, TableEntry, TextBuilder, Title, Width,
+    SelectionBuilder, SuggestInputBuilder, TableBuilder, TableEntry, TextBuilder, Title,
+    VerticalTabsBuilder, Width,
 };
 
 fn buffer(w: u16, h: u16) -> Buffer {
@@ -361,6 +362,60 @@ fn scrolling_tabs_render_variants() {
     };
     let mut b = buffer(12, 1);
     StatefulWidget::render(w, Rect::new(0, 0, 12, 1), &mut b, &mut st);
+}
+
+#[test]
+/// UI-R-114, UI-R-115, UI-R-116, UI-R-120, UI-R-121 — padded title rows
+/// written one character per row, and active-block style matching the
+/// horizontal tab bar's selected style.
+fn it_vertical_tabs_render_variants() {
+    let w = VerticalTabsBuilder::<String>::default()
+        .padding(Margin::new(1, 1))
+        .build()
+        .unwrap();
+    let titles = vec!["Tab".to_string()];
+    let mut st = VerticalTabsState {
+        titles: titles.clone(),
+        active: 0,
+        offset: 0,
+    };
+    let mut b1 = buffer(3, 5);
+    StatefulWidget::render(&w, Rect::new(0, 0, 3, 5), &mut b1, &mut st);
+    let row = |b: &Buffer, y: u16| {
+        format!(
+            "{}{}{}",
+            b[(0, y)].symbol(),
+            b[(1, y)].symbol(),
+            b[(2, y)].symbol()
+        )
+    };
+    assert_eq!(row(&b1, 0), "   ");
+    assert_eq!(row(&b1, 1), " T ");
+    assert_eq!(row(&b1, 2), " a ");
+    assert_eq!(row(&b1, 3), " b ");
+    assert_eq!(row(&b1, 4), "   ");
+    let selected = ScrollingTabsStyle::default().selected;
+    for y in 0..5 {
+        for x in 0..3 {
+            assert_eq!(b1[(x, y)].fg, selected.fg.unwrap());
+            assert_eq!(b1[(x, y)].bg, selected.bg.unwrap());
+        }
+    }
+
+    let mut st2 = VerticalTabsState {
+        titles,
+        active: 0,
+        offset: 0,
+    };
+    let mut b2 = buffer(3, 5);
+    StatefulWidget::render(w, Rect::new(0, 0, 3, 5), &mut b2, &mut st2);
+    for y in 0..5 {
+        for x in 0..3 {
+            assert_eq!(b1[(x, y)].symbol(), b2[(x, y)].symbol());
+            assert_eq!(b1[(x, y)].fg, b2[(x, y)].fg);
+            assert_eq!(b1[(x, y)].bg, b2[(x, y)].bg);
+        }
+    }
 }
 
 // ---- Selection ----
