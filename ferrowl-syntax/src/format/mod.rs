@@ -14,5 +14,8 @@ pub fn format(lang: Language, source: &str) -> Option<String> {
         Language::Json => json::format(source),
         Language::Lua => Some(lua::format(source)),
         Language::Markdown => None,
+        // A diff's leading markers and hunk offsets are content, not indentation; any
+        // re-render would corrupt them, so Diff has no formatter.
+        Language::Diff => None,
     }
 }

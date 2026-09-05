@@ -1,4 +1,4 @@
-//! Pure text-to-spans syntax highlighting for Lua, JSON and Markdown.
+//! Pure text-to-spans syntax highlighting for Lua, JSON, Markdown and Diff.
 //!
 //! No rendering, no dependencies — lexers here just walk a line of source and emit
 //! `(start_char, end_char, SyntaxKind)` spans plus a carry-over [`LineState`] for
@@ -31,6 +31,12 @@ pub enum SyntaxKind {
     Object,
     /// Identifier in call or method position (e.g. `Set` in `C_Register:Set(1)`).
     Function,
+    /// Diff line introducing content (`+`).
+    Added,
+    /// Diff line removing content (`-`).
+    Removed,
+    /// Diff header or hunk marker (`@@`, `---`, `+++`, `diff `, `index `).
+    Meta,
 }
 
 /// Whether a line ends mid-way through a Lua long bracket (`[[...]]` / `[=[...=]` etc.)

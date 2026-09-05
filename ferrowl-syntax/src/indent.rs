@@ -49,6 +49,7 @@ fn classify(lang: Language, text: &str, kind: SyntaxKind) -> (bool, bool) {
             kind == SyntaxKind::Punct && matches!(text, "}" | "]"),
         ),
         Language::Markdown => (false, false),
+        Language::Diff => (false, false),
     }
 }
 
