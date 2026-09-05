@@ -48,6 +48,13 @@ pub struct CodeInputFieldState {
     #[getset(get = "pub")]
     #[builder(default = "None")]
     placeholder: Option<String>,
+    /// Per-line gutter text replacing the line index, one entry per buffer line.
+    /// Never resynced on edits: an insert, split or delete shifts buffer rows out
+    /// from under a stale label list, so labels are intended for disabled,
+    /// read-only use — keeping them aligned with the buffer is the consumer's job.
+    #[getset(get = "pub")]
+    #[builder(default = "None")]
+    gutter_labels: Option<Vec<String>>,
     #[getset(get_copy = "pub")]
     #[builder(default = "Some(Duration::from_millis(300))")]
     space_indent: Option<Duration>,
@@ -1914,6 +1921,45 @@ mod tests {
         assert_eq!(
             s.register(),
             Some(("one\ntwo\nthree", RegisterKind::Linewise))
+        );
+    }
+
+    #[test]
+    /// UI-R-164 — gutter labels default to `None`, are builder-settable, and settable after construction.
+    fn ut_gutter_labels_default_builder_and_setter() {
+        let mut s = state();
+        assert_eq!(s.gutter_labels(), &None);
+
+        let built = CodeInputFieldStateBuilder::default()
+            .vim(false)
+            .gutter_labels(Some(vec!["A".to_string(), "B".to_string()]))
+            .build()
+            .unwrap();
+        assert_eq!(
+            built.gutter_labels(),
+            &Some(vec!["A".to_string(), "B".to_string()])
+        );
+
+        s.set_gutter_labels(Some(vec!["X".to_string()]));
+        assert_eq!(s.gutter_labels(), &Some(vec!["X".to_string()]));
+    }
+
+    #[test]
+    /// UI-E-079 — a mutating edit leaves a stale gutter-label list byte-identical, never resynced.
+    fn ut_edit_leaves_gutter_labels_stale() {
+        let mut s = CodeInputFieldStateBuilder::default()
+            .vim(false)
+            .gutter_labels(Some(vec!["one".to_string(), "two".to_string()]))
+            .build()
+            .unwrap();
+        s.set_content("ab");
+        press(&mut s, KeyModifiers::NONE, KeyCode::Left);
+        press(&mut s, KeyModifiers::NONE, KeyCode::Enter);
+        assert_eq!(s.content(), "a\nb");
+        assert_eq!(
+            s.gutter_labels(),
+            &Some(vec!["one".to_string(), "two".to_string()]),
+            "labels are never resynced by the widget on a mutating edit"
         );
     }
 }
