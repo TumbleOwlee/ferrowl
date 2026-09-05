@@ -15,17 +15,17 @@ use ferrowl_syntax::{Language, SyntaxKind};
 use ferrowl_ui::Border;
 use ferrowl_ui::state::{
     ButtonStateBuilder, CodeInputFieldStateBuilder, InputFieldStateBuilder, ScrollingTabsState,
-    SelectionStateBuilder, SuggestInputStateBuilder, TableStateBuilder, VerticalTabsState,
+    SelectionStateBuilder, SuggestInputStateBuilder, TabBarState, TableStateBuilder,
 };
 use ferrowl_ui::style::{
-    ButtonStyle, InputFieldStyle, ScrollingTabsStyle, SelectionStyle, SuggestInputStyle,
-    SyntaxTheme, TableStyle, TextStyle,
+    ButtonStyle, InputFieldStyle, SelectionStyle, SuggestInputStyle, SyntaxTheme, TabBarStyle,
+    TableStyle, TextStyle,
 };
 use ferrowl_ui::traits::{Init, Suggestion, SuggestionProvider, ToLabel};
 use ferrowl_ui::widgets::{
     ButtonBuilder, CodeInputFieldBuilder, Header, InputFieldBuilder, ScrollingTabsBuilder,
-    SelectionBuilder, SuggestInputBuilder, TableBuilder, TableEntry, TextBuilder, Title,
-    VerticalTabsBuilder, Width,
+    SelectionBuilder, SuggestInputBuilder, TabBarBuilder, TableBuilder, TableEntry, TextBuilder,
+    Title, Width,
 };
 
 fn buffer(w: u16, h: u16) -> Buffer {
@@ -54,7 +54,7 @@ fn init_and_to_label() {
 fn style_defaults_build() {
     let _ = ButtonStyle::default();
     let _ = InputFieldStyle::default();
-    let _ = ScrollingTabsStyle::default();
+    let _ = TabBarStyle::default();
     let _ = SelectionStyle::default();
     let _ = SuggestInputStyle::default();
     let _ = TableStyle::default();
@@ -369,12 +369,13 @@ fn scrolling_tabs_render_variants() {
 /// written one character per row, and active-block style matching the
 /// horizontal tab bar's selected style.
 fn it_vertical_tabs_render_variants() {
-    let w = VerticalTabsBuilder::<String>::default()
+    let w = TabBarBuilder::<String>::default()
         .padding(Margin::new(1, 1))
+        .direction(ratatui::layout::Direction::Vertical)
         .build()
         .unwrap();
     let titles = vec!["Tab".to_string()];
-    let mut st = VerticalTabsState {
+    let mut st = TabBarState {
         titles: titles.clone(),
         active: 0,
         offset: 0,
@@ -394,7 +395,7 @@ fn it_vertical_tabs_render_variants() {
     assert_eq!(row(&b1, 2), " a ");
     assert_eq!(row(&b1, 3), " b ");
     assert_eq!(row(&b1, 4), "   ");
-    let selected = ScrollingTabsStyle::default().selected;
+    let selected = TabBarStyle::default().selected;
     for y in 0..5 {
         for x in 0..3 {
             assert_eq!(b1[(x, y)].fg, selected.fg.unwrap());
@@ -402,7 +403,7 @@ fn it_vertical_tabs_render_variants() {
         }
     }
 
-    let mut st2 = VerticalTabsState {
+    let mut st2 = TabBarState {
         titles,
         active: 0,
         offset: 0,

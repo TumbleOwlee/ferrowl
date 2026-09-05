@@ -4,17 +4,17 @@
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ferrowl_ui::{
     AlternateScreen, Border,
-    state::VerticalTabsState,
-    widgets::{TextBuilder, VerticalTabsBuilder},
+    state::TabBarState,
+    widgets::{TabBarBuilder, TextBuilder},
 };
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout, Margin, Rect},
+    layout::{Constraint, Direction, Layout, Margin, Rect},
 };
 use std::{io::Stdout, time::Duration};
 
 struct App {
-    tabs: VerticalTabsState<String>,
+    tabs: TabBarState<String>,
     body: String,
 }
 
@@ -24,8 +24,9 @@ fn ui(f: &mut Frame, app: &mut App) {
 
     // Two blank columns each side of the title (H = 2), one blank row above
     // and below each title (V = 1).
-    let tabs = VerticalTabsBuilder::<String>::default()
+    let tabs = TabBarBuilder::<String>::default()
         .padding(Margin::new(2, 1))
+        .direction(Direction::Vertical)
         .build()
         .unwrap();
     f.render_stateful_widget(&tabs, tabs_area, &mut app.tabs);
@@ -44,7 +45,7 @@ fn main() {
         AlternateScreen::new().expect("Failed to create alternate screen.");
 
     let mut app = App {
-        tabs: VerticalTabsState {
+        tabs: TabBarState {
             titles: vec!["BOARD".to_string(), "REPOSITORY".to_string()],
             active: 0,
             offset: 0,

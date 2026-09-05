@@ -10,9 +10,9 @@ mod markdown_render;
 mod scrolling_tabs;
 mod selection;
 mod suggest_input;
+mod tab_bar;
 mod table;
 mod text;
-mod vertical_tabs;
 
 pub use build::*;
 pub use button::*;
@@ -54,9 +54,9 @@ pub fn render_border(
 }
 pub use selection::*;
 pub use suggest_input::*;
+pub use tab_bar::*;
 pub use table::*;
 pub use text::*;
-pub use vertical_tabs::*;
 
 use crate::traits::{IsFocus, Margins};
 use crate::{

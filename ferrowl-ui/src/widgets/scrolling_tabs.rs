@@ -9,7 +9,7 @@ use ratatui::{
 use std::marker::PhantomData;
 
 use crate::state::ScrollingTabsState;
-use crate::style::ScrollingTabsStyle;
+use crate::style::TabBarStyle;
 use crate::traits::ToLabel;
 
 /// A tab bar that scrolls horizontally to keep the selected tab visible.
@@ -24,8 +24,8 @@ use crate::traits::ToLabel;
 #[getset(set = "pub")]
 pub struct ScrollingTabs<T: ToLabel + Clone> {
     #[getset(get = "pub")]
-    #[builder(default = "ScrollingTabsStyle::default()")]
-    style: ScrollingTabsStyle,
+    #[builder(default = "TabBarStyle::default()")]
+    style: TabBarStyle,
     #[getset(get = "pub")]
     #[builder(default = r#""│".to_string()"#)]
     divider: String,

@@ -2,86 +2,128 @@ use derive_builder::Builder;
 use getset::{CopyGetters, Getters, Setters, WithSetters};
 use ratatui::{
     buffer::Buffer,
-    layout::{Margin, Rect, VerticalAlignment},
+    layout::{Direction, Margin, Rect},
     widgets::StatefulWidget,
 };
 use std::marker::PhantomData;
 
-use crate::state::VerticalTabsState;
-use crate::style::ScrollingTabsStyle;
+use crate::state::TabBarState;
+use crate::style::TabBarStyle;
 use crate::traits::ToLabel;
 
-/// A tab bar that lays its tabs out vertically, writing each title downward
-/// one character per row and scrolling to keep the active tab's block of
-/// rows visible. An optional padding of a horizontal count H and a vertical
-/// count V frames every tab, making the widget's rendered width `1 + 2H`
-/// columns. When the tabs' natural height is less than the area, the spare
-/// rows stretch the tabs to fill it and `alignment` places each tab's
-/// character and padding rows at the top, middle or bottom of the resulting
-/// extent.
+/// A tab's placement, `Start`, `Center` or `End`, along a [`TabBar`]'s
+/// layout direction once it has gained cells from filling the area
+/// (UI-R-126).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TabAlignment {
+    Start,
+    #[default]
+    Center,
+    End,
+}
+
+/// A tab bar that lays its tabs out one after another along its layout
+/// direction, writing each title one character per cell in that direction
+/// and scrolling to keep the active tab's block of cells visible. An
+/// optional padding of a horizontal count H and a vertical count V frames
+/// every tab, making the widget's rendered extent across the layout
+/// direction `1 + 2c` cells, where `c` is H under `Vertical` and V under
+/// `Horizontal`. When the tabs' natural extent along the layout direction
+/// is less than the area, the spare cells stretch the tabs to fill it and
+/// `alignment` places each tab's character and padding cells at the start,
+/// middle or end of the resulting extent.
 ///
-/// Style is shared with [`crate::widgets::ScrollingTabs`] via
-/// [`ScrollingTabsStyle`]; tab data and the active index live in
-/// [`VerticalTabsState`], which the widget only ever reads, aside from the
+/// Style lives in [`TabBarStyle`]; tab data and the active index live in
+/// [`TabBarState`], which the widget only ever reads, aside from the
 /// scroll offset it maintains itself.
 #[derive(Builder, Debug, Clone, Getters, Setters, CopyGetters, WithSetters)]
 #[getset(set = "pub")]
-pub struct VerticalTabs<T: ToLabel + Clone> {
+pub struct TabBar<T: ToLabel + Clone> {
     #[getset(get = "pub")]
-    #[builder(default = "ScrollingTabsStyle::default()")]
-    style: ScrollingTabsStyle,
+    #[builder(default = "TabBarStyle::default()")]
+    style: TabBarStyle,
     #[getset(get_copy = "pub")]
     #[builder(default = "Margin::new(0, 0)")]
     padding: Margin,
     #[getset(get_copy = "pub")]
-    #[builder(default = "VerticalAlignment::Center")]
-    alignment: VerticalAlignment,
+    #[builder(default = "TabAlignment::Center")]
+    alignment: TabAlignment,
+    #[getset(get_copy = "pub")]
+    #[builder(default = "Direction::Horizontal")]
+    direction: Direction,
     #[builder(setter(skip))]
     #[builder(default = "PhantomData")]
     marker: PhantomData<T>,
 }
 
-impl<T: ToLabel + Clone> StatefulWidget for VerticalTabs<T> {
-    type State = VerticalTabsState<T>;
+impl<T: ToLabel + Clone> TabBar<T> {
+    /// The padding count running along the layout direction: `padding.vertical`
+    /// under `Vertical`, `padding.horizontal` under `Horizontal` (UI-R-120).
+    fn along_padding(&self) -> usize {
+        match self.direction {
+            Direction::Vertical => self.padding.vertical as usize,
+            Direction::Horizontal => self.padding.horizontal as usize,
+        }
+    }
+
+    /// The padding count running across the layout direction: `padding.horizontal`
+    /// under `Vertical`, `padding.vertical` under `Horizontal` (UI-R-121).
+    fn across_padding(&self) -> usize {
+        match self.direction {
+            Direction::Vertical => self.padding.horizontal as usize,
+            Direction::Horizontal => self.padding.vertical as usize,
+        }
+    }
+
+    /// The widget's rendered extent across the layout direction, `1 + 2c`
+    /// cells for the across-direction padding count `c` (UI-R-121).
+    pub fn rendered_extent(&self) -> u16 {
+        1 + 2 * self.across_padding() as u16
+    }
+}
+
+impl<T: ToLabel + Clone> StatefulWidget for TabBar<T> {
+    type State = TabBarState<T>;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         StatefulWidget::render(&self, area, buf, state);
     }
 }
 
-/// Resolves row `row` (counted across the whole stacked tab list) to the
-/// owning tab's index and, if the row is a character row rather than a
-/// vertical padding or gained row, the character it carries. `labels`
-/// holds each tab's title, pre-split into characters so a row lookup never
-/// re-renders a label; `heights` holds each tab's rendered height, natural
-/// or stretched; `leads` holds each tab's gained rows placed before its
-/// padding, per its alignment.
-fn resolve_row(
+/// Resolves slot `slot` (counted across the whole stacked tab list, in cells
+/// along the layout direction) to the owning tab's index and, if the slot is
+/// a character cell rather than an along-direction padding or gained cell,
+/// the character it carries. `labels` holds each tab's title, pre-split into
+/// characters so a slot lookup never re-renders a label; `heights` holds
+/// each tab's rendered extent along the direction, natural or stretched;
+/// `leads` holds each tab's gained cells placed before its padding, per its
+/// alignment.
+fn resolve_slot(
     labels: &[Vec<char>],
     heights: &[usize],
     leads: &[usize],
-    vertical: usize,
-    row: usize,
+    along_padding: usize,
+    slot: usize,
 ) -> Option<(usize, Option<char>)> {
     let mut start = 0usize;
     for (idx, label) in labels.iter().enumerate() {
         let chars_count = label.len();
         let height = heights[idx];
-        if row < start + height {
-            let local = row - start;
+        if slot < start + height {
+            let local = slot - start;
             let lead = leads[idx];
-            if local < lead + vertical || local >= lead + vertical + chars_count {
+            if local < lead + along_padding || local >= lead + along_padding + chars_count {
                 return Some((idx, None));
             }
-            return Some((idx, label.get(local - lead - vertical).copied()));
+            return Some((idx, label.get(local - lead - along_padding).copied()));
         }
         start += height;
     }
     None
 }
 
-impl<T: ToLabel + Clone> StatefulWidget for &VerticalTabs<T> {
-    type State = VerticalTabsState<T>;
+impl<T: ToLabel + Clone> StatefulWidget for &TabBar<T> {
+    type State = TabBarState<T>;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         if area.width == 0 || area.height == 0 {
@@ -92,9 +134,12 @@ impl<T: ToLabel + Clone> StatefulWidget for &VerticalTabs<T> {
             return;
         }
 
-        let horizontal = self.padding.horizontal as usize;
-        let vertical = self.padding.vertical as usize;
-        let h = area.height as usize;
+        let along_padding = self.along_padding();
+        let across_padding = self.across_padding();
+        let h = match self.direction {
+            Direction::Vertical => area.height as usize,
+            Direction::Horizontal => area.width as usize,
+        };
 
         let labels: Vec<Vec<char>> = state
             .titles
@@ -103,7 +148,7 @@ impl<T: ToLabel + Clone> StatefulWidget for &VerticalTabs<T> {
             .collect();
         let natural: Vec<usize> = labels
             .iter()
-            .map(|label| 2 * vertical + label.len())
+            .map(|label| 2 * along_padding + label.len())
             .collect();
         let total: usize = natural.iter().sum();
         let heights: Vec<usize> = if total < h {
@@ -123,9 +168,9 @@ impl<T: ToLabel + Clone> StatefulWidget for &VerticalTabs<T> {
             .map(|(height, nat)| {
                 let g = height - nat;
                 match self.alignment {
-                    VerticalAlignment::Top => 0,
-                    VerticalAlignment::Center => g / 2,
-                    VerticalAlignment::Bottom => g,
+                    TabAlignment::Start => 0,
+                    TabAlignment::Center => g / 2,
+                    TabAlignment::End => g,
                 }
             })
             .collect();
@@ -142,7 +187,7 @@ impl<T: ToLabel + Clone> StatefulWidget for &VerticalTabs<T> {
             }
             start += height;
         }
-        let total_rows = start;
+        let total_slots = start;
 
         if let Some((block_start, block_height)) = active_block {
             if block_start + block_height > state.offset + h {
@@ -153,22 +198,36 @@ impl<T: ToLabel + Clone> StatefulWidget for &VerticalTabs<T> {
             }
         }
 
-        let end = (state.offset + h).min(total_rows);
-        for row in state.offset..end {
-            let (tab_idx, ch) = resolve_row(&labels, &heights, &leads, vertical, row)
-                .expect("row is bounded by total_rows, the same sum resolve_row walks");
-            let y = area.y + (row - state.offset) as u16;
+        let end = (state.offset + h).min(total_slots);
+        for slot in state.offset..end {
+            let (tab_idx, ch) = resolve_slot(&labels, &heights, &leads, along_padding, slot)
+                .expect("slot is bounded by total_slots, the same sum resolve_slot walks");
+            let a = match self.direction {
+                Direction::Vertical => area.y,
+                Direction::Horizontal => area.x,
+            } + (slot - state.offset) as u16;
             let style = if tab_idx == state.active {
                 self.style.selected
             } else {
                 self.style.general
             };
-            for col in 0..=(2 * horizontal) {
-                let x = area.x + col as u16;
-                if x >= area.x + area.width {
+            for across_index in 0..=(2 * across_padding) {
+                let b = match self.direction {
+                    Direction::Vertical => area.x,
+                    Direction::Horizontal => area.y,
+                } + across_index as u16;
+                let (x, y) = match self.direction {
+                    Direction::Vertical => (b, a),
+                    Direction::Horizontal => (a, b),
+                };
+                let clipped = match self.direction {
+                    Direction::Vertical => x >= area.x + area.width,
+                    Direction::Horizontal => y >= area.y + area.height,
+                };
+                if clipped {
                     break;
                 }
-                let sym = if col == horizontal {
+                let sym = if across_index == across_padding {
                     ch.map_or_else(|| " ".to_string(), String::from)
                 } else {
                     " ".to_string()
@@ -200,11 +259,12 @@ mod tests {
     /// UI-R-120, UI-R-121 — horizontal padding alone widens the render.
     #[test]
     fn ut_horizontal_padding_widens_render() {
-        let w = VerticalTabsBuilder::<String>::default()
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
             .padding(Margin::new(2, 0))
             .build()
             .unwrap();
-        let mut st = VerticalTabsState {
+        let mut st = TabBarState {
             titles: titles(&["Tab"]),
             active: 0,
             offset: 0,
@@ -214,7 +274,7 @@ mod tests {
         assert_eq!(b[(2, 0)].symbol(), "T");
         assert_eq!(b[(2, 1)].symbol(), "a");
         assert_eq!(b[(2, 2)].symbol(), "b");
-        let style = ScrollingTabsStyle::default();
+        let style = TabBarStyle::default();
         for y in 0..3 {
             for x in [0usize, 1, 3, 4] {
                 assert_eq!(b[(x as u16, y)].symbol(), " ");
@@ -233,11 +293,12 @@ mod tests {
     /// without changing the rendered width.
     #[test]
     fn ut_vertical_padding_frames_rows() {
-        let w = VerticalTabsBuilder::<String>::default()
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
             .padding(Margin::new(0, 1))
             .build()
             .unwrap();
-        let mut st = VerticalTabsState {
+        let mut st = TabBarState {
             titles: titles(&["Tab"]),
             active: 0,
             offset: 0,
@@ -254,8 +315,11 @@ mod tests {
     /// UI-R-114, UI-R-115 — a title is written one character per row, top-down.
     #[test]
     fn ut_renders_title_one_char_per_row() {
-        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
-        let mut st = VerticalTabsState {
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
             titles: titles(&["Tab", "Two"]),
             active: 0,
             offset: 0,
@@ -274,18 +338,19 @@ mod tests {
     /// selected style, including its padding rows and columns.
     #[test]
     fn ut_active_block_cells_use_selected_style() {
-        let w = VerticalTabsBuilder::<String>::default()
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
             .padding(Margin::new(1, 1))
             .build()
             .unwrap();
-        let mut st = VerticalTabsState {
+        let mut st = TabBarState {
             titles: titles(&["Tab", "Two"]),
             active: 1,
             offset: 0,
         };
         let mut b = buffer(3, 10);
         StatefulWidget::render(&w, Rect::new(0, 0, 3, 10), &mut b, &mut st);
-        let style = ScrollingTabsStyle::default();
+        let style = TabBarStyle::default();
         for y in 0..5 {
             for x in 0..3 {
                 assert!(cell_has_style(&b[(x, y)], style.general));
@@ -301,8 +366,11 @@ mod tests {
     /// UI-R-120, UI-R-121 — default padding is zero, rendering exactly one column.
     #[test]
     fn ut_default_padding_is_zero() {
-        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
-        let mut st = VerticalTabsState {
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
             titles: titles(&["Tab"]),
             active: 0,
             offset: 0,
@@ -323,11 +391,12 @@ mod tests {
     /// UI-R-120, UI-R-121 — H and V together frame the title with blank rows and columns.
     #[test]
     fn ut_padding_frames_each_title() {
-        let w = VerticalTabsBuilder::<String>::default()
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
             .padding(Margin::new(1, 1))
             .build()
             .unwrap();
-        let mut st = VerticalTabsState {
+        let mut st = TabBarState {
             titles: titles(&["Tab"]),
             active: 0,
             offset: 0,
@@ -353,8 +422,11 @@ mod tests {
     /// scrolls to keep the active tab's block visible.
     #[test]
     fn ut_scrolls_to_keep_active_visible() {
-        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
-        let mut st = VerticalTabsState {
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
             titles: titles(&["Tab", "Two"]),
             active: 1,
             offset: 0,
@@ -371,8 +443,11 @@ mod tests {
     /// block is already visible.
     #[test]
     fn ut_scroll_offset_is_minimal() {
-        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
-        let mut st = VerticalTabsState {
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
             titles: titles(&["Tab", "Two"]),
             active: 1,
             offset: 3,
@@ -390,9 +465,12 @@ mod tests {
     /// minimal distance.
     #[test]
     fn ut_render_leaves_titles_and_active_untouched() {
-        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
+            .build()
+            .unwrap();
         let input = titles(&["alpha", "beta", "gamma", "delta", "epsilon"]);
-        let mut st = VerticalTabsState {
+        let mut st = TabBarState {
             titles: input.clone(),
             active: 4,
             offset: 0,
@@ -407,8 +485,11 @@ mod tests {
     /// UI-E-063 — zero-sized area skips drawing, offset unchanged.
     #[test]
     fn ut_zero_sized_area_skips_drawing() {
-        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
-        let mut st = VerticalTabsState {
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
             titles: titles(&["alpha", "beta", "gamma"]),
             active: 0,
             offset: 2,
@@ -430,11 +511,12 @@ mod tests {
     /// leftmost `1 + 2H` columns only.
     #[test]
     fn ut_wider_area_uses_rendered_width_only() {
-        let w = VerticalTabsBuilder::<String>::default()
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
             .padding(Margin::new(1, 1))
             .build()
             .unwrap();
-        let mut st = VerticalTabsState {
+        let mut st = TabBarState {
             titles: titles(&["Tab"]),
             active: 0,
             offset: 0,
@@ -456,11 +538,12 @@ mod tests {
     /// right edge, no reflow, no panic.
     #[test]
     fn ut_narrower_area_clips_rendered_columns() {
-        let w = VerticalTabsBuilder::<String>::default()
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
             .padding(Margin::new(1, 1))
             .build()
             .unwrap();
-        let mut st = VerticalTabsState {
+        let mut st = TabBarState {
             titles: titles(&["Tab"]),
             active: 0,
             offset: 0,
@@ -475,8 +558,11 @@ mod tests {
     /// UI-E-065 — empty tab list draws nothing and resets the offset.
     #[test]
     fn ut_empty_titles_reset_offset() {
-        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
-        let mut st = VerticalTabsState {
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
             titles: vec![],
             active: 0,
             offset: 3,
@@ -489,11 +575,12 @@ mod tests {
     /// UI-E-066 — active out of range: no cell selected, offset unchanged, no panic.
     #[test]
     fn ut_active_out_of_range_is_inert() {
-        let w = VerticalTabsBuilder::<String>::default()
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
             .padding(Margin::new(1, 1))
             .build()
             .unwrap();
-        let mut st = VerticalTabsState {
+        let mut st = TabBarState {
             titles: titles(&["alpha", "beta", "gamma"]),
             active: 9,
             offset: 1,
@@ -501,7 +588,7 @@ mod tests {
         let mut b = buffer(3, 3);
         StatefulWidget::render(&w, Rect::new(0, 0, 3, 3), &mut b, &mut st);
         assert_eq!(st.offset, 1);
-        let style = ScrollingTabsStyle::default();
+        let style = TabBarStyle::default();
         for y in 0..3 {
             for x in 0..3 {
                 assert!(cell_has_style(&b[(x, y)], style.general));
@@ -512,24 +599,28 @@ mod tests {
     /// UI-R-120, UI-E-067 — an empty title occupies only its padding rows.
     #[test]
     fn ut_empty_title_occupies_padding_only() {
-        let w = VerticalTabsBuilder::<String>::default()
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
             .padding(Margin::new(1, 1))
             .build()
             .unwrap();
-        let mut st = VerticalTabsState {
+        let mut st = TabBarState {
             titles: titles(&["", "Two"]),
             active: 0,
             offset: 0,
         };
         let mut b = buffer(3, 7);
         StatefulWidget::render(&w, Rect::new(0, 0, 3, 7), &mut b, &mut st);
-        let style = ScrollingTabsStyle::default();
+        let style = TabBarStyle::default();
         assert!(cell_has_style(&b[(1, 0)], style.selected));
         assert!(cell_has_style(&b[(1, 1)], style.selected));
         assert_eq!(b[(1, 3)].symbol(), "T");
 
-        let w0 = VerticalTabsBuilder::<String>::default().build().unwrap();
-        let mut st0 = VerticalTabsState {
+        let w0 = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
+            .build()
+            .unwrap();
+        let mut st0 = TabBarState {
             titles: titles(&["", "Two"]),
             active: 0,
             offset: 0,
@@ -542,8 +633,11 @@ mod tests {
     /// UI-E-068 — double-width title characters written as-is, no fallback glyph.
     #[test]
     fn ut_wide_title_char_is_written_as_is() {
-        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
-        let mut st = VerticalTabsState {
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
             titles: titles(&["日本"]),
             active: 0,
             offset: 0,
@@ -558,11 +652,12 @@ mod tests {
     /// at the top edge; the rest of the block is clipped.
     #[test]
     fn ut_block_taller_than_area_starts_at_top() {
-        let w = VerticalTabsBuilder::<String>::default()
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
             .padding(Margin::new(1, 1))
             .build()
             .unwrap();
-        let mut st = VerticalTabsState {
+        let mut st = TabBarState {
             titles: titles(&["Ab", "Longtitle"]),
             active: 1,
             offset: 0,
@@ -579,15 +674,18 @@ mod tests {
     /// among the tabs so they together cover the whole area.
     #[test]
     fn ut_spare_rows_stretch_tabs_to_cover_area() {
-        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
-        let mut st = VerticalTabsState {
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
             titles: titles(&["A", "B"]),
             active: 0,
             offset: 0,
         };
         let mut b = buffer(1, 6);
         StatefulWidget::render(&w, Rect::new(0, 0, 1, 6), &mut b, &mut st);
-        let style = ScrollingTabsStyle::default();
+        let style = TabBarStyle::default();
         for y in 0..6 {
             assert!(
                 cell_has_style(&b[(0, y)], style.general)
@@ -600,15 +698,18 @@ mod tests {
     /// topmost tabs, and a gained row of the active tab is styled selected.
     #[test]
     fn ut_spare_rows_divided_evenly_remainder_to_top() {
-        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
-        let mut st = VerticalTabsState {
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
             titles: titles(&["A", "B", "C"]),
             active: 1,
             offset: 0,
         };
         let mut b = buffer(1, 8);
         StatefulWidget::render(&w, Rect::new(0, 0, 1, 8), &mut b, &mut st);
-        let style = ScrollingTabsStyle::default();
+        let style = TabBarStyle::default();
         for y in 0..3 {
             assert!(cell_has_style(&b[(0, y)], style.general));
         }
@@ -620,23 +721,24 @@ mod tests {
         }
     }
 
-    /// UI-R-124, UI-R-126, UI-R-116 — under `Top` alignment gained rows sit
+    /// UI-R-124, UI-R-126, UI-R-116 — under `Start` alignment gained rows sit
     /// outside the padding, below it, and the whole extent stays selected.
     #[test]
     fn ut_gained_rows_sit_outside_the_padding() {
-        let w = VerticalTabsBuilder::<String>::default()
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
             .padding(Margin::new(0, 1))
-            .alignment(VerticalAlignment::Top)
+            .alignment(TabAlignment::Start)
             .build()
             .unwrap();
-        let mut st = VerticalTabsState {
+        let mut st = TabBarState {
             titles: titles(&["A"]),
             active: 0,
             offset: 0,
         };
         let mut b = buffer(1, 5);
         StatefulWidget::render(&w, Rect::new(0, 0, 1, 5), &mut b, &mut st);
-        let style = ScrollingTabsStyle::default();
+        let style = TabBarStyle::default();
         assert_eq!(b[(0, 0)].symbol(), " ");
         assert_eq!(b[(0, 1)].symbol(), "A");
         assert_eq!(b[(0, 2)].symbol(), " ");
@@ -651,9 +753,12 @@ mod tests {
     /// already fills or exceeds the area; the scroll rules govern instead.
     #[test]
     fn ut_no_stretch_when_natural_height_fills_area() {
-        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
+            .build()
+            .unwrap();
 
-        let mut st = VerticalTabsState {
+        let mut st = TabBarState {
             titles: titles(&["Ab", "Cd"]),
             active: 0,
             offset: 0,
@@ -665,7 +770,7 @@ mod tests {
         assert_eq!(b[(0, 2)].symbol(), "C");
         assert_eq!(b[(0, 3)].symbol(), "d");
 
-        let mut st = VerticalTabsState {
+        let mut st = TabBarState {
             titles: titles(&["Ab", "Cd"]),
             active: 0,
             offset: 0,
@@ -676,7 +781,7 @@ mod tests {
         assert_eq!(b[(0, 1)].symbol(), "b");
         assert_eq!(b[(0, 2)].symbol(), "C");
 
-        let mut st = VerticalTabsState {
+        let mut st = TabBarState {
             titles: titles(&["Abc", "Def"]),
             active: 1,
             offset: 3,
@@ -697,15 +802,18 @@ mod tests {
     /// gained row and covers the whole area.
     #[test]
     fn ut_single_tab_covers_whole_area() {
-        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
-        let mut st = VerticalTabsState {
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
             titles: titles(&["A"]),
             active: 0,
             offset: 0,
         };
         let mut b = buffer(1, 5);
         StatefulWidget::render(&w, Rect::new(0, 0, 1, 5), &mut b, &mut st);
-        let style = ScrollingTabsStyle::default();
+        let style = TabBarStyle::default();
         for y in 0..5 {
             assert!(cell_has_style(&b[(0, y)], style.selected));
         }
@@ -715,15 +823,18 @@ mod tests {
     /// tabs gain one row each and the area is still covered.
     #[test]
     fn ut_fewer_spare_rows_than_tabs() {
-        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
-        let mut st = VerticalTabsState {
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
             titles: titles(&["A", "B", "C"]),
             active: 0,
             offset: 0,
         };
         let mut b = buffer(1, 5);
         StatefulWidget::render(&w, Rect::new(0, 0, 1, 5), &mut b, &mut st);
-        let style = ScrollingTabsStyle::default();
+        let style = TabBarStyle::default();
         for y in 0..2 {
             assert!(cell_has_style(&b[(0, y)], style.selected));
         }
@@ -736,8 +847,11 @@ mod tests {
     /// while the stretch path applies, and selects no cell.
     #[test]
     fn ut_out_of_range_active_keeps_offset_when_stretching() {
-        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
-        let mut st = VerticalTabsState {
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
             titles: titles(&["Abc", "Def"]),
             active: 9,
             offset: 2,
@@ -745,7 +859,7 @@ mod tests {
         let mut b = buffer(1, 10);
         StatefulWidget::render(&w, Rect::new(0, 0, 1, 10), &mut b, &mut st);
         assert_eq!(st.offset, 2);
-        let style = ScrollingTabsStyle::default();
+        let style = TabBarStyle::default();
         for y in 0..8 {
             assert!(!cell_has_style(&b[(0, y)], style.selected));
         }
@@ -755,15 +869,18 @@ mod tests {
     /// part in the spare-row division and so becomes visible.
     #[test]
     fn ut_zero_height_tab_becomes_visible_via_stretch() {
-        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
-        let mut st = VerticalTabsState {
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
             titles: titles(&["", "A"]),
             active: 0,
             offset: 0,
         };
         let mut b = buffer(1, 4);
         StatefulWidget::render(&w, Rect::new(0, 0, 1, 4), &mut b, &mut st);
-        let style = ScrollingTabsStyle::default();
+        let style = TabBarStyle::default();
         assert!(cell_has_style(&b[(0, 0)], style.selected));
         assert!(cell_has_style(&b[(0, 1)], style.selected));
     }
@@ -772,8 +889,11 @@ mod tests {
     /// once a later render finds spare height to stretch into.
     #[test]
     fn ut_stretch_clears_a_retained_offset() {
-        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
-        let mut st = VerticalTabsState {
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
             titles: titles(&["Abc", "Def"]),
             active: 1,
             offset: 0,
@@ -785,7 +905,7 @@ mod tests {
         let mut big = buffer(1, 10);
         StatefulWidget::render(&w, Rect::new(0, 0, 1, 10), &mut big, &mut st);
         assert_eq!(st.offset, 0);
-        let style = ScrollingTabsStyle::default();
+        let style = TabBarStyle::default();
         for y in 0..10 {
             assert!(
                 cell_has_style(&big[(0, y)], style.general)
@@ -798,12 +918,13 @@ mod tests {
     /// the smaller half above the top padding row.
     #[test]
     fn ut_alignment_center_splits_the_gained_rows() {
-        let w = VerticalTabsBuilder::<String>::default()
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
             .padding(Margin::new(0, 1))
-            .alignment(VerticalAlignment::Center)
+            .alignment(TabAlignment::Center)
             .build()
             .unwrap();
-        let mut st = VerticalTabsState {
+        let mut st = TabBarState {
             titles: titles(&["A"]),
             active: 0,
             offset: 0,
@@ -817,16 +938,17 @@ mod tests {
         assert_eq!(b[(0, 4)].symbol(), " ");
     }
 
-    /// UI-R-126, UI-R-124 — `Bottom` puts every gained row above the
+    /// UI-R-126, UI-R-124 — `End` puts every gained row above the
     /// padding, outside it.
     #[test]
-    fn ut_alignment_bottom_puts_gained_rows_first() {
-        let w = VerticalTabsBuilder::<String>::default()
+    fn ut_alignment_end_puts_gained_rows_first() {
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
             .padding(Margin::new(0, 1))
-            .alignment(VerticalAlignment::Bottom)
+            .alignment(TabAlignment::End)
             .build()
             .unwrap();
-        let mut st = VerticalTabsState {
+        let mut st = TabBarState {
             titles: titles(&["A"]),
             active: 0,
             offset: 0,
@@ -843,11 +965,12 @@ mod tests {
     /// UI-R-126 — with no `.alignment` call the builder defaults to `Center`.
     #[test]
     fn ut_alignment_defaults_to_center() {
-        let w = VerticalTabsBuilder::<String>::default()
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
             .padding(Margin::new(0, 1))
             .build()
             .unwrap();
-        let mut st = VerticalTabsState {
+        let mut st = TabBarState {
             titles: titles(&["A"]),
             active: 0,
             offset: 0,
@@ -864,11 +987,12 @@ mod tests {
     /// UI-R-127 — an odd `g` splits with the smaller half above.
     #[test]
     fn ut_center_puts_the_smaller_half_above() {
-        let w = VerticalTabsBuilder::<String>::default()
-            .alignment(VerticalAlignment::Center)
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
+            .alignment(TabAlignment::Center)
             .build()
             .unwrap();
-        let mut st = VerticalTabsState {
+        let mut st = TabBarState {
             titles: titles(&["A"]),
             active: 0,
             offset: 0,
@@ -885,12 +1009,13 @@ mod tests {
     /// below the bottom padding row; the title sits one row above centre.
     #[test]
     fn ut_center_single_gained_row_goes_below() {
-        let w = VerticalTabsBuilder::<String>::default()
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
             .padding(Margin::new(0, 1))
-            .alignment(VerticalAlignment::Center)
+            .alignment(TabAlignment::Center)
             .build()
             .unwrap();
-        let mut st = VerticalTabsState {
+        let mut st = TabBarState {
             titles: titles(&["A"]),
             active: 0,
             offset: 0,
@@ -907,17 +1032,14 @@ mod tests {
     /// height already fills or exceeds the area.
     #[test]
     fn ut_alignment_is_inert_without_stretching() {
-        for alignment in [
-            VerticalAlignment::Top,
-            VerticalAlignment::Center,
-            VerticalAlignment::Bottom,
-        ] {
-            let w = VerticalTabsBuilder::<String>::default()
+        for alignment in [TabAlignment::Start, TabAlignment::Center, TabAlignment::End] {
+            let w = TabBarBuilder::<String>::default()
+                .direction(Direction::Vertical)
                 .alignment(alignment)
                 .build()
                 .unwrap();
 
-            let mut st = VerticalTabsState {
+            let mut st = TabBarState {
                 titles: titles(&["Ab", "Cd"]),
                 active: 0,
                 offset: 0,
@@ -929,7 +1051,7 @@ mod tests {
             assert_eq!(b[(0, 2)].symbol(), "C");
             assert_eq!(b[(0, 3)].symbol(), "d");
 
-            let mut st = VerticalTabsState {
+            let mut st = TabBarState {
                 titles: titles(&["Ab", "Cd"]),
                 active: 0,
                 offset: 0,
@@ -947,15 +1069,16 @@ mod tests {
     #[test]
     fn ut_unstretched_tab_renders_alike_under_every_alignment() {
         for (alignment, first, second) in [
-            (VerticalAlignment::Top, 0u16, 2u16),
-            (VerticalAlignment::Center, 0, 2),
-            (VerticalAlignment::Bottom, 1, 3),
+            (TabAlignment::Start, 0u16, 2u16),
+            (TabAlignment::Center, 0, 2),
+            (TabAlignment::End, 1, 3),
         ] {
-            let w = VerticalTabsBuilder::<String>::default()
+            let w = TabBarBuilder::<String>::default()
+                .direction(Direction::Vertical)
                 .alignment(alignment)
                 .build()
                 .unwrap();
-            let mut st = VerticalTabsState {
+            let mut st = TabBarState {
                 titles: titles(&["A", "B", "C"]),
                 active: 0,
                 offset: 0,
@@ -972,18 +1095,15 @@ mod tests {
     /// active tab's whole extent stays selected under every alignment.
     #[test]
     fn ut_active_extent_is_styled_under_every_alignment() {
-        let style = ScrollingTabsStyle::default();
-        for alignment in [
-            VerticalAlignment::Top,
-            VerticalAlignment::Center,
-            VerticalAlignment::Bottom,
-        ] {
-            let w = VerticalTabsBuilder::<String>::default()
+        let style = TabBarStyle::default();
+        for alignment in [TabAlignment::Start, TabAlignment::Center, TabAlignment::End] {
+            let w = TabBarBuilder::<String>::default()
+                .direction(Direction::Vertical)
                 .padding(Margin::new(0, 1))
                 .alignment(alignment)
                 .build()
                 .unwrap();
-            let mut st = VerticalTabsState {
+            let mut st = TabBarState {
                 titles: titles(&["A"]),
                 active: 0,
                 offset: 0,
@@ -994,5 +1114,375 @@ mod tests {
                 assert!(cell_has_style(&b[(0, y)], style.selected));
             }
         }
+    }
+
+    fn row(b: &Buffer, y: u16, w: u16) -> String {
+        (0..w).map(|x| b[(x, y)].symbol().to_string()).collect()
+    }
+
+    /// UI-R-173 — with no `.direction` call the builder defaults to
+    /// `Horizontal`, laying tabs left to right on the first row.
+    #[test]
+    fn ut_direction_defaults_to_horizontal() {
+        let w = TabBarBuilder::<String>::default().build().unwrap();
+        let mut st = TabBarState {
+            titles: titles(&["Tab", "Two"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(6, 1);
+        StatefulWidget::render(&w, Rect::new(0, 0, 6, 1), &mut b, &mut st);
+        assert_eq!(row(&b, 0, 6), "TabTwo");
+    }
+
+    /// UI-R-114, UI-R-174 — titles are written adjacent, one character per
+    /// column, with no separator cell between them.
+    #[test]
+    fn ut_horizontal_writes_one_char_per_column() {
+        let w = TabBarBuilder::<String>::default().build().unwrap();
+        let mut st = TabBarState {
+            titles: titles(&["A", "B"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(2, 1);
+        StatefulWidget::render(&w, Rect::new(0, 0, 2, 1), &mut b, &mut st);
+        assert_eq!(row(&b, 0, 2), "AB");
+    }
+
+    /// UI-R-120, UI-R-121 — H=1, V=1 frames the title with blank rows and
+    /// columns, the literal example from UI-R-121.
+    #[test]
+    fn ut_horizontal_padding_frames_title() {
+        let w = TabBarBuilder::<String>::default()
+            .padding(Margin::new(1, 1))
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
+            titles: titles(&["Tab"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(5, 3);
+        StatefulWidget::render(&w, Rect::new(0, 0, 5, 3), &mut b, &mut st);
+        assert_eq!(row(&b, 0, 5), "     ");
+        assert_eq!(row(&b, 1, 5), " Tab ");
+        assert_eq!(row(&b, 2, 5), "     ");
+    }
+
+    /// UI-R-121 — `rendered_extent` is `1 + 2c` for the across-direction
+    /// padding count `c`: V under `Horizontal`, H under `Vertical`.
+    #[test]
+    fn ut_rendered_extent_matches_padding() {
+        let default = TabBarBuilder::<String>::default().build().unwrap();
+        assert_eq!(default.rendered_extent(), 1);
+
+        let horizontal = TabBarBuilder::<String>::default()
+            .padding(Margin::new(2, 3))
+            .build()
+            .unwrap();
+        assert_eq!(horizontal.rendered_extent(), 1 + 2 * 3);
+
+        let vertical = TabBarBuilder::<String>::default()
+            .padding(Margin::new(2, 3))
+            .direction(Direction::Vertical)
+            .build()
+            .unwrap();
+        assert_eq!(vertical.rendered_extent(), 1 + 2 * 2);
+    }
+
+    /// UI-R-116 — every cell of the active tab, padding and gained cells
+    /// included, carries the selected style under `Horizontal` layout too.
+    #[test]
+    fn ut_horizontal_active_tab_cells_use_selected_style() {
+        let w = TabBarBuilder::<String>::default()
+            .padding(Margin::new(1, 1))
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
+            titles: titles(&["Tab", "Two"]),
+            active: 1,
+            offset: 0,
+        };
+        let mut b = buffer(10, 3);
+        StatefulWidget::render(&w, Rect::new(0, 0, 10, 3), &mut b, &mut st);
+        let style = TabBarStyle::default();
+        for y in 0..3 {
+            for x in 0..5 {
+                assert!(cell_has_style(&b[(x, y)], style.general));
+            }
+            for x in 5..10 {
+                assert!(cell_has_style(&b[(x, y)], style.selected));
+            }
+        }
+    }
+
+    /// UI-R-122, UI-R-123 — spare columns stretch the tabs so together they
+    /// cover every column of the area, the remainder going to the first
+    /// tabs from the start of the layout direction.
+    #[test]
+    fn ut_horizontal_spare_columns_stretch_tabs_to_cover_area() {
+        let w = TabBarBuilder::<String>::default().build().unwrap();
+        let mut st = TabBarState {
+            titles: titles(&["A", "B", "C"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(8, 1);
+        StatefulWidget::render(&w, Rect::new(0, 0, 8, 1), &mut b, &mut st);
+        let style = TabBarStyle::default();
+        // natural 1 each over 3 tabs, 5 spare columns: s / n = 1 to every
+        // tab, remainder 5 % 3 = 2 to the first two tabs from the start —
+        // extents 3, 3, 2, covering the area exactly.
+        for x in 0..3 {
+            assert!(cell_has_style(&b[(x, 0)], style.selected));
+        }
+        for x in 3..8 {
+            assert!(cell_has_style(&b[(x, 0)], style.general));
+        }
+    }
+
+    /// UI-R-124, UI-R-126 — under `Start` alignment the cells a tab gains
+    /// sit outside its padding, after it.
+    #[test]
+    fn ut_horizontal_gained_columns_sit_outside_the_padding() {
+        let w = TabBarBuilder::<String>::default()
+            .padding(Margin::new(1, 0))
+            .alignment(TabAlignment::Start)
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
+            titles: titles(&["A"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(5, 1);
+        StatefulWidget::render(&w, Rect::new(0, 0, 5, 1), &mut b, &mut st);
+        assert_eq!(row(&b, 0, 5), " A   ");
+        let style = TabBarStyle::default();
+        for x in 0..5 {
+            assert!(cell_has_style(&b[(x, 0)], style.selected));
+        }
+    }
+
+    /// UI-R-127, UI-E-074 — an odd `g` splits with the smaller half before
+    /// the tab; gaining exactly one cell puts it after the trailing padding.
+    #[test]
+    fn ut_horizontal_center_puts_the_smaller_half_before() {
+        let w = TabBarBuilder::<String>::default()
+            .alignment(TabAlignment::Center)
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
+            titles: titles(&["A"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(4, 1);
+        StatefulWidget::render(&w, Rect::new(0, 0, 4, 1), &mut b, &mut st);
+        assert_eq!(row(&b, 0, 4), " A  ");
+
+        let w = TabBarBuilder::<String>::default()
+            .padding(Margin::new(1, 0))
+            .alignment(TabAlignment::Center)
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
+            titles: titles(&["A"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(4, 1);
+        StatefulWidget::render(&w, Rect::new(0, 0, 4, 1), &mut b, &mut st);
+        assert_eq!(row(&b, 0, 4), " A  ");
+    }
+
+    /// UI-R-125, UI-R-128 — alignment changes nothing once the natural
+    /// extent already fills or exceeds the area.
+    #[test]
+    fn ut_horizontal_alignment_is_inert_without_stretching() {
+        for alignment in [TabAlignment::Start, TabAlignment::Center, TabAlignment::End] {
+            let w = TabBarBuilder::<String>::default()
+                .alignment(alignment)
+                .build()
+                .unwrap();
+
+            let mut st = TabBarState {
+                titles: titles(&["Ab", "Cd"]),
+                active: 0,
+                offset: 0,
+            };
+            let mut b = buffer(4, 1);
+            StatefulWidget::render(&w, Rect::new(0, 0, 4, 1), &mut b, &mut st);
+            assert_eq!(row(&b, 0, 4), "AbCd");
+
+            let mut st = TabBarState {
+                titles: titles(&["Ab", "Cd"]),
+                active: 0,
+                offset: 0,
+            };
+            let mut b = buffer(3, 1);
+            StatefulWidget::render(&w, Rect::new(0, 0, 3, 1), &mut b, &mut st);
+            assert_eq!(row(&b, 0, 3), "AbC");
+        }
+    }
+
+    /// UI-E-064 — a taller area than the rendered extent draws into the
+    /// first `1 + 2c` rows only, leaving the rest untouched.
+    #[test]
+    fn ut_horizontal_taller_area_uses_rendered_extent_only() {
+        let w = TabBarBuilder::<String>::default()
+            .padding(Margin::new(1, 0))
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
+            titles: titles(&["Tab"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(5, 3);
+        StatefulWidget::render(&w, Rect::new(0, 0, 5, 3), &mut b, &mut st);
+        assert_eq!(row(&b, 0, 5), " Tab ");
+        for y in 1..3 {
+            for x in 0..5 {
+                assert_eq!(b[(x, y)].symbol(), " ");
+                assert!(cell_has_style(&b[(x, y)], ratatui::style::Style::default()));
+            }
+        }
+    }
+
+    /// UI-E-069 — an area shorter across the layout direction than the
+    /// rendered extent clips the far padding row, no reflow, no panic.
+    #[test]
+    fn ut_horizontal_shorter_area_clips_rows() {
+        let w = TabBarBuilder::<String>::default()
+            .padding(Margin::new(1, 1))
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
+            titles: titles(&["Tab"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(5, 2);
+        StatefulWidget::render(&w, Rect::new(0, 0, 5, 2), &mut b, &mut st);
+        assert_eq!(row(&b, 0, 5), "     ");
+        assert_eq!(row(&b, 1, 5), " Tab ");
+    }
+
+    /// UI-E-067, UI-E-073 — an empty title occupies only its along-direction
+    /// padding cells, and with that padding 0 it becomes visible again
+    /// through its share of spare columns.
+    #[test]
+    fn ut_horizontal_empty_title_occupies_padding_only() {
+        let w = TabBarBuilder::<String>::default()
+            .padding(Margin::new(1, 1))
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
+            titles: titles(&["", "Two"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(7, 3);
+        StatefulWidget::render(&w, Rect::new(0, 0, 7, 3), &mut b, &mut st);
+        let style = TabBarStyle::default();
+        assert!(cell_has_style(&b[(0, 1)], style.selected));
+        assert!(cell_has_style(&b[(1, 1)], style.selected));
+        assert_eq!(b[(3, 1)].symbol(), "T");
+
+        let w0 = TabBarBuilder::<String>::default().build().unwrap();
+        let mut st0 = TabBarState {
+            titles: titles(&["", "Two"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b0 = buffer(5, 1);
+        StatefulWidget::render(&w0, Rect::new(0, 0, 5, 1), &mut b0, &mut st0);
+        let style0 = TabBarStyle::default();
+        assert!(cell_has_style(&b0[(0, 0)], style0.selected));
+        assert_eq!(b0[(1, 0)].symbol(), "T");
+    }
+
+    /// UI-E-071 — a single tab with spare extent takes every gained cell
+    /// and covers the whole area.
+    #[test]
+    fn ut_horizontal_single_tab_covers_whole_area() {
+        let w = TabBarBuilder::<String>::default().build().unwrap();
+        let mut st = TabBarState {
+            titles: titles(&["A"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(5, 1);
+        StatefulWidget::render(&w, Rect::new(0, 0, 5, 1), &mut b, &mut st);
+        let style = TabBarStyle::default();
+        for x in 0..5 {
+            assert!(cell_has_style(&b[(x, 0)], style.selected));
+        }
+    }
+
+    /// UI-E-072 — with fewer spare columns than tabs, the first tabs from
+    /// the start of the layout direction gain one cell each and the area is
+    /// still covered to its last column.
+    #[test]
+    fn ut_horizontal_fewer_spare_columns_than_tabs() {
+        let w = TabBarBuilder::<String>::default().build().unwrap();
+        let mut st = TabBarState {
+            titles: titles(&["A", "B", "C"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(5, 1);
+        StatefulWidget::render(&w, Rect::new(0, 0, 5, 1), &mut b, &mut st);
+        let style = TabBarStyle::default();
+        for x in 0..2 {
+            assert!(cell_has_style(&b[(x, 0)], style.selected));
+        }
+        for x in 2..5 {
+            assert!(cell_has_style(&b[(x, 0)], style.general));
+        }
+    }
+
+    /// UI-E-075 — a tab that gains no cells renders alike under every
+    /// alignment; only the tabs that gain cells move.
+    #[test]
+    fn ut_horizontal_unstretched_tab_renders_alike_under_every_alignment() {
+        for (alignment, first, second) in [
+            (TabAlignment::Start, 0u16, 2u16),
+            (TabAlignment::Center, 0, 2),
+            (TabAlignment::End, 1, 3),
+        ] {
+            let w = TabBarBuilder::<String>::default()
+                .alignment(alignment)
+                .build()
+                .unwrap();
+            let mut st = TabBarState {
+                titles: titles(&["A", "B", "C"]),
+                active: 0,
+                offset: 0,
+            };
+            let mut b = buffer(5, 1);
+            StatefulWidget::render(&w, Rect::new(0, 0, 5, 1), &mut b, &mut st);
+            assert_eq!(b[(first, 0)].symbol(), "A");
+            assert_eq!(b[(second, 0)].symbol(), "B");
+            assert_eq!(b[(4, 0)].symbol(), "C");
+        }
+    }
+
+    /// UI-E-084 — a double-width title character counts as one cell in the
+    /// extent computation and is written unchanged.
+    #[test]
+    fn ut_horizontal_wide_title_char_is_written_as_is() {
+        let w = TabBarBuilder::<String>::default().build().unwrap();
+        let mut st = TabBarState {
+            titles: titles(&["日本"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(2, 1);
+        StatefulWidget::render(&w, Rect::new(0, 0, 2, 1), &mut b, &mut st);
+        assert_eq!(b[(0, 0)].symbol(), "日");
+        assert_eq!(b[(1, 0)].symbol(), "本");
     }
 }
