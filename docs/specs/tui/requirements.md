@@ -236,9 +236,15 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-123** — The spare rows of UI-R-122 are divided evenly: with `s` spare rows over `n` displayed tabs every tab gains `s / n` rows and the first `s % n` tabs, counted from the top, gain one row more.
 
-**UI-R-124** — The rows a tab gains under UI-R-122 are appended below that tab's bottom padding rows, leaving its character rows and its padding rows in place.
+**UI-R-124** — The rows a tab gains under UI-R-122 are added outside that tab's padding rows, leaving its character rows and its padding rows contiguous and in place.
 
 **UI-R-125** — The vertical tab line (UI-R-114) stretches no tab when the tabs' natural height is at least the height of the area; the scroll offset (UI-R-117, UI-R-118) governs that case instead.
+
+**UI-R-126** — The vertical tab line (UI-R-114) takes an alignment of `Top`, `Center` or `Bottom`, default `Center`, which places each tab's character rows together with its padding rows (UI-R-115, UI-R-120) at the top of, in the middle of, or at the bottom of that tab's stretched extent (UI-R-122), the gained rows filling the remainder.
+
+**UI-R-127** — Under `Center` alignment (UI-R-126) an odd number of gained rows splits with the smaller half above: a tab gaining `g` rows takes `g / 2` above its top padding row and the rest below its bottom padding row.
+
+**UI-R-128** — Alignment (UI-R-126) changes nothing when no stretching applies (UI-R-125): with the tabs' natural height at or above the area height, `Top`, `Center` and `Bottom` render identically.
 
 ## Modbus monitor view
 

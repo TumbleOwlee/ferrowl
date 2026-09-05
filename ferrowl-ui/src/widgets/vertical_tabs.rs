@@ -1,6 +1,10 @@
 use derive_builder::Builder;
 use getset::{CopyGetters, Getters, Setters, WithSetters};
-use ratatui::{buffer::Buffer, layout::Margin, layout::Rect, widgets::StatefulWidget};
+use ratatui::{
+    buffer::Buffer,
+    layout::{Margin, Rect, VerticalAlignment},
+    widgets::StatefulWidget,
+};
 use std::marker::PhantomData;
 
 use crate::state::VerticalTabsState;
@@ -11,7 +15,10 @@ use crate::traits::ToLabel;
 /// one character per row and scrolling to keep the active tab's block of
 /// rows visible. An optional padding of a horizontal count H and a vertical
 /// count V frames every tab, making the widget's rendered width `1 + 2H`
-/// columns.
+/// columns. When the tabs' natural height is less than the area, the spare
+/// rows stretch the tabs to fill it and `alignment` places each tab's
+/// character and padding rows at the top, middle or bottom of the resulting
+/// extent.
 ///
 /// Style is shared with [`crate::widgets::ScrollingTabs`] via
 /// [`ScrollingTabsStyle`]; tab data and the active index live in
@@ -26,6 +33,9 @@ pub struct VerticalTabs<T: ToLabel + Clone> {
     #[getset(get_copy = "pub")]
     #[builder(default = "Margin::new(0, 0)")]
     padding: Margin,
+    #[getset(get_copy = "pub")]
+    #[builder(default = "VerticalAlignment::Center")]
+    alignment: VerticalAlignment,
     #[builder(setter(skip))]
     #[builder(default = "PhantomData")]
     marker: PhantomData<T>,
@@ -42,10 +52,12 @@ impl<T: ToLabel + Clone> StatefulWidget for VerticalTabs<T> {
 /// Resolves row `row` (counted across the whole stacked tab list) to the
 /// owning tab's index and, if the row is a character row rather than a
 /// vertical padding or gained row, the character it carries. `heights`
-/// holds each tab's rendered height, natural or stretched.
+/// holds each tab's rendered height, natural or stretched; `leads` holds
+/// each tab's gained rows placed before its padding, per its alignment.
 fn resolve_row<T: ToLabel>(
     titles: &[T],
     heights: &[usize],
+    leads: &[usize],
     vertical: usize,
     row: usize,
 ) -> Option<(usize, Option<char>)> {
@@ -56,10 +68,11 @@ fn resolve_row<T: ToLabel>(
         let height = heights[idx];
         if row < start + height {
             let local = row - start;
-            if local < vertical || local >= vertical + chars_count {
+            let lead = leads[idx];
+            if local < lead + vertical || local >= lead + vertical + chars_count {
                 return Some((idx, None));
             }
-            return Some((idx, label.chars().nth(local - vertical)));
+            return Some((idx, label.chars().nth(local - lead - vertical)));
         }
         start += height;
     }
@@ -97,8 +110,20 @@ impl<T: ToLabel + Clone> StatefulWidget for &VerticalTabs<T> {
                 .map(|(i, nat)| nat + s / n + usize::from(i < s % n))
                 .collect()
         } else {
-            natural
+            natural.clone()
         };
+        let leads: Vec<usize> = heights
+            .iter()
+            .zip(natural.iter())
+            .map(|(height, nat)| {
+                let g = height - nat;
+                match self.alignment {
+                    VerticalAlignment::Top => 0,
+                    VerticalAlignment::Center => g / 2,
+                    VerticalAlignment::Bottom => g,
+                }
+            })
+            .collect();
 
         if total < h && state.active < state.titles.len() {
             state.offset = 0;
@@ -125,7 +150,8 @@ impl<T: ToLabel + Clone> StatefulWidget for &VerticalTabs<T> {
 
         let end = (state.offset + h).min(total_rows);
         for row in state.offset..end {
-            let Some((tab_idx, ch)) = resolve_row(&state.titles, &heights, vertical, row) else {
+            let Some((tab_idx, ch)) = resolve_row(&state.titles, &heights, &leads, vertical, row)
+            else {
                 continue;
             };
             let y = area.y + (row - state.offset) as u16;
@@ -591,12 +617,13 @@ mod tests {
         }
     }
 
-    /// UI-R-124 — rows a tab gains are appended below its bottom padding,
-    /// leaving its character and padding rows in place.
+    /// UI-R-124, UI-R-126, UI-R-116 — under `Top` alignment gained rows sit
+    /// outside the padding, below it, and the whole extent stays selected.
     #[test]
-    fn ut_stretch_rows_append_below_bottom_padding() {
+    fn ut_gained_rows_sit_outside_the_padding() {
         let w = VerticalTabsBuilder::<String>::default()
             .padding(Margin::new(0, 1))
+            .alignment(VerticalAlignment::Top)
             .build()
             .unwrap();
         let mut st = VerticalTabsState {
@@ -761,6 +788,208 @@ mod tests {
                 cell_has_style(&big[(0, y)], style.general)
                     || cell_has_style(&big[(0, y)], style.selected)
             );
+        }
+    }
+
+    /// UI-R-126, UI-R-127, UI-R-124 — `Center` splits the gained rows with
+    /// the smaller half above the top padding row.
+    #[test]
+    fn ut_alignment_center_splits_the_gained_rows() {
+        let w = VerticalTabsBuilder::<String>::default()
+            .padding(Margin::new(0, 1))
+            .alignment(VerticalAlignment::Center)
+            .build()
+            .unwrap();
+        let mut st = VerticalTabsState {
+            titles: titles(&["A"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(1, 5);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 5), &mut b, &mut st);
+        assert_eq!(b[(0, 0)].symbol(), " ");
+        assert_eq!(b[(0, 1)].symbol(), " ");
+        assert_eq!(b[(0, 2)].symbol(), "A");
+        assert_eq!(b[(0, 3)].symbol(), " ");
+        assert_eq!(b[(0, 4)].symbol(), " ");
+    }
+
+    /// UI-R-126, UI-R-124 — `Bottom` puts every gained row above the
+    /// padding, outside it.
+    #[test]
+    fn ut_alignment_bottom_puts_gained_rows_first() {
+        let w = VerticalTabsBuilder::<String>::default()
+            .padding(Margin::new(0, 1))
+            .alignment(VerticalAlignment::Bottom)
+            .build()
+            .unwrap();
+        let mut st = VerticalTabsState {
+            titles: titles(&["A"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(1, 5);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 5), &mut b, &mut st);
+        assert_eq!(b[(0, 0)].symbol(), " ");
+        assert_eq!(b[(0, 1)].symbol(), " ");
+        assert_eq!(b[(0, 2)].symbol(), " ");
+        assert_eq!(b[(0, 3)].symbol(), "A");
+        assert_eq!(b[(0, 4)].symbol(), " ");
+    }
+
+    /// UI-R-126 — with no `.alignment` call the builder defaults to `Center`.
+    #[test]
+    fn ut_alignment_defaults_to_center() {
+        let w = VerticalTabsBuilder::<String>::default()
+            .padding(Margin::new(0, 1))
+            .build()
+            .unwrap();
+        let mut st = VerticalTabsState {
+            titles: titles(&["A"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(1, 5);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 5), &mut b, &mut st);
+        assert_eq!(b[(0, 0)].symbol(), " ");
+        assert_eq!(b[(0, 1)].symbol(), " ");
+        assert_eq!(b[(0, 2)].symbol(), "A");
+        assert_eq!(b[(0, 3)].symbol(), " ");
+        assert_eq!(b[(0, 4)].symbol(), " ");
+    }
+
+    /// UI-R-127 — an odd `g` splits with the smaller half above.
+    #[test]
+    fn ut_center_puts_the_smaller_half_above() {
+        let w = VerticalTabsBuilder::<String>::default()
+            .alignment(VerticalAlignment::Center)
+            .build()
+            .unwrap();
+        let mut st = VerticalTabsState {
+            titles: titles(&["A"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(1, 4);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 4), &mut b, &mut st);
+        assert_eq!(b[(0, 0)].symbol(), " ");
+        assert_eq!(b[(0, 1)].symbol(), "A");
+        assert_eq!(b[(0, 2)].symbol(), " ");
+        assert_eq!(b[(0, 3)].symbol(), " ");
+    }
+
+    /// UI-E-074, UI-R-127 — gaining exactly one row under `Center` puts it
+    /// below the bottom padding row; the title sits one row above centre.
+    #[test]
+    fn ut_center_single_gained_row_goes_below() {
+        let w = VerticalTabsBuilder::<String>::default()
+            .padding(Margin::new(0, 1))
+            .alignment(VerticalAlignment::Center)
+            .build()
+            .unwrap();
+        let mut st = VerticalTabsState {
+            titles: titles(&["A"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(1, 4);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 4), &mut b, &mut st);
+        assert_eq!(b[(0, 0)].symbol(), " ");
+        assert_eq!(b[(0, 1)].symbol(), "A");
+        assert_eq!(b[(0, 2)].symbol(), " ");
+        assert_eq!(b[(0, 3)].symbol(), " ");
+    }
+
+    /// UI-R-128, UI-R-125 — alignment changes nothing once the natural
+    /// height already fills or exceeds the area.
+    #[test]
+    fn ut_alignment_is_inert_without_stretching() {
+        for alignment in [
+            VerticalAlignment::Top,
+            VerticalAlignment::Center,
+            VerticalAlignment::Bottom,
+        ] {
+            let w = VerticalTabsBuilder::<String>::default()
+                .alignment(alignment)
+                .build()
+                .unwrap();
+
+            let mut st = VerticalTabsState {
+                titles: titles(&["Ab", "Cd"]),
+                active: 0,
+                offset: 0,
+            };
+            let mut b = buffer(1, 4);
+            StatefulWidget::render(&w, Rect::new(0, 0, 1, 4), &mut b, &mut st);
+            assert_eq!(b[(0, 0)].symbol(), "A");
+            assert_eq!(b[(0, 1)].symbol(), "b");
+            assert_eq!(b[(0, 2)].symbol(), "C");
+            assert_eq!(b[(0, 3)].symbol(), "d");
+
+            let mut st = VerticalTabsState {
+                titles: titles(&["Ab", "Cd"]),
+                active: 0,
+                offset: 0,
+            };
+            let mut b = buffer(1, 3);
+            StatefulWidget::render(&w, Rect::new(0, 0, 1, 3), &mut b, &mut st);
+            assert_eq!(b[(0, 0)].symbol(), "A");
+            assert_eq!(b[(0, 1)].symbol(), "b");
+            assert_eq!(b[(0, 2)].symbol(), "C");
+        }
+    }
+
+    /// UI-E-075, UI-R-123 — a tab that gains no rows renders alike under
+    /// every alignment; only the tabs that gain rows move.
+    #[test]
+    fn ut_unstretched_tab_renders_alike_under_every_alignment() {
+        for (alignment, first, second) in [
+            (VerticalAlignment::Top, 0u16, 2u16),
+            (VerticalAlignment::Center, 0, 2),
+            (VerticalAlignment::Bottom, 1, 3),
+        ] {
+            let w = VerticalTabsBuilder::<String>::default()
+                .alignment(alignment)
+                .build()
+                .unwrap();
+            let mut st = VerticalTabsState {
+                titles: titles(&["A", "B", "C"]),
+                active: 0,
+                offset: 0,
+            };
+            let mut b = buffer(1, 5);
+            StatefulWidget::render(&w, Rect::new(0, 0, 1, 5), &mut b, &mut st);
+            assert_eq!(b[(0, first)].symbol(), "A");
+            assert_eq!(b[(0, second)].symbol(), "B");
+            assert_eq!(b[(0, 4)].symbol(), "C");
+        }
+    }
+
+    /// UI-R-116 — moving a title inside its extent moves no styling: the
+    /// active tab's whole extent stays selected under every alignment.
+    #[test]
+    fn ut_active_extent_is_styled_under_every_alignment() {
+        let style = ScrollingTabsStyle::default();
+        for alignment in [
+            VerticalAlignment::Top,
+            VerticalAlignment::Center,
+            VerticalAlignment::Bottom,
+        ] {
+            let w = VerticalTabsBuilder::<String>::default()
+                .padding(Margin::new(0, 1))
+                .alignment(alignment)
+                .build()
+                .unwrap();
+            let mut st = VerticalTabsState {
+                titles: titles(&["A"]),
+                active: 0,
+                offset: 0,
+            };
+            let mut b = buffer(1, 5);
+            StatefulWidget::render(&w, Rect::new(0, 0, 1, 5), &mut b, &mut st);
+            for y in 0..5 {
+                assert!(cell_has_style(&b[(0, y)], style.selected));
+            }
         }
     }
 }

@@ -92,6 +92,8 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-071** | Vertical tab line holding a single tab with spare height (UI-R-122) | that one tab takes every spare row and covers the whole area |
 | **UI-E-072** | Vertical tab line with fewer spare rows than tabs (UI-R-123) | the topmost `s` tabs gain one row each and the rest gain none; the area is still covered to its last row |
 | **UI-E-073** | Vertical tab line empty title with vertical padding 0 (UI-E-067) while there is spare height | takes part in the division (UI-R-123) like any other tab, so a tab of zero natural height becomes visible as its share of spare rows |
+| **UI-E-074** | Vertical tab line tab gaining exactly one row under `Center` (UI-R-127) | the gained row goes below the tab's bottom padding row; the title sits one row above centre |
+| **UI-E-075** | Vertical tab line tab that gains no rows (UI-R-123) while others do | its own render is identical under all three alignments; only the stretched tabs move |
 
 ## Known limitations and stated constraints
 
