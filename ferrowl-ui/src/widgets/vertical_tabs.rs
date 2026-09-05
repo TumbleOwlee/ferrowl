@@ -51,20 +51,21 @@ impl<T: ToLabel + Clone> StatefulWidget for VerticalTabs<T> {
 
 /// Resolves row `row` (counted across the whole stacked tab list) to the
 /// owning tab's index and, if the row is a character row rather than a
-/// vertical padding or gained row, the character it carries. `heights`
-/// holds each tab's rendered height, natural or stretched; `leads` holds
-/// each tab's gained rows placed before its padding, per its alignment.
-fn resolve_row<T: ToLabel>(
-    titles: &[T],
+/// vertical padding or gained row, the character it carries. `labels`
+/// holds each tab's title, pre-split into characters so a row lookup never
+/// re-renders a label; `heights` holds each tab's rendered height, natural
+/// or stretched; `leads` holds each tab's gained rows placed before its
+/// padding, per its alignment.
+fn resolve_row(
+    labels: &[Vec<char>],
     heights: &[usize],
     leads: &[usize],
     vertical: usize,
     row: usize,
 ) -> Option<(usize, Option<char>)> {
     let mut start = 0usize;
-    for (idx, title) in titles.iter().enumerate() {
-        let label = title.to_label();
-        let chars_count = label.chars().count();
+    for (idx, label) in labels.iter().enumerate() {
+        let chars_count = label.len();
         let height = heights[idx];
         if row < start + height {
             let local = row - start;
@@ -72,7 +73,7 @@ fn resolve_row<T: ToLabel>(
             if local < lead + vertical || local >= lead + vertical + chars_count {
                 return Some((idx, None));
             }
-            return Some((idx, label.chars().nth(local - lead - vertical)));
+            return Some((idx, label.get(local - lead - vertical).copied()));
         }
         start += height;
     }
@@ -95,10 +96,14 @@ impl<T: ToLabel + Clone> StatefulWidget for &VerticalTabs<T> {
         let vertical = self.padding.vertical as usize;
         let h = area.height as usize;
 
-        let natural: Vec<usize> = state
+        let labels: Vec<Vec<char>> = state
             .titles
             .iter()
-            .map(|t| 2 * vertical + t.to_label().chars().count())
+            .map(|t| t.to_label().chars().collect())
+            .collect();
+        let natural: Vec<usize> = labels
+            .iter()
+            .map(|label| 2 * vertical + label.len())
             .collect();
         let total: usize = natural.iter().sum();
         let heights: Vec<usize> = if total < h {
@@ -150,10 +155,8 @@ impl<T: ToLabel + Clone> StatefulWidget for &VerticalTabs<T> {
 
         let end = (state.offset + h).min(total_rows);
         for row in state.offset..end {
-            let Some((tab_idx, ch)) = resolve_row(&state.titles, &heights, &leads, vertical, row)
-            else {
-                continue;
-            };
+            let (tab_idx, ch) = resolve_row(&labels, &heights, &leads, vertical, row)
+                .expect("row is bounded by total_rows, the same sum resolve_row walks");
             let y = area.y + (row - state.offset) as u16;
             let style = if tab_idx == state.active {
                 self.style.selected
@@ -424,7 +427,7 @@ mod tests {
     }
 
     /// UI-E-064 — an area wider than the rendered width draws into the
-    /// leftmost `1 + 2N` columns only.
+    /// leftmost `1 + 2H` columns only.
     #[test]
     fn ut_wider_area_uses_rendered_width_only() {
         let w = VerticalTabsBuilder::<String>::default()
