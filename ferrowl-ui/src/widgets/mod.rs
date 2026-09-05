@@ -7,7 +7,6 @@ mod code_input_field;
 mod input_field;
 mod markdown_input_field;
 mod markdown_render;
-mod scrolling_tabs;
 mod selection;
 mod suggest_input;
 mod tab_bar;
@@ -24,7 +23,6 @@ use ratatui::layout::{HorizontalAlignment, Margin};
 use ratatui::style::Style;
 use ratatui::widgets::{Block, StatefulWidget, Widget as RenderWidget};
 use ratatui::{buffer::Buffer, layout::Rect};
-pub use scrolling_tabs::*;
 
 use crate::Border;
 

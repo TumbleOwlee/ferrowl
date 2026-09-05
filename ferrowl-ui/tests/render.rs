@@ -14,8 +14,8 @@ use ratatui::widgets::{StatefulWidget, Widget as RWidget};
 use ferrowl_syntax::{Language, SyntaxKind};
 use ferrowl_ui::Border;
 use ferrowl_ui::state::{
-    ButtonStateBuilder, CodeInputFieldStateBuilder, InputFieldStateBuilder, ScrollingTabsState,
-    SelectionStateBuilder, SuggestInputStateBuilder, TabBarState, TableStateBuilder,
+    ButtonStateBuilder, CodeInputFieldStateBuilder, InputFieldStateBuilder, SelectionStateBuilder,
+    SuggestInputStateBuilder, TabBarState, TableStateBuilder,
 };
 use ferrowl_ui::style::{
     ButtonStyle, InputFieldStyle, SelectionStyle, SuggestInputStyle, SyntaxTheme, TabBarStyle,
@@ -23,9 +23,8 @@ use ferrowl_ui::style::{
 };
 use ferrowl_ui::traits::{Init, Suggestion, SuggestionProvider, ToLabel};
 use ferrowl_ui::widgets::{
-    ButtonBuilder, CodeInputFieldBuilder, Header, InputFieldBuilder, ScrollingTabsBuilder,
-    SelectionBuilder, SuggestInputBuilder, TabBarBuilder, TableBuilder, TableEntry, TextBuilder,
-    Title, Width,
+    ButtonBuilder, CodeInputFieldBuilder, Header, InputFieldBuilder, SelectionBuilder,
+    SuggestInputBuilder, TabBarBuilder, TableBuilder, TableEntry, TextBuilder, Title, Width,
 };
 
 fn buffer(w: u16, h: u16) -> Buffer {
@@ -333,42 +332,46 @@ fn code_input_field_h_scroll_clips_mid_span() {
     );
 }
 
-// ---- ScrollingTabs ----
+// ---- TabBar ----
 
 #[test]
-/// UI-R-046 — the tab bar scrolls horizontally to keep the selected tab visible.
-fn scrolling_tabs_render_variants() {
-    let w = ScrollingTabsBuilder::<String>::default().build().unwrap();
-
-    // Empty -> early return.
-    let mut st = ScrollingTabsState::<String> {
-        titles: vec![],
-        selected: 0,
+/// UI-R-114, UI-R-116, UI-R-121, UI-R-174 — padded title columns written
+/// one character per column, active-tab style over every cell, under
+/// `Horizontal` layout.
+fn it_tab_bar_horizontal_render_variants() {
+    let w = TabBarBuilder::<String>::default()
+        .padding(Margin::new(1, 1))
+        .build()
+        .unwrap();
+    let mut st = TabBarState {
+        titles: vec!["Tab".to_string()],
+        active: 0,
+        offset: 0,
     };
-    let mut b = buffer(20, 1);
-    StatefulWidget::render(&w, Rect::new(0, 0, 20, 1), &mut b, &mut st);
-
-    // Several tabs, selected in the middle, narrow width -> centering logic.
-    let titles = vec![
-        "alpha".to_string(),
-        "beta".to_string(),
-        "gamma".to_string(),
-        "delta".to_string(),
-        "epsilon".to_string(),
-    ];
-    let mut st = ScrollingTabsState {
-        titles,
-        selected: 2,
+    let mut b = buffer(5, 3);
+    StatefulWidget::render(&w, Rect::new(0, 0, 5, 3), &mut b, &mut st);
+    let row = |b: &Buffer, y: u16| {
+        (0..5)
+            .map(|x| b[(x, y)].symbol().to_string())
+            .collect::<String>()
     };
-    let mut b = buffer(12, 1);
-    StatefulWidget::render(w, Rect::new(0, 0, 12, 1), &mut b, &mut st);
+    assert_eq!(row(&b, 0), "     ");
+    assert_eq!(row(&b, 1), " Tab ");
+    assert_eq!(row(&b, 2), "     ");
+    let selected = TabBarStyle::default().selected;
+    for y in 0..3 {
+        for x in 0..5 {
+            assert_eq!(b[(x, y)].fg, selected.fg.unwrap());
+            assert_eq!(b[(x, y)].bg, selected.bg.unwrap());
+        }
+    }
 }
 
 #[test]
-/// UI-R-114, UI-R-115, UI-R-116, UI-R-120, UI-R-121 — padded title rows
-/// written one character per row, and active-block style applying in
-/// either layout direction.
-fn it_vertical_tabs_render_variants() {
+/// UI-R-115, UI-R-116, UI-R-120, UI-R-121 — padded title rows
+/// written one character per row, and active-block style identical whether
+/// the widget is rendered by reference or consumed by value.
+fn it_tab_bar_render_variants() {
     let w = TabBarBuilder::<String>::default()
         .padding(Margin::new(1, 1))
         .direction(ratatui::layout::Direction::Vertical)

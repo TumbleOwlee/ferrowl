@@ -545,8 +545,8 @@ mod tests {
         assert!(cell_has_style(&b[(0, 3)], ratatui::style::Style::default()));
     }
 
-    /// UI-R-117, UI-R-122, UI-R-125 — tabs that already fit the area are
-    /// stretched to cover it and never scroll, clearing any retained offset.
+    /// UI-R-117, UI-R-122 — tabs that already fit the area are stretched to
+    /// cover it and never scroll, clearing any retained offset.
     #[test]
     fn ut_no_scroll_while_the_tabs_fit() {
         let w = TabBarBuilder::<String>::default().build().unwrap();
