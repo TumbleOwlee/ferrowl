@@ -10,6 +10,9 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 |---|---|---|
 | **UI-E-001** | Unknown first token (`:bogus`) | forwarded to the active view; if the view also does not recognize it, app logs `Unknown command ':bogus'` at Warning |
 | **UI-E-002** | Empty submission (`:` then `Enter`) | no-op; command mode exits |
+| **UI-E-091** | `Enter` on an empty command line (UI-R-191) | a submit outcome carrying the empty string, and the line closes; the widget does not special-case empty input, the consumer does |
+| **UI-E-092** | Command line with both an error and a notice set (UI-R-194, UI-R-195) | the error is shown and the notice is retained, appearing once the consumer clears the error |
+| **UI-E-093** | Command-line help box taller than the rows available above the line (UI-R-196) | the box is clipped to the available rows and stays anchored to the bottom, matching the app's no-minimum-size stance (UI-E-047) |
 | **UI-E-003** | Extra whitespace between tokens | collapsed on split; `:  swap   0    1` = `:swap 0 1` |
 | **UI-E-004** | `:swap` with a non-numeric or missing index | rejected (parsed as unknown-`swap`); no swap |
 | **UI-E-005** | `:swap i j` with `i == j` or either out of range | silent no-op |
@@ -54,6 +57,8 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-034** | A rename is an edit | restarts the sim thread when the dialog closes (SC-R-024): the Lua context is keyed by script name |
 | **UI-E-061** | `Esc` on a monitor view overlay (UI-R-112) with nothing typed into it yet | close-confirm popup opens anyway — monitor overlays track no dirty flag, so the confirmation is unconditional |
 | **UI-E-062** | `Esc` on a monitor add/edit-interpretation dialog while one of its own sub-popups is open (the delete confirmation, the predefined-register picker) | dismisses only that sub-popup; does not reach the dialog's close-confirm (UI-R-112), same rule as UI-E-033 |
+| **UI-E-094** | Frame smaller than the editor dialog's minimum size (UI-R-200) | the box takes the whole frame and is clipped, no minimum is enforced against the terminal (UI-E-047) |
+| **UI-E-095** | `Enter` in `Insert` mode inside the editor dialog (UI-R-205) | the field splits the line; confirming (UI-R-202) is reachable only from `Normal` mode |
 
 ## Code editor
 
@@ -73,6 +78,10 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-079** | Mutating edit on an enabled field that has gutter labels (UI-R-164) | labels are never resynced by the widget: an inserted, split or deleted line shifts rows out from under the labels and leaves them stale; labels are intended for disabled, read-only use, and keeping them in sync is the consumer's job |
 | **UI-E-080** | Gutter-label list longer than the buffer | the surplus labels are never rendered, but still count toward the gutter width of UI-R-167 |
 | **UI-E-083** | Gutter labels wider than the field's whole area (UI-R-172) | the gutter takes the full area width and the text content is left zero columns; no minimum content width is reserved and no label is dropped, matching the app's no-minimum-size stance (UI-E-047, UI-E-055) |
+| **UI-E-084** | `PageDown`, `PageUp`, `Ctrl+D` or `Ctrl+U` before the first render (UI-R-173) | the visible height is one row, so a page and a half page both move the active line by one line |
+| **UI-E-085** | Paging (UI-R-174, UI-R-175) at the first or last buffer line | the move clamps to that line; no wrap-around, matching UI-E-076 |
+| **UI-E-086** | `h`, `l`, `Left`, `Right`, `0` or `$` on an *enabled* code editor | unchanged cursor motion (UI-R-029); the horizontal viewport scrolling of UI-R-176 through UI-R-179 exists only while the field is disabled |
+| **UI-E-087** | Vertical move onto a line shorter than the horizontal scroll offset (UI-R-180) | that row shows only its gutter and no text until the view is scrolled back; the view never snaps to the shorter line |
 
 ## Syntax highlighting
 
@@ -91,6 +100,19 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-072** | `h`, `l`, `0`, `$`, `w`, `b`, `e` in a read-only markdown input field | consumed and ignored; only line/display-row navigation (`j`, `k`, `gg`, `G`, `Ctrl+D`, `Ctrl+U`) and yank act (UI-R-139) |
 | **UI-E-073** | Fence opened and never closed before the end of the buffer (UI-R-121) | every following line stays fence body to the last line of the buffer |
 | **UI-E-076** | `Ctrl+D` / `Ctrl+U` near the first or last display row (UI-R-136) | movement clamps to the first/last row; no wrap-around |
+| **UI-E-089** | Measuring the empty text (UI-R-188) | one display row, the single empty source line |
+| **UI-E-090** | Measuring at a width that leaves no columns for text, gutter included (UI-R-188) | the available text width is treated as one column, so every source line wraps one character per display row |
+
+## Diff widget
+
+| ID | Condition | Behavior |
+|---|---|---|
+| **UI-E-097** | Body line appearing before any hunk header, or a line the parser does not recognize (UI-R-208) | kept as a meta row; nothing is dropped and no parse error is raised |
+| **UI-E-098** | `\ No newline at end of file` marker in the input (UI-R-208) | a meta row of its own, following the line it belongs to |
+| **UI-E-099** | Empty diff text (UI-R-207) | no rows; the panes render empty and the selected-row query (UI-R-226) reports no rows |
+| **UI-E-100** | Visual selection spanning rows whose one side is a filler (UI-R-209, UI-R-226) | the filler rows are part of the reported range, and the per-row query (UI-R-227) reports no line number for that side |
+| **UI-E-101** | Layout toggled (UI-R-215) while a Visual selection is active | active row and selection are unchanged: both layouts address the same aligned rows (UI-R-213) |
+| **UI-E-102** | Gutter-label list longer than the widget's row count (UI-R-218) | the surplus labels are never rendered but still count toward the gutter width, as UI-E-080 |
 
 ## Rendering and terminal size
 
@@ -169,3 +191,7 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 ### Markdown input field has no consumer in the application
 
 **UI-E-077** — The markdown input field is a library widget in the TUI crate with no use in any application view; it is exercised only by its runnable example and by automated buffer-render tests. Absence of a consumer is deliberate, not an oversight.
+
+### Review-flow widgets have no consumer in the application
+
+**UI-E-096** — The diff widget, the markdown measurement, the command-line widget and the editor dialog are library surface in the TUI crate with no use in any application view; each is exercised only by runnable examples and automated tests. Absence of a consumer is deliberate, not an oversight, as for the markdown input field (UI-E-077).

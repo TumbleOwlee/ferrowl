@@ -261,6 +261,8 @@ Vim-modal editor (default for the Lua-script editor). Modes: `NORMAL`, `INSERT`,
 | `e` | End of current/next word | UI-R-028 |
 | `gg` | First line, first column | UI-R-028 |
 | `G` | Last line | UI-R-028 |
+| `PageDown` / `PageUp` | Page down / up by the visible height | UI-R-173, UI-R-174 |
+| `Ctrl+D` / `Ctrl+U` | Half a page down / up | UI-R-173, UI-R-175 |
 
 ### Edits (Normal)
 
@@ -294,6 +296,16 @@ Printable keys insert; `Enter` splits with auto-indent (when a language is set);
 
 Yank/delete also copy to the system clipboard via OSC 52. A `language` setting drives syntax highlighting and format-on-blur (JSON may decline invalid input; Lua always reformats). The Diff language colors whole lines and has no formatter, so a Diff field never reformats on blur. (UI-R-170, UI-R-171)
 
+### Read-only (disabled) editor
+
+| Key | Action | Req |
+|---|---|---|
+| `h` / `Left` | Scroll the viewport one column left | UI-R-176, UI-R-177 |
+| `l` / `Right` | Scroll one column right | UI-R-176, UI-R-177 |
+| `0` | Scroll to the first column | UI-R-178 |
+| `$` | Scroll the active line's last column into view | UI-R-179 |
+| `gg` / `G` / `v` / `V` / `Esc` | Unchanged from the enabled editor | UI-R-182 |
+
 ## Markdown input field — modes and commands
 
 The widget uses the mode transitions, motions, edits and Insert-mode keys of the code editor tables above (UI-R-125).
@@ -311,7 +323,7 @@ The widget uses the mode transitions, motions, edits and Insert-mode keys of the
 | `h` / `l` / `0` / `$` / `w` / `b` / `e` | read-only | Consumed, no movement | UI-E-072 |
 | mutating keys, `i` / `a` / `I` / `A` / `o` / `O` / `v` / `V` | read-only | Ignored, reported unhandled | UI-R-155 |
 
-Public surface: content get and set (UI-R-125), read-only toggle (UI-R-128, UI-R-155), focus set and query (UI-R-126, UI-R-128), current vim mode and its display label (UI-R-125), builder options for the markdown theme (UI-R-141), the syntax theme (UI-R-129) and the line-number gutter, default off (UI-R-140).
+Public surface: content get and set (UI-R-125), read-only toggle (UI-R-128, UI-R-155), focus set and query (UI-R-126, UI-R-128), current vim mode and its display label (UI-R-125), builder options for the markdown theme (UI-R-141), the syntax theme (UI-R-129) and the line-number gutter, default off (UI-R-140), and a measurement function taking a text and an available width and returning the display-row count that text would render at, touching no state (UI-R-188).
 
 ## Code editor and syntax public surface
 
@@ -321,3 +333,42 @@ Public surface: content get and set (UI-R-125), read-only toggle (UI-R-128, UI-R
 | Highlight kinds `Added`, `Removed`, `Meta` | diff line kinds added to the fixed kind enumeration | UI-R-039 |
 | Syntax theme styles `added`, `removed`, `meta` | per-kind styles for the diff kinds, foreground-only defaults | UI-R-162, UI-R-163 |
 | Code-editor state `gutter_labels: Option<Vec<String>>` | per-line gutter text replacing the line index; builder-settable and settable after construction | UI-R-164, UI-R-165, UI-R-168 |
+| Code-editor state visible-height accessor | remembered visible height in rows of the last render | UI-R-173 |
+| Code-editor state vertical-scroll-offset accessor | current vertical scroll offset | UI-R-173 |
+| Code-editor state horizontal-scroll accessor | current horizontal scroll column | UI-R-176 |
+
+## Command-line widget
+
+State fields: `open` flag, `input` (single-line input state holding text and cursor), `error: Option<String>`, `notice: Option<String>`, `hint: String` (UI-R-189).
+
+Opening the command line sets `open`, clears `input`'s text and focuses it (UI-R-190).
+
+Event handling: `Enter` returns a submit outcome carrying the trimmed input text and closes the line; `Esc` returns a cancel outcome and closes the line; every other key is offered to `input` and the event is reported consumed (UI-R-191, UI-R-192, UI-R-193).
+
+Builder: a help list of `(usage, description)` pairs, rendered as a bordered box above the line while open and non-empty (UI-R-196).
+
+## Editor dialog widget
+
+Builder: `title: String`, width and height percentages defaulting to 60/50, and a minimum size defaulting to 40 columns by 8 rows (UI-R-199, UI-R-200).
+
+Public surface: a text accessor returning the held markdown field's current text (UI-R-201).
+
+Event handling: `Enter` in `Normal` mode with non-blank text returns a confirmed outcome carrying the field's text and closes the dialog; `Enter` in `Normal` mode with blank text leaves the dialog open and reports the event consumed; `Esc` in `Normal` mode returns a cancelled outcome and closes the dialog; every other key is offered to the markdown field (UI-R-202, UI-R-203, UI-R-204, UI-R-205).
+
+## Diff widget
+
+Public surface: construction from a unified diff text (UI-R-207); layout option (`Split` default, `Unified`) and a runtime toggle key (UI-R-214, UI-R-215); per-side syntax language, default none (UI-R-220, UI-R-221); per-side gutter labels, settable at build time and after (UI-R-218); a focused-side setter and query (UI-R-228); a selected-row query (UI-R-226); a per-row query returning that row's diff kind and old/new line numbers (UI-R-227).
+
+| Key | Mode | Action | Req |
+|---|---|---|---|
+| `j` / `k`, counts, `gg`, `G` | Normal / Visual | Move the active row | UI-R-230 |
+| `PageDown` / `PageUp` / `Ctrl+D` / `Ctrl+U` | Normal / Visual | Page / half-page the active row | UI-R-231 |
+| `h` / `l` / `Left` / `Right` / `0` / `$` | Normal / Visual | Horizontal scroll, applied to every pane | UI-R-232 |
+| `]c` / `[c` | Normal / Visual | Move to the first row of the next / previous hunk | UI-R-233 |
+| `v` / `V` | Normal | Enter Visual | UI-R-223 |
+| `Esc` | Visual | Back to Normal | UI-R-223 |
+| `Esc` | Normal | Unhandled, reaches the enclosing layer | UI-R-223 |
+| `yy` | Normal | Yank the focused side's text of the selected rows | UI-R-229 |
+| `y` | Visual | Yank the focused side's text of the selected rows | UI-R-229 |
+| `Ctrl+T` | Normal / Visual | Toggle layout | UI-R-215 |
+| mutating and Insert-entering keys | Normal / Visual | Reported unhandled | UI-R-222 |

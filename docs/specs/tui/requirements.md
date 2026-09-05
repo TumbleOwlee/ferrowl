@@ -74,6 +74,26 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-020** — While the command line is focused, a help popup lists available commands: generic app-level commands plus whatever the active view advertises for its module type.
 
+**UI-R-189** — A command-line widget state carries an open flag, a single-line input state holding the typed text and its cursor, an optional error message, an optional notice message and a hint string.
+
+**UI-R-190** — Opening the command line (UI-R-189) sets it open, clears the input text and focuses the input.
+
+**UI-R-191** — While the command line is open, `Enter` reports a submit outcome carrying the trimmed input text and closes the line.
+
+**UI-R-192** — While the command line is open, `Esc` reports a cancel outcome and closes the line.
+
+**UI-R-193** — While the command line is open, every key other than `Enter` and `Esc` is offered to the input state and the event is reported consumed.
+
+**UI-R-194** — The command line renders, in this order of precedence, the `:` prompt followed by the input text and cursor while open, otherwise the error message in the theme's error style, otherwise the notice message, otherwise the hint.
+
+**UI-R-195** — The command-line widget never clears its error or notice message on its own; both persist until the consumer clears them.
+
+**UI-R-196** — The command-line widget builder takes a help list of usage and description pairs and, while the line is open and the list is non-empty, renders a bordered help box directly above the line, anchored to the bottom of the frame, one row per pair, with the usage column bold in the theme's highlight style.
+
+**UI-R-197** — An empty help list (UI-R-196) renders no help box, and the command line occupies its single row alone.
+
+**UI-R-198** — The command-line widget parses nothing: the submit outcome of UI-R-191 carries the raw trimmed string and the widget derives no command from it.
+
 ## Dialogs & overlays mechanism
 
 **UI-R-021** — A dialog/overlay is a modal layer rendered over the content and log panes, consuming keyboard input while open. Overlays paint back-to-front (module overlays, command help popup, app-level dialog, keybind-help dialog on top).
@@ -105,6 +125,22 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 **UI-R-081** — `Tab` is never consumed by a field-completion popup (UI-R-026), so it always moves focus to the dialog's next field.
 
 **UI-R-082** — Accepting a field-completion popup suggestion (UI-R-026) marked *partial* keeps the popup open and re-queries (e.g. descending a directory); accepting a non-partial one closes it.
+
+**UI-R-199** — An editor-dialog widget renders a centered bordered box over the frame, clearing the cells beneath it, with a caller-supplied title on its border.
+
+**UI-R-200** — The editor dialog's box takes a percentage of the frame's width and height, both builder-settable, defaulting to 60 percent of the width and 50 percent of the height, and is never smaller than its builder-settable minimum of 40 columns by 8 rows.
+
+**UI-R-201** — The editor dialog holds one editable markdown input field in the vim-modal profile, sized to the box's inner area, opened with empty text in `Normal` mode.
+
+**UI-R-202** — `Enter` in `Normal` mode with text that is not blank reports a confirmed outcome carrying the field's text and closes the editor dialog.
+
+**UI-R-203** — `Enter` in `Normal` mode with blank text — empty or whitespace only — leaves the editor dialog open and reports the event consumed.
+
+**UI-R-204** — `Esc` in `Normal` mode reports a cancelled outcome and closes the editor dialog.
+
+**UI-R-205** — Every key the editor dialog does not act on itself (UI-R-202 through UI-R-204) is offered to its markdown field, so `Esc` in `Insert` or a Visual mode only returns the field to `Normal` (UI-R-028) and leaves the dialog open.
+
+**UI-R-206** — The editor dialog's border title shows the field's current vim mode label next to the caller-supplied title (UI-R-199), in the same form the code editor's border uses.
 
 ## Script-manager dialog
 
@@ -190,6 +226,26 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-172** — The gutter width of UI-R-167 is clamped to the field's area width, never exceeding it and never wrapping, so the gutter is always drawn inside the widget's area.
 
+**UI-R-173** — The multi-line code editor's state remembers the visible height in rows of its last render, and reports one row before the first render.
+
+**UI-R-174** — `PageDown` and `PageUp` move the code editor's active line down or up by the remembered visible height (UI-R-173), clamped to the first and last buffer line.
+
+**UI-R-175** — `Ctrl+D` and `Ctrl+U` move the code editor's active line down or up by half the remembered visible height (UI-R-173), rounded down and never less than one line, clamped to the first and last buffer line.
+
+**UI-R-176** — While the code editor is disabled, `h`, `l`, `Left` and `Right` scroll the viewport one column left or right instead of moving the cursor within the line, and the cursor column follows the scroll so the keep-the-cursor-visible logic never scrolls the view back.
+
+**UI-R-177** — The horizontal scroll of UI-R-176 is clamped to zero at the left and, at the right, to the last column of the widest line in the buffer.
+
+**UI-R-178** — While the code editor is disabled, `0` sets the horizontal scroll to the first column.
+
+**UI-R-179** — While the code editor is disabled, `$` sets the horizontal scroll to the smallest offset that brings the active line's last column into view.
+
+**UI-R-180** — A vertical move in a disabled code editor leaves the horizontal scroll unchanged, whatever the length of the line moved onto.
+
+**UI-R-181** — The paging of UI-R-174 and UI-R-175 and the read-only horizontal scrolling of UI-R-176 through UI-R-180 are available in both the plain and the vim-modal editor profiles (UI-R-027).
+
+**UI-R-182** — A disabled vim-modal code editor keeps `gg`, `G`, `v`, `V` and `Esc` at their enabled meanings (UI-R-028), so a read-only field can still enter Visual mode and hold a charwise or linewise selection.
+
 ## Markdown input field
 
 **UI-R-125** — The markdown input field is a multi-line widget composing the vim-modal code-editor state (UI-R-027 through UI-R-036): buffer, `Normal`/`Insert`/`Visual` modes, motions and operators, registers, single-level undo and the disabled flag, which the markdown widget surfaces as read-only.
@@ -253,6 +309,64 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 **UI-R-154** — `![alt](url)` renders as `alt` in the theme's image style; the `!`, brackets, parentheses and URL are hidden.
 
 **UI-R-155** — A read-only markdown input field ignores every mutating key and every mode-entry key, reporting them unhandled as the disabled code editor does (UI-R-036), so the widget never leaves `Normal` mode.
+
+**UI-R-188** — The markdown input field widget measures text without rendering it: given a text and an available width, it reports the number of display rows that text would occupy if drawn by that widget at that width, applying the same wrapping, hanging-indent and gutter rules as a render (UI-R-130 through UI-R-133, UI-R-140, UI-R-142), and mutating no state.
+
+## Diff widget
+
+**UI-R-207** — The diff widget takes a unified diff text and parses it into hunks, each hunk's header line supplying the old-side and new-side starting line numbers of its body.
+
+**UI-R-208** — The diff widget classifies each parsed body line by its first character — space as context, `+` as added, `-` as removed — and keeps the remainder of the line as that line's text; every other line of the input is a meta line kept verbatim.
+
+**UI-R-209** — The diff widget aligns a hunk's lines into rows holding an optional old-side entry and an optional new-side entry: a context line occupies both entries of one row, a run of removed lines pairs positionwise with the run of added lines that follows it, and a surplus line on either side occupies a row whose other entry is a filler.
+
+**UI-R-210** — A meta line (UI-R-208), file header and hunk header included, occupies a row of its own drawn in the theme's meta style across the full width of the widget, with a blank gutter on every side.
+
+**UI-R-211** — In the split layout the diff widget draws two panes of equal width side by side, the old side left and the new side right, rendering one screen row per aligned row (UI-R-209) so corresponding old and new lines always sit on the same screen row.
+
+**UI-R-212** — A filler entry (UI-R-209) renders as an empty text area with a blank gutter cell of the full gutter width, so the row carries no line number and no text on that side.
+
+**UI-R-213** — In the unified layout the diff widget draws one pane, rendering each aligned row (UI-R-209) as its old-side entry followed by its new-side entry when both are present and differ, and as a single screen row otherwise, so the widget's selection and active row stay addressed in aligned rows in either layout.
+
+**UI-R-214** — The diff widget's layout is a builder option defaulting to split (UI-R-211).
+
+**UI-R-215** — `Ctrl+T` toggles the diff widget between the split and unified layouts at runtime.
+
+**UI-R-216** — Each rendered entry carries a marker column between its gutter and its text holding `-` for a removed line, `+` for an added line and a space for a context line or a filler.
+
+**UI-R-217** — An entry's gutter cell holds that side's file line number, counted from the hunk header's starting line for that side (UI-R-207).
+
+**UI-R-218** — The diff widget takes an optional list of gutter labels per side, settable when built and afterwards, whose entry for a row replaces that side's line number in the gutter, following the gutter rules of the code editor (UI-R-165 through UI-R-169, UI-R-172).
+
+**UI-R-219** — A row's text is styled by its diff kind, using the syntax theme's added, removed and meta styles (UI-R-162, UI-R-163); a context line takes the theme's normal text style.
+
+**UI-R-220** — The diff widget takes an optional syntax language per side; with a language set, each entry's text is highlighted by that language (UI-R-037) and the highlight spans supply the foreground, the diff-kind style of UI-R-219 supplying every other attribute.
+
+**UI-R-221** — The syntax language of UI-R-220 defaults to none, in which case the diff-kind style of UI-R-219 alone styles the text.
+
+**UI-R-222** — The diff widget is read-only: it holds no editable buffer and reports every mutating and Insert-entering key unhandled, as the disabled code editor does (UI-R-036).
+
+**UI-R-223** — The diff widget has two modes, `Normal` and `Visual`: `v` and `V` enter Visual from Normal, `Esc` in Visual returns to Normal, `Esc` in Normal is left unhandled so it reaches the enclosing layer (UI-R-028), and no Insert mode exists.
+
+**UI-R-224** — The active row is drawn in the theme's read-only highlighted-row style on every pane at once (UI-R-138), so the reader sees the same row marked on both sides.
+
+**UI-R-225** — In Visual mode every row from the selection anchor to the active row inclusive is drawn in the selection style on every pane at once.
+
+**UI-R-226** — The diff widget reports its selected rows as the active row alone in `Normal` mode and as the inclusive range between the selection anchor row and the active row, ordered ascending, in Visual mode.
+
+**UI-R-227** — The diff widget answers, for any of its rows, that row's diff kind and its old-side and new-side file line numbers, each absent where that side holds a filler, so a consumer maps a selected row range (UI-R-226) to file lines without parsing the diff itself.
+
+**UI-R-228** — The diff widget carries a focused side, settable and queryable, whose pane paints the focused border style while the other paints the normal one.
+
+**UI-R-229** — `yy` in `Normal` and `y` in Visual copy the focused side's text of the selected rows (UI-R-226) into the register and to the system clipboard, as the code editor's yank does (UI-R-030, UI-R-083), skipping rows whose focused side holds a filler.
+
+**UI-R-230** — `j`, `k`, their count prefixes, `gg` and `G` move the active row within the widget's aligned rows, and the single vertical scroll offset keeps the active row visible, so both panes always show the same row range.
+
+**UI-R-231** — `PageDown`, `PageUp`, `Ctrl+D` and `Ctrl+U` move the diff widget's active row by the visible height or half of it, with the remembered-height and clamping semantics of UI-R-173 through UI-R-175.
+
+**UI-R-232** — `h`, `l`, `Left`, `Right`, `0` and `$` scroll the diff widget horizontally with the semantics of UI-R-176 through UI-R-179, applying one horizontal offset to every pane at once.
+
+**UI-R-233** — `]c` moves the active row to the first row of the next hunk and `[c` to the first row of the previous hunk, each clamping at the last and first hunk.
 
 ## Syntax highlighting
 
