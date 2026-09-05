@@ -2,6 +2,7 @@
 
 pub(crate) mod json;
 pub(crate) mod lua;
+pub(crate) mod markdown;
 mod scan;
 
 use crate::{LineState, SyntaxKind};
@@ -11,6 +12,7 @@ use crate::{LineState, SyntaxKind};
 pub enum Language {
     Lua,
     Json,
+    Markdown,
 }
 
 pub(crate) fn highlight(
@@ -21,5 +23,6 @@ pub(crate) fn highlight(
     match lang {
         Language::Lua => lua::highlight_line(line, state),
         Language::Json => json::highlight_line(line, state),
+        Language::Markdown => markdown::highlight_line(line, state),
     }
 }

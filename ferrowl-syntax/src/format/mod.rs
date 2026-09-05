@@ -13,5 +13,6 @@ pub fn format(lang: Language, source: &str) -> Option<String> {
     match lang {
         Language::Json => json::format(source),
         Language::Lua => Some(lua::format(source)),
+        Language::Markdown => None,
     }
 }

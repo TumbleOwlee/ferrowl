@@ -71,6 +71,17 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-044** | `gg`/`dd`/`yy` first press | held pending; any non-matching key cancels the chord before doing its own action |
 | **UI-E-045** | Yank/delete with no clipboard-capable terminal | OSC 52 best-effort; failure ignored; internal register still holds the text |
 
+## Markdown input field
+
+| ID | Condition | Behavior |
+|---|---|---|
+| **UI-E-069** | Width too narrow for a list item's or block quote's hanging indent (UI-R-132) | the hanging indent is dropped and continuation rows start at column zero |
+| **UI-E-070** | Single word longer than the available width (UI-R-131) | broken mid-word at a character boundary; never truncated, never overflowed |
+| **UI-E-071** | Cursor line revealed as source in `Normal` (UI-R-126) | cursor column is a source column; no mapping between rendered and source columns is kept, so the reveal is the only place the cursor is positioned against markup |
+| **UI-E-072** | `h`, `l`, `0`, `$`, `w`, `b`, `e` in a read-only markdown input field | consumed and ignored; only line/display-row navigation (`j`, `k`, `gg`, `G`, `Ctrl+D`, `Ctrl+U`) and yank act (UI-R-139) |
+| **UI-E-073** | Fence opened and never closed before the end of the buffer (UI-R-121) | every following line stays fence body to the last line of the buffer |
+| **UI-E-076** | `Ctrl+D` / `Ctrl+U` near the first or last display row (UI-R-136) | movement clamps to the first/last row; no wrap-around |
+
 ## Rendering and terminal size
 
 | ID | Condition | Behavior |
@@ -132,3 +143,19 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 ### Terminal-restore paths are not unit-tested
 
 **UI-E-060** — UI-R-001 requires terminal restore on normal exit, error exit, and from a panic hook. None of the three — `AlternateScreen`'s `Drop` impl (`ferrowl-ui/src/screen.rs`), `AlternateScreen::release()` from the error-exit branch (`ferrowl/src/main.rs`, after `app.run()` returns `Err`), or the same `release()` in the panic hook (`main.rs`, before `runtime.block_on`) — is exercised by an automated test. All three mutate the real terminal's raw-mode/alternate-screen state; doing so inside the test harness's process would corrupt its terminal (the panic-hook path also requires actually panicking), so this is left to manual verification (`cargo run -- --demo`, then exit normally, force an error exit, trigger a panic, checking the prompt is intact each time).
+
+### Markdown rendering covers a fixed construct set
+
+**UI-E-074** — Tables, raw HTML, footnotes, reference links, setext headings and autolinks render as plain text (UI-R-124). Rendering is line-preserving (UI-R-142), so a table is never laid out into columns and adjacent lines are never reflowed into one paragraph.
+
+### Nested inline emphasis is best-effort
+
+**UI-E-075** — Nested inline markers are resolved best-effort rather than by a full CommonMark inline parser: `***x***` yields bold and italic together, but unusual or ambiguous nestings may leave a marker visible or drop a style.
+
+### Intraword underscore never opens italic
+
+**UI-E-078** — A `_` adjacent to a word character (letter, digit or `_`) on the side that would make it a marker never opens or closes italic: preceded by one it cannot open, followed by one it cannot close, so `snake_case_word` and `_snake_case_name` keep their underscores visible instead of hiding a spurious pair as markers.
+
+### Markdown input field has no consumer in the application
+
+**UI-E-077** — The markdown input field is a library widget in the TUI crate with no use in any application view; it is exercised only by its runnable example and by automated buffer-render tests. Absence of a consumer is deliberate, not an oversight.

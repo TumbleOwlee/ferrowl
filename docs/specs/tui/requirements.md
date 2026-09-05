@@ -176,13 +176,87 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-036** — A disabled code editor ignores all mutating keys (insert, delete, paste, mode entry that would edit) while permitting navigation, and reports such keys unhandled.
 
+## Markdown input field
+
+**UI-R-125** — The markdown input field is a multi-line widget composing the vim-modal code-editor state (UI-R-027 through UI-R-036): buffer, `Normal`/`Insert`/`Visual` modes, motions and operators, registers, single-level undo and the disabled flag, which the markdown widget surfaces as read-only.
+
+**UI-R-126** — Focused, editable, in `Normal` mode: every source line is drawn in its rendered form except the line holding the cursor, which is drawn as styled source, revealing that line's markup for editing.
+
+**UI-R-127** — Focused, editable, in `Insert` or `Visual` mode: every source line is drawn as styled source, with no rendered lines.
+
+**UI-R-128** — Unfocused, or read-only in any state, every source line is drawn in its rendered form, including the cursor line; no line reveals its source.
+
+**UI-R-129** — The styled-source view of UI-R-126 and UI-R-127 is produced by the Markdown language of UI-R-037: source characters are drawn unchanged, styled by highlight span.
+
+**UI-R-130** — Line wrapping is always on and cannot be disabled: content never overflows the widget width horizontally and the widget never scrolls horizontally.
+
+**UI-R-131** — A line too long for the available width breaks at a word boundary; a single word longer than the available width breaks at a character boundary instead.
+
+**UI-R-132** — Continuation rows of a wrapped list item or block quote are indented to the content start of that line (the column after its marker), so wrapped text aligns under the first row's text.
+
+**UI-R-133** — A fence delimiter or fence-body line wraps at a character boundary with no hanging indent.
+
+**UI-R-134** — `j`, `k`, their count prefixes, `dd`, `yy` and gutter line numbers address source lines, not display rows: `j` from a wrapped line moves to the next source line.
+
+**UI-R-135** — `gj` and `gk` move the cursor one display row down or up, staying inside a wrapped source line when it spans several rows.
+
+**UI-R-136** — `Ctrl+D` and `Ctrl+U` scroll by half the visible height measured in display rows and move the cursor by the same number of display rows.
+
+**UI-R-137** — Scrolling is measured in display rows and the viewport always keeps the cursor's display row visible.
+
+**UI-R-138** — Read-only, the display row range of the cursor's source line is drawn in the theme's highlighted-row style, so line navigation is visible without a text cursor.
+
+**UI-R-139** — Read-only, `j`, `k`, their count prefixes, `yy` (with its count prefix), `gg`, `G`, `Ctrl+D` and `Ctrl+U` remain available, so a reader can navigate lines and display rows and yank them.
+
+**UI-R-140** — An optional line-number gutter, off by default and selected on the widget builder, prints the source line number on the first display row of each source line and leaves continuation rows blank.
+
+**UI-R-141** — Markdown rendering styles come from a markdown theme with compile-time defaults, injected on the widget builder like the syntax theme, holding per-level heading styles, per-level quote-bar styles, and link, inline-code, bullet, horizontal-rule, image and read-only highlighted-row styles.
+
+**UI-R-142** — Rendering is line-preserving: one source line produces exactly one rendered line, wrapped over one or more display rows; lines are never joined into paragraphs and no construct is laid out across lines.
+
+**UI-R-143** — A heading line hides its `#` markers and the space after them and draws the remaining text bold in the theme's color for that heading level.
+
+**UI-R-144** — An unordered list item replaces its `-`, `*` or `+` marker with `•` in the theme's bullet style, keeping the leading indentation that expresses nesting depth.
+
+**UI-R-145** — An ordered list item keeps its number and delimiter as written, unchanged.
+
+**UI-R-146** — A task item replaces `- [ ]` with `☐` and `- [x]` with `☑`, keeping the item's text.
+
+**UI-R-147** — A block-quote line replaces each `>` marker with a `▎` bar in the theme's quote-bar color for that nesting depth and draws the quoted text dimmed and italic.
+
+**UI-R-148** — A horizontal rule (`---` or `***`) is drawn as a rule line spanning the full text width, after the gutter when enabled, in the theme's rule style.
+
+**UI-R-149** — A fence delimiter line hides its backticks and info string, rendering as an empty line in the theme's code style, so the one-line-per-source-line invariant of UI-R-142 holds.
+
+**UI-R-150** — A fence-body line is drawn verbatim, character for character, in the theme's code style.
+
+**UI-R-151** — When the fence's info string is `lua` or `json`, its body lines are additionally highlighted through the syntax highlighter for that language (UI-R-037) with the carry-over line state threaded across the block; any other info string, or none, leaves the body in plain code style.
+
+**UI-R-152** — Inline `**bold**`, `*italic*`/`_italic_`, `` `code` `` and `~~strike~~` hide their markers and draw the content bold, italic, in the theme's code style, and crossed out respectively.
+
+**UI-R-153** — `[text](url)` renders as `text` in the theme's link style, underlined; the brackets, parentheses and URL are hidden.
+
+**UI-R-154** — `![alt](url)` renders as `alt` in the theme's image style; the `!`, brackets, parentheses and URL are hidden.
+
+**UI-R-155** — A read-only markdown input field ignores every mutating key and every mode-entry key, reporting them unhandled as the disabled code editor does (UI-R-036), so the widget never leaves `Normal` mode.
+
 ## Syntax highlighting
 
-**UI-R-037** — Syntax highlighting is pure text-to-span computation: for a language and one line of source (plus a carry-over line state for multi-line constructs) it returns `(start_char, end_char, kind)` spans, sorted by start, non-overlapping, character indices. Two languages: Lua and JSON.
+**UI-R-037** — Syntax highlighting is pure text-to-span computation: for a language and one line of source (plus a carry-over line state for multi-line constructs) it returns `(start_char, end_char, kind)` spans, sorted by start, non-overlapping, character indices. Three languages: Lua, JSON and Markdown.
 
 **UI-R-038** — The carry-over state lets multi-line constructs (Lua long strings and long comments) highlight correctly across lines when highlighted in order.
 
 **UI-R-039** — Highlight kinds are a fixed enumeration (keyword, identifier, number, string, comment, punctuation, JSON key, literal, object identifier, function identifier); the consumer maps kind to colors. Highlighting never mutates the source.
+
+**UI-R-120** — The Markdown language exposes, beside the span path of UI-R-037, a per-line block-model entry point: given one source line and a carried state it returns that line's block kind — paragraph, heading with level 1–6, unordered list item with nesting depth and marker character, ordered list item with nesting depth, task item with checked state, block quote with nesting depth, horizontal rule, fence delimiter with info string, or fence body — together with the inline spans of UI-R-122.
+
+**UI-R-121** — The block-model carried state of UI-R-120 records whether the parser is inside a fenced code block and that fence's info string; while inside a fence every line is classified as fence body regardless of its own content, until a matching closing fence delimiter line.
+
+**UI-R-122** — Inline parsing reports, over source character columns of one line, spans for `**bold**`, `*italic*`, `_italic_`, `` `code` ``, `~~strike~~`, `[text](url)` and `![alt](url)`, each distinguishing its marker columns (delimiters, brackets, URL) from its content columns, so a consumer can hide markers without recomputing positions.
+
+**UI-R-123** — A character preceded by a backslash is literal: the backslash is a marker column and the escaped character never opens or closes an inline construct.
+
+**UI-R-124** — Constructs the block model does not recognize — tables, raw HTML, footnotes, reference links, setext headings, autolinks — are reported as paragraph text with no inline spans over them.
 
 ## Tables, live updates & logging
 
