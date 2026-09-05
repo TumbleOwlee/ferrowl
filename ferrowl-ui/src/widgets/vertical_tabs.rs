@@ -41,9 +41,11 @@ impl<T: ToLabel + Clone> StatefulWidget for VerticalTabs<T> {
 
 /// Resolves row `row` (counted across the whole stacked tab list) to the
 /// owning tab's index and, if the row is a character row rather than a
-/// vertical padding row, the character it carries.
+/// vertical padding or gained row, the character it carries. `heights`
+/// holds each tab's rendered height, natural or stretched.
 fn resolve_row<T: ToLabel>(
     titles: &[T],
+    heights: &[usize],
     vertical: usize,
     row: usize,
 ) -> Option<(usize, Option<char>)> {
@@ -51,7 +53,7 @@ fn resolve_row<T: ToLabel>(
     for (idx, title) in titles.iter().enumerate() {
         let label = title.to_label();
         let chars_count = label.chars().count();
-        let height = 2 * vertical + chars_count;
+        let height = heights[idx];
         if row < start + height {
             let local = row - start;
             if local < vertical || local >= vertical + chars_count {
@@ -78,18 +80,40 @@ impl<T: ToLabel + Clone> StatefulWidget for &VerticalTabs<T> {
 
         let horizontal = self.padding.horizontal as usize;
         let vertical = self.padding.vertical as usize;
+        let h = area.height as usize;
+
+        let natural: Vec<usize> = state
+            .titles
+            .iter()
+            .map(|t| 2 * vertical + t.to_label().chars().count())
+            .collect();
+        let total: usize = natural.iter().sum();
+        let heights: Vec<usize> = if total < h {
+            let s = h - total;
+            let n = natural.len();
+            natural
+                .iter()
+                .enumerate()
+                .map(|(i, nat)| nat + s / n + usize::from(i < s % n))
+                .collect()
+        } else {
+            natural
+        };
+
+        if total < h && state.active < state.titles.len() {
+            state.offset = 0;
+        }
+
         let mut start = 0usize;
         let mut active_block = None;
-        for (idx, title) in state.titles.iter().enumerate() {
-            let height = 2 * vertical + title.to_label().chars().count();
+        for (idx, height) in heights.iter().enumerate() {
             if idx == state.active {
-                active_block = Some((start, height));
+                active_block = Some((start, *height));
             }
             start += height;
         }
         let total_rows = start;
 
-        let h = area.height as usize;
         if let Some((block_start, block_height)) = active_block {
             if block_start + block_height > state.offset + h {
                 state.offset = block_start + block_height - h;
@@ -101,7 +125,7 @@ impl<T: ToLabel + Clone> StatefulWidget for &VerticalTabs<T> {
 
         let end = (state.offset + h).min(total_rows);
         for row in state.offset..end {
-            let Some((tab_idx, ch)) = resolve_row(&state.titles, vertical, row) else {
+            let Some((tab_idx, ch)) = resolve_row(&state.titles, &heights, vertical, row) else {
                 continue;
             };
             let y = area.y + (row - state.offset) as u16;
@@ -520,5 +544,223 @@ mod tests {
         assert_eq!(b[(1, 0)].symbol(), " ");
         assert_eq!(b[(1, 1)].symbol(), "L");
         assert_eq!(b[(1, 2)].symbol(), "o");
+    }
+
+    /// UI-R-122 — spare rows below the tabs' natural height are divided
+    /// among the tabs so they together cover the whole area.
+    #[test]
+    fn ut_spare_rows_stretch_tabs_to_cover_area() {
+        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
+        let mut st = VerticalTabsState {
+            titles: titles(&["A", "B"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(1, 6);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 6), &mut b, &mut st);
+        let style = ScrollingTabsStyle::default();
+        for y in 0..6 {
+            assert!(
+                cell_has_style(&b[(0, y)], style.general)
+                    || cell_has_style(&b[(0, y)], style.selected)
+            );
+        }
+    }
+
+    /// UI-R-123, UI-R-116 — spare rows are divided evenly, remainder to the
+    /// topmost tabs, and a gained row of the active tab is styled selected.
+    #[test]
+    fn ut_spare_rows_divided_evenly_remainder_to_top() {
+        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
+        let mut st = VerticalTabsState {
+            titles: titles(&["A", "B", "C"]),
+            active: 1,
+            offset: 0,
+        };
+        let mut b = buffer(1, 8);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 8), &mut b, &mut st);
+        let style = ScrollingTabsStyle::default();
+        for y in 0..3 {
+            assert!(cell_has_style(&b[(0, y)], style.general));
+        }
+        for y in 3..6 {
+            assert!(cell_has_style(&b[(0, y)], style.selected));
+        }
+        for y in 6..8 {
+            assert!(cell_has_style(&b[(0, y)], style.general));
+        }
+    }
+
+    /// UI-R-124 — rows a tab gains are appended below its bottom padding,
+    /// leaving its character and padding rows in place.
+    #[test]
+    fn ut_stretch_rows_append_below_bottom_padding() {
+        let w = VerticalTabsBuilder::<String>::default()
+            .padding(Margin::new(0, 1))
+            .build()
+            .unwrap();
+        let mut st = VerticalTabsState {
+            titles: titles(&["A"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(1, 5);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 5), &mut b, &mut st);
+        let style = ScrollingTabsStyle::default();
+        assert_eq!(b[(0, 0)].symbol(), " ");
+        assert_eq!(b[(0, 1)].symbol(), "A");
+        assert_eq!(b[(0, 2)].symbol(), " ");
+        assert_eq!(b[(0, 3)].symbol(), " ");
+        assert_eq!(b[(0, 4)].symbol(), " ");
+        for y in 0..5 {
+            assert!(cell_has_style(&b[(0, y)], style.selected));
+        }
+    }
+
+    /// UI-R-125, UI-R-118 — no tab stretches once the natural height
+    /// already fills or exceeds the area; the scroll rules govern instead.
+    #[test]
+    fn ut_no_stretch_when_natural_height_fills_area() {
+        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
+
+        let mut st = VerticalTabsState {
+            titles: titles(&["Ab", "Cd"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(1, 4);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 4), &mut b, &mut st);
+        assert_eq!(b[(0, 0)].symbol(), "A");
+        assert_eq!(b[(0, 1)].symbol(), "b");
+        assert_eq!(b[(0, 2)].symbol(), "C");
+        assert_eq!(b[(0, 3)].symbol(), "d");
+
+        let mut st = VerticalTabsState {
+            titles: titles(&["Ab", "Cd"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(1, 3);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 3), &mut b, &mut st);
+        assert_eq!(b[(0, 0)].symbol(), "A");
+        assert_eq!(b[(0, 1)].symbol(), "b");
+        assert_eq!(b[(0, 2)].symbol(), "C");
+
+        let mut st = VerticalTabsState {
+            titles: titles(&["Abc", "Def"]),
+            active: 1,
+            offset: 3,
+        };
+        let mut b = buffer(1, 6);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 6), &mut b, &mut st);
+        assert_eq!(st.offset, 3);
+        assert_eq!(b[(0, 0)].symbol(), "D");
+        assert_eq!(b[(0, 1)].symbol(), "e");
+        assert_eq!(b[(0, 2)].symbol(), "f");
+        for y in 3..6 {
+            assert_eq!(b[(0, y)].symbol(), " ");
+            assert!(cell_has_style(&b[(0, y)], ratatui::style::Style::default()));
+        }
+    }
+
+    /// UI-E-071, UI-R-116 — a single tab with spare height takes every
+    /// gained row and covers the whole area.
+    #[test]
+    fn ut_single_tab_covers_whole_area() {
+        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
+        let mut st = VerticalTabsState {
+            titles: titles(&["A"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(1, 5);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 5), &mut b, &mut st);
+        let style = ScrollingTabsStyle::default();
+        for y in 0..5 {
+            assert!(cell_has_style(&b[(0, y)], style.selected));
+        }
+    }
+
+    /// UI-E-072, UI-R-123 — with fewer spare rows than tabs, the topmost
+    /// tabs gain one row each and the area is still covered.
+    #[test]
+    fn ut_fewer_spare_rows_than_tabs() {
+        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
+        let mut st = VerticalTabsState {
+            titles: titles(&["A", "B", "C"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(1, 5);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 5), &mut b, &mut st);
+        let style = ScrollingTabsStyle::default();
+        for y in 0..2 {
+            assert!(cell_has_style(&b[(0, y)], style.selected));
+        }
+        for y in 2..5 {
+            assert!(cell_has_style(&b[(0, y)], style.general));
+        }
+    }
+
+    /// UI-E-066 — an out-of-range active leaves the offset untouched even
+    /// while the stretch path applies, and selects no cell.
+    #[test]
+    fn ut_out_of_range_active_keeps_offset_when_stretching() {
+        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
+        let mut st = VerticalTabsState {
+            titles: titles(&["Abc", "Def"]),
+            active: 9,
+            offset: 2,
+        };
+        let mut b = buffer(1, 10);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 10), &mut b, &mut st);
+        assert_eq!(st.offset, 2);
+        let style = ScrollingTabsStyle::default();
+        for y in 0..8 {
+            assert!(!cell_has_style(&b[(0, y)], style.selected));
+        }
+    }
+
+    /// UI-E-073 — an empty title with zero vertical padding still takes
+    /// part in the spare-row division and so becomes visible.
+    #[test]
+    fn ut_zero_height_tab_becomes_visible_via_stretch() {
+        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
+        let mut st = VerticalTabsState {
+            titles: titles(&["", "A"]),
+            active: 0,
+            offset: 0,
+        };
+        let mut b = buffer(1, 4);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 4), &mut b, &mut st);
+        let style = ScrollingTabsStyle::default();
+        assert!(cell_has_style(&b[(0, 0)], style.selected));
+        assert!(cell_has_style(&b[(0, 1)], style.selected));
+    }
+
+    /// UI-R-122 — a scroll offset retained from a smaller area is cleared
+    /// once a later render finds spare height to stretch into.
+    #[test]
+    fn ut_stretch_clears_a_retained_offset() {
+        let w = VerticalTabsBuilder::<String>::default().build().unwrap();
+        let mut st = VerticalTabsState {
+            titles: titles(&["Abc", "Def"]),
+            active: 1,
+            offset: 0,
+        };
+        let mut small = buffer(1, 2);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 2), &mut small, &mut st);
+        assert_eq!(st.offset, 3);
+
+        let mut big = buffer(1, 10);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 10), &mut big, &mut st);
+        assert_eq!(st.offset, 0);
+        let style = ScrollingTabsStyle::default();
+        for y in 0..10 {
+            assert!(
+                cell_has_style(&big[(0, y)], style.general)
+                    || cell_has_style(&big[(0, y)], style.selected)
+            );
+        }
     }
 }

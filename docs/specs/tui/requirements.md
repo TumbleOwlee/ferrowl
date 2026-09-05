@@ -220,7 +220,7 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-115** — A tab's title in the vertical tab line (UI-R-114) is written one character per row, top to bottom in title order, so an n-character title occupies n consecutive character rows.
 
-**UI-R-116** — The vertical tab line (UI-R-114) renders every cell belonging to the active tab — its character rows and its padding rows and columns (UI-R-120, UI-R-121) alike — in the active style, and every cell of every other tab in the inactive style, using the same styles as the horizontal tab bar (UI-R-002).
+**UI-R-116** — The vertical tab line (UI-R-114) renders every cell belonging to the active tab — its character rows, its padding rows and columns (UI-R-120, UI-R-121) and the rows it gains from filling the height (UI-R-122) alike — in the active style, and every cell of every other tab in the inactive style, using the same styles as the horizontal tab bar (UI-R-002).
 
 **UI-R-117** — When the tabs of the vertical tab line (UI-R-114) need more rows than the area has, it scrolls vertically so the active tab's block of rows stays visible — the vertical counterpart of the horizontal tab-bar overflow scroll (UI-R-046).
 
@@ -231,6 +231,14 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 **UI-R-120** — The vertical tab line (UI-R-114) takes a padding of a horizontal count H and a vertical count V, both default 0, and renders V blank rows above and V blank rows below every tab's character rows (UI-R-115).
 
 **UI-R-121** — The horizontal padding count H of the vertical tab line (UI-R-120) renders H blank columns to the left and H to the right of the character column, so the widget's rendered width is `1 + 2H` columns and is never fixed at one; with H = 1, V = 1 and title `Tab` the widget renders the rows `"   "`, `" T "`, `" a "`, `" b "`, `"   "` from top to bottom.
+
+**UI-R-122** — When the displayed tabs' natural height — character rows plus padding rows (UI-R-115, UI-R-120) — is less than the height of the area, the vertical tab line (UI-R-114) divides the spare rows among those tabs so that the tabs together cover every row of the area.
+
+**UI-R-123** — The spare rows of UI-R-122 are divided evenly: with `s` spare rows over `n` displayed tabs every tab gains `s / n` rows and the first `s % n` tabs, counted from the top, gain one row more.
+
+**UI-R-124** — The rows a tab gains under UI-R-122 are appended below that tab's bottom padding rows, leaving its character rows and its padding rows in place.
+
+**UI-R-125** — The vertical tab line (UI-R-114) stretches no tab when the tabs' natural height is at least the height of the area; the scroll offset (UI-R-117, UI-R-118) governs that case instead.
 
 ## Modbus monitor view
 

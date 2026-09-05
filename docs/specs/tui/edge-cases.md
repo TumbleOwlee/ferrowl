@@ -89,6 +89,9 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-068** | Vertical tab line title character that is double-width (CJK, emoji) | drawn as-is into the one-column character column and clipped there; no substitution or fallback glyph. Intentional |
 | **UI-E-069** | Vertical tab line drawn into an area narrower than its rendered width (UI-R-121) | the rendered columns are clipped at the right edge of the area; no reflow, no padding reduction, never panics |
 | **UI-E-070** | Vertical tab line active tab whose block is taller than the area (UI-R-118) | the scroll offset places the block's first row at the top edge; the rest of the block is clipped |
+| **UI-E-071** | Vertical tab line holding a single tab with spare height (UI-R-122) | that one tab takes every spare row and covers the whole area |
+| **UI-E-072** | Vertical tab line with fewer spare rows than tabs (UI-R-123) | the topmost `s` tabs gain one row each and the rest gain none; the area is still covered to its last row |
+| **UI-E-073** | Vertical tab line empty title with vertical padding 0 (UI-E-067) while there is spare height | takes part in the division (UI-R-123) like any other tab, so a tab of zero natural height becomes visible as its share of spare rows |
 
 ## Known limitations and stated constraints
 
