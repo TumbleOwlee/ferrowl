@@ -100,21 +100,22 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-047** | Very small terminal | no app-level minimum-size guard; content area squeezed, content clips. Popups skip drawing when their area is zero-sized |
 | **UI-E-048** | Log line longer than the per-line cap | truncated before storage |
 | **UI-E-049** | Table cell wider than the column | reachable via horizontal scroll tied to the selected column |
-| **UI-E-050** | Tabs overflow the bar width | tab bar scrolls horizontally to keep the active tab visible |
+| **UI-E-050** | Tabs overflow the tab bar's width | the bar scrolls horizontally per the tab widget's centering scroll (UI-R-117, UI-R-118), keeping the active tab visible |
 | **UI-E-051** | No input for one redraw interval (~100 ms) | UI redraws anyway |
-| **UI-E-063** | Vertical tab line drawn into an area of zero width or zero height | skips drawing; scroll offset unchanged (UI-E-047) |
-| **UI-E-064** | Vertical tab line drawn into an area wider than its rendered width (UI-R-121) | draws into the leftmost `1 + 2H` columns only; the remaining columns are left untouched |
-| **UI-E-065** | Vertical tab line with an empty tab list | nothing drawn; scroll offset reset to zero |
-| **UI-E-066** | Vertical tab line active index out of range (UI-R-119) | no cell takes the active style; scroll offset unchanged; never panics |
-| **UI-E-067** | Vertical tab line title that is the empty string (UI-R-115) | occupies no character rows, only its 2V padding rows (UI-R-120), which still take the active style when it is the active tab; with vertical padding 0 the tab occupies no rows at all and is invisible |
-| **UI-E-068** | Vertical tab line title character that is double-width (CJK, emoji) | drawn as-is into the one-column character column and clipped there; no substitution or fallback glyph. Intentional |
-| **UI-E-069** | Vertical tab line drawn into an area narrower than its rendered width (UI-R-121) | the rendered columns are clipped at the right edge of the area; no reflow, no padding reduction, never panics |
-| **UI-E-070** | Vertical tab line active tab whose block is taller than the area (UI-R-118) | the scroll offset places the block's first row at the top edge; the rest of the block is clipped |
-| **UI-E-071** | Vertical tab line holding a single tab with spare height (UI-R-122) | that one tab takes every spare row and covers the whole area |
-| **UI-E-072** | Vertical tab line with fewer spare rows than tabs (UI-R-123) | the topmost `s` tabs gain one row each and the rest gain none; the area is still covered to its last row |
-| **UI-E-073** | Vertical tab line empty title with vertical padding 0 (UI-E-067) while there is spare height | takes part in the division (UI-R-123) like any other tab, so a tab of zero natural height becomes visible as its share of spare rows |
-| **UI-E-074** | Vertical tab line tab gaining exactly one row under `Center` (UI-R-127) | the gained row goes below the tab's bottom padding row; the title sits one row above centre |
-| **UI-E-075** | Vertical tab line tab that gains no rows (UI-R-123) while others do | its own render is identical under all three alignments; only the stretched tabs move |
+| **UI-E-063** | Tab widget drawn into an area of zero width or zero height | skips drawing; because no window is computed the recorded scroll offset (UI-R-175) keeps the value the previous render left, rather than being recomputed (UI-E-047) |
+| **UI-E-064** | Tab widget drawn into an area larger across its layout direction than its rendered extent (UI-R-121) | draws into the first `1 + 2c` lines from the near edge only — leftmost columns under `Vertical`, topmost rows under `Horizontal` — and leaves the rest untouched |
+| **UI-E-065** | Tab widget with an empty tab list | nothing drawn; scroll offset reset to zero |
+| **UI-E-066** | Tab widget active index out of range (UI-R-119) | no cell takes the active style; with no in-range active block to centre on, no new window is computed and the recorded scroll offset (UI-R-175) keeps the value the previous render left; never panics |
+| **UI-E-067** | Tab widget title that is the empty string (UI-R-115, UI-R-174) | occupies no character cells, only its twice-the-along-direction-padding cells (UI-R-120), which still take the active style when it is the active tab; with that padding count 0 the tab occupies no cells at all and is invisible |
+| **UI-E-068** | Tab widget under `Vertical` layout with a double-width title character (CJK, emoji) | drawn as-is into the one-column character column and clipped there; no substitution or fallback glyph. Intentional |
+| **UI-E-069** | Tab widget drawn into an area smaller across its layout direction than its rendered extent (UI-R-121) | the rendered lines are clipped at the far edge of the area; no reflow, no padding reduction, never panics |
+| **UI-E-070** | Tab widget active tab whose block is longer along the layout direction than the area (UI-R-118) | there is no leftover extent to centre in, so the computed window starts at the block's first cell, placing it at the near edge; the rest of the block is clipped |
+| **UI-E-071** | Tab widget holding a single tab with spare extent (UI-R-122) | that one tab takes every spare cell and covers the whole area |
+| **UI-E-072** | Tab widget with fewer spare cells than tabs (UI-R-123) | the first `s` tabs from the start of the layout direction gain one cell each and the rest gain none; the area is still covered to its last cell |
+| **UI-E-073** | Tab widget empty title with along-direction padding 0 (UI-E-067) while there is spare extent | takes part in the division (UI-R-123) like any other tab, so a tab of zero natural extent becomes visible as its share of spare cells |
+| **UI-E-074** | Tab widget tab gaining exactly one cell under `Center` (UI-R-127) | the gained cell goes after the tab's trailing padding cell; the title sits one cell before centre |
+| **UI-E-075** | Tab widget tab that gains no cells (UI-R-123) while others do | its own render is identical under all three alignments; only the stretched tabs move |
+| **UI-E-084** | Tab widget under `Horizontal` layout with a double-width title character (CJK, emoji) | counted as one cell when extents are computed (UI-R-174, UI-R-122) and drawn as-is, so the drawn tab covers more terminal cells than its computed extent and the fill is off by one cell per such character; no substitution or fallback glyph. Intentional |
 
 ## Known limitations and stated constraints
 
