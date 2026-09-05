@@ -8,10 +8,6 @@ use crate::style::{MarkdownTheme, SyntaxTheme};
 
 /// One source line rendered to display cells, before wrapping.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(
-    dead_code,
-    reason = "the markdown input field widget renders through it"
-)]
 pub(crate) struct RenderedLine {
     /// Styled runs of the rendered text, markers already hidden.
     pub spans: Vec<(String, Style)>,
@@ -25,10 +21,6 @@ pub(crate) struct RenderedLine {
 
 /// Renders one classified source line. `carry` is the syntax-highlighter state threaded
 /// through a `lua`/`json` fence body (UI-R-151); it is returned updated.
-#[allow(
-    dead_code,
-    reason = "the markdown input field widget renders through it"
-)]
 pub(crate) fn render_line(
     block: &BlockLine,
     source: &str,
@@ -309,10 +301,6 @@ fn inline_render(
 /// Wraps one rendered line to `width` display columns, returning its display rows
 /// (never empty: a blank line is one empty row). Wrapping is always on and content never
 /// overflows horizontally (UI-R-130).
-#[allow(
-    dead_code,
-    reason = "the markdown input field widget renders through it"
-)]
 pub(crate) fn wrap_line(line: &RenderedLine, width: usize) -> Vec<Vec<(String, Style)>> {
     if width == 0 {
         return vec![Vec::new()];

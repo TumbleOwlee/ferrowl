@@ -78,8 +78,18 @@ impl MarkdownInputFieldState {
         self.inner.disabled()
     }
 
+    /// Enabling read-only forces the inner editor back to `Normal` (UI-R-155): the wrapper's
+    /// read-only filter only ever inspects the current key, not the mode, so an editor left
+    /// in `Insert`/`Visual` would keep inserting/selecting right past it.
     pub fn set_read_only(&mut self, read_only: bool) {
         self.inner.set_disabled(read_only);
+        if read_only {
+            if self.inner.vim_mode() != VimMode::Normal {
+                self.inner.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+            }
+            self.pending_count = None;
+            self.pending_g = false;
+        }
     }
 
     pub fn vim_mode(&self) -> VimMode {
@@ -108,10 +118,6 @@ impl MarkdownInputFieldState {
 
     /// Hands the widget's last-rendered layout to the state so navigation can address
     /// display rows (UI-R-135, UI-R-136, UI-R-137).
-    #[allow(
-        dead_code,
-        reason = "the markdown input field widget renders through it"
-    )]
     pub(crate) fn sync_layout(&mut self, rows_per_line: Vec<usize>, visible_rows: usize) {
         self.rows_per_line = rows_per_line;
         self.visible_rows = visible_rows;
@@ -127,12 +133,16 @@ impl MarkdownInputFieldState {
         self.clamp_scroll();
     }
 
+    /// Sets the cursor's display row within the active source line, computed by the widget
+    /// from the wrapped styled-source layout (UI-R-137: a viewport following the cursor as
+    /// it types past a wrap needs this, since `gj`/`gk` are the only other writer of
+    /// `line_row` and neither fires while typing).
+    pub(crate) fn sync_cursor_row(&mut self, row: usize) {
+        self.line_row = row;
+    }
+
     /// Sum of `rows_per_line[..active_line]` plus the cursor's row inside its own line, `0`
     /// when the layout cache is empty.
-    #[allow(
-        dead_code,
-        reason = "the markdown input field widget renders through it"
-    )]
     pub(crate) fn cursor_display_row(&self) -> usize {
         if self.rows_per_line.is_empty() {
             return 0;
@@ -213,6 +223,22 @@ impl IsFocus for MarkdownInputFieldState {
 
 impl HandleEvents for MarkdownInputFieldState {
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
+        // UI-R-125: Insert mode is the composed editor's, unmodified — every key (digits,
+        // `g`, `j`/`k`, `d`, `y`, `G`, Ctrl+D/Ctrl+U, everything) goes straight to it before
+        // any of this wrapper's Normal-mode count/prefix/read-only logic runs, so nothing
+        // the wrapper intercepts elsewhere can be swallowed here instead of typed. No
+        // pending chord survives Insert mode, whichever key is entering or leaving it.
+        if self.inner.vim_mode() == VimMode::Insert {
+            self.pending_count = None;
+            self.pending_g = false;
+            self.pending_yank_count = None;
+            self.pending_delete_count = None;
+            let result = self.inner.handle_events(modifiers, code);
+            self.line_row = 0;
+            self.clamp_scroll();
+            return result;
+        }
+
         if modifiers == KeyModifiers::NONE {
             if let KeyCode::Char(c @ '1'..='9') = code {
                 let digit = c as usize - '0' as usize;
@@ -633,6 +659,62 @@ mod tests {
             1,
             "3j after a canceled g should move 3 source lines, landing on the last one"
         );
+    }
+
+    #[test]
+    /// UI-R-125 — Insert mode is the composed editor's, unmodified: `g` is not a
+    /// pending-chord prefix there, so `g` then a letter inserts both characters.
+    fn ut_g_is_typed_verbatim_in_insert_mode() {
+        let mut s = state_with("");
+        key(&mut s, 'i');
+        key(&mut s, 'g');
+        key(&mut s, 'x');
+        s.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert_eq!(s.content(), "gx");
+    }
+
+    #[test]
+    /// UI-R-125 — Insert mode forwards every key the wrapper intercepts elsewhere (a digit,
+    /// `g`, `j`, `d`, `y`, `G`, Ctrl+D/Ctrl+U) straight to the composed editor unchanged:
+    /// the printable ones type verbatim and the mode never leaves Insert.
+    fn ut_insert_mode_forwards_every_wrapper_intercepted_key_verbatim() {
+        let mut s = state_with("");
+        key(&mut s, 'i');
+        for c in ['1', 'g', 'j', 'd', 'y', 'G'] {
+            key(&mut s, c);
+        }
+        s.handle_events(KeyModifiers::CONTROL, KeyCode::Char('d'));
+        s.handle_events(KeyModifiers::CONTROL, KeyCode::Char('u'));
+        assert_eq!(s.vim_mode(), VimMode::Insert);
+        assert_eq!(s.content(), "1gjdyG");
+    }
+
+    #[test]
+    /// UI-R-155 — enabling read-only while Insert mode is active forces the editor back to
+    /// `Normal` immediately, so the read-only filter is never bypassed by a mode it can't see.
+    fn ut_enabling_read_only_forces_insert_mode_back_to_normal() {
+        let mut s = state_with("one");
+        key(&mut s, 'i');
+        assert_eq!(s.vim_mode(), VimMode::Insert);
+        s.set_read_only(true);
+        assert_eq!(s.vim_mode(), VimMode::Normal);
+        let result = key(&mut s, 'x');
+        assert!(matches!(result, EventResult::Unhandled(_, _)));
+        assert_eq!(s.content(), "one");
+        assert_eq!(s.vim_mode(), VimMode::Normal);
+    }
+
+    #[test]
+    /// UI-R-137 — the viewport follows the cursor's own wrapped row within the active line
+    /// (set by the widget via `sync_cursor_row`), not just whole source lines, so typing
+    /// past a wrap keeps the cursor visible.
+    fn ut_sync_cursor_row_feeds_the_viewport_clamp() {
+        let mut s = state_with("a");
+        s.sync_layout(vec![5], 3);
+        s.sync_cursor_row(4);
+        s.sync_layout(vec![5], 3);
+        assert_eq!(s.cursor_display_row(), 4);
+        assert!(s.row_scroll() <= 4 && s.row_scroll() + 3 > 4);
     }
 
     #[test]
