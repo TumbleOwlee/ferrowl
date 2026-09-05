@@ -175,7 +175,7 @@ impl<T: ToLabel + Clone> StatefulWidget for &TabBar<T> {
             })
             .collect();
 
-        if total < h && state.active < state.titles.len() {
+        if total <= h && state.active < state.titles.len() {
             state.offset = 0;
         }
 
@@ -189,16 +189,19 @@ impl<T: ToLabel + Clone> StatefulWidget for &TabBar<T> {
         }
         let total_slots = start;
 
-        if let Some((block_start, block_height)) = active_block {
-            if block_start + block_height > state.offset + h {
-                state.offset = block_start + block_height - h;
-            }
-            if state.offset > block_start {
-                state.offset = block_start;
-            }
+        let mut end = (state.offset + h).min(total_slots);
+        if total > h
+            && let Some((block_start, block_height)) = active_block
+        {
+            let leftover = h.saturating_sub(block_height);
+            let near_ideal = leftover / 2;
+            let far_ideal = leftover - near_ideal;
+            let far_available = total_slots - block_start - block_height;
+            let near = near_ideal.min(block_start);
+            let far = far_ideal.min(far_available);
+            state.offset = block_start - near;
+            end = (block_start + block_height + far).min(state.offset + h);
         }
-
-        let end = (state.offset + h).min(total_slots);
         for slot in state.offset..end {
             let (tab_idx, ch) = resolve_slot(&labels, &heights, &leads, along_padding, slot)
                 .expect("slot is bounded by total_slots, the same sum resolve_slot walks");
@@ -439,30 +442,150 @@ mod tests {
         assert_eq!(b[(0, 2)].symbol(), "o");
     }
 
-    /// UI-R-118 — offset moves the minimum distance, unchanged when the whole
-    /// block is already visible.
+    /// UI-R-114, UI-R-174, UI-R-117 — fewer columns than the tabs' total
+    /// width scrolls to keep the active tab's block visible under
+    /// `Horizontal` layout too.
     #[test]
-    fn ut_scroll_offset_is_minimal() {
+    fn ut_horizontal_scrolls_to_keep_active_visible() {
+        let w = TabBarBuilder::<String>::default().build().unwrap();
+        let mut st = TabBarState {
+            titles: titles(&["Tab", "Two"]),
+            active: 1,
+            offset: 0,
+        };
+        let mut b = buffer(3, 1);
+        StatefulWidget::render(&w, Rect::new(0, 0, 3, 1), &mut b, &mut st);
+        assert_eq!(st.offset, 3);
+        assert_eq!(b[(0, 0)].symbol(), "T");
+        assert_eq!(b[(1, 0)].symbol(), "w");
+        assert_eq!(b[(2, 0)].symbol(), "o");
+    }
+
+    /// UI-R-118 — the active block is centred: with leftover `l` cells the
+    /// block sits `l / 2` cells from the near edge, in both directions.
+    #[test]
+    fn ut_scroll_centres_the_active_block() {
         let w = TabBarBuilder::<String>::default()
             .direction(Direction::Vertical)
             .build()
             .unwrap();
         let mut st = TabBarState {
-            titles: titles(&["Tab", "Two"]),
-            active: 1,
-            offset: 3,
+            titles: titles(&["A", "B", "C", "D", "E"]),
+            active: 2,
+            offset: 0,
         };
         let mut b = buffer(1, 3);
         StatefulWidget::render(&w, Rect::new(0, 0, 1, 3), &mut b, &mut st);
-        assert_eq!(st.offset, 3);
+        assert_eq!(st.offset, 1);
+        assert_eq!(b[(0, 0)].symbol(), "B");
+        assert_eq!(b[(0, 1)].symbol(), "C");
+        assert_eq!(b[(0, 2)].symbol(), "D");
 
-        st.active = 0;
-        StatefulWidget::render(&w, Rect::new(0, 0, 1, 3), &mut b, &mut st);
-        assert_eq!(st.offset, 0);
+        let w = TabBarBuilder::<String>::default().build().unwrap();
+        let mut st = TabBarState {
+            titles: titles(&["A", "B", "C", "D", "E"]),
+            active: 2,
+            offset: 0,
+        };
+        let mut b = buffer(3, 1);
+        StatefulWidget::render(&w, Rect::new(0, 0, 3, 1), &mut b, &mut st);
+        assert_eq!(st.offset, 1);
+        assert_eq!(b[(0, 0)].symbol(), "B");
+        assert_eq!(b[(1, 0)].symbol(), "C");
+        assert_eq!(b[(2, 0)].symbol(), "D");
     }
 
-    /// UI-R-118, UI-R-119 — widget writes no field but the offset, moved the
-    /// minimal distance.
+    /// UI-R-118 — an active block flush against the start of the list gets
+    /// no cells before it, no underflow, even though the ideal half of the
+    /// leftover would ask for more; the cells the near side could not use
+    /// are never handed to the far side, so the window stays short and the
+    /// far edge of the area is left blank rather than showing an extra cell.
+    #[test]
+    fn ut_scroll_does_not_roll_leftover_over_to_the_far_side() {
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
+            titles: titles(&["A", "B", "C", "D", "E"]),
+            active: 0,
+            offset: 5,
+        };
+        let mut b = buffer(1, 3);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 3), &mut b, &mut st);
+        assert_eq!(st.offset, 0);
+        assert_eq!(b[(0, 0)].symbol(), "A");
+        assert_eq!(b[(0, 1)].symbol(), "B");
+        assert_eq!(b[(0, 2)].symbol(), " ");
+        assert!(cell_has_style(&b[(0, 2)], ratatui::style::Style::default()));
+    }
+
+    /// UI-R-118, UI-R-117 — an active block near the far end still opens its
+    /// window `leftover / 2` cells before it; when that runs the window past
+    /// the last tab the trailing area cells stay untouched rather than the
+    /// window being pulled back to consume them.
+    #[test]
+    fn ut_scroll_at_the_far_end_leaves_trailing_cells_blank() {
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
+            titles: titles(&["A", "B", "C", "D", "E"]),
+            active: 3,
+            offset: 0,
+        };
+        let mut b = buffer(1, 4);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 4), &mut b, &mut st);
+        assert_eq!(st.offset, 2);
+        assert_eq!(b[(0, 0)].symbol(), "C");
+        assert_eq!(b[(0, 1)].symbol(), "D");
+        assert_eq!(b[(0, 2)].symbol(), "E");
+        assert_eq!(b[(0, 3)].symbol(), " ");
+        assert!(cell_has_style(&b[(0, 3)], ratatui::style::Style::default()));
+    }
+
+    /// UI-R-117, UI-R-122, UI-R-125 — tabs that already fit the area are
+    /// stretched to cover it and never scroll, clearing any retained offset.
+    #[test]
+    fn ut_no_scroll_while_the_tabs_fit() {
+        let w = TabBarBuilder::<String>::default().build().unwrap();
+        let mut st = TabBarState {
+            titles: titles(&["Abc", "Def"]),
+            active: 1,
+            offset: 99,
+        };
+        let mut b = buffer(10, 1);
+        StatefulWidget::render(&w, Rect::new(0, 0, 10, 1), &mut b, &mut st);
+        assert_eq!(st.offset, 0);
+        let style = TabBarStyle::default();
+        for x in 0..10 {
+            assert!(
+                cell_has_style(&b[(x, 0)], style.general)
+                    || cell_has_style(&b[(x, 0)], style.selected)
+            );
+        }
+    }
+
+    /// UI-R-175 — the stored offset is an output of the render, overwritten
+    /// every time regardless of what the caller set it to beforehand.
+    #[test]
+    fn ut_offset_is_recomputed_every_render() {
+        let w = TabBarBuilder::<String>::default()
+            .direction(Direction::Vertical)
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
+            titles: titles(&["A", "B", "C", "D", "E"]),
+            active: 2,
+            offset: 99,
+        };
+        let mut b = buffer(1, 3);
+        StatefulWidget::render(&w, Rect::new(0, 0, 1, 3), &mut b, &mut st);
+        assert_eq!(st.offset, 1);
+    }
+
+    /// UI-R-119 — the render writes no field but the offset.
     #[test]
     fn ut_render_leaves_titles_and_active_untouched() {
         let w = TabBarBuilder::<String>::default()
@@ -482,7 +605,7 @@ mod tests {
         assert_eq!(st.offset, 19);
     }
 
-    /// UI-E-063 — zero-sized area skips drawing, offset unchanged.
+    /// UI-E-063, UI-R-175 — zero-sized area skips drawing, offset unchanged.
     #[test]
     fn ut_zero_sized_area_skips_drawing() {
         let w = TabBarBuilder::<String>::default()
@@ -572,7 +695,7 @@ mod tests {
         assert_eq!(st.offset, 0);
     }
 
-    /// UI-E-066 — active out of range: no cell selected, offset unchanged, no panic.
+    /// UI-E-066, UI-R-175 — active out of range: no cell selected, offset unchanged, no panic.
     #[test]
     fn ut_active_out_of_range_is_inert() {
         let w = TabBarBuilder::<String>::default()
@@ -648,10 +771,11 @@ mod tests {
         assert_eq!(b[(0, 1)].symbol(), "本");
     }
 
-    /// UI-E-070 — an active block taller than the area places its first row
-    /// at the top edge; the rest of the block is clipped.
+    /// UI-E-070 — an active block longer than the area places its first
+    /// cell at the near edge; the rest of the block is clipped. Holds in
+    /// both layout directions.
     #[test]
-    fn ut_block_taller_than_area_starts_at_top() {
+    fn ut_block_longer_than_area_starts_at_near_edge() {
         let w = TabBarBuilder::<String>::default()
             .direction(Direction::Vertical)
             .padding(Margin::new(1, 1))
@@ -668,6 +792,22 @@ mod tests {
         assert_eq!(b[(1, 0)].symbol(), " ");
         assert_eq!(b[(1, 1)].symbol(), "L");
         assert_eq!(b[(1, 2)].symbol(), "o");
+
+        let w = TabBarBuilder::<String>::default()
+            .padding(Margin::new(1, 1))
+            .build()
+            .unwrap();
+        let mut st = TabBarState {
+            titles: titles(&["Ab", "Longtitle"]),
+            active: 1,
+            offset: 0,
+        };
+        let mut b = buffer(3, 3);
+        StatefulWidget::render(&w, Rect::new(0, 0, 3, 3), &mut b, &mut st);
+        assert_eq!(st.offset, 4);
+        assert_eq!(b[(0, 1)].symbol(), " ");
+        assert_eq!(b[(1, 1)].symbol(), "L");
+        assert_eq!(b[(2, 1)].symbol(), "o");
     }
 
     /// UI-R-122 — spare rows below the tabs' natural height are divided
@@ -749,8 +889,10 @@ mod tests {
         }
     }
 
-    /// UI-R-125, UI-R-118 — no tab stretches once the natural height
-    /// already fills or exceeds the area; the scroll rules govern instead.
+    /// UI-R-125, UI-R-118, UI-R-117 — no tab stretches once the natural
+    /// height already fills or exceeds the area; the scroll rules govern
+    /// instead, and an exact fit clears any retained offset without
+    /// scrolling.
     #[test]
     fn ut_no_stretch_when_natural_height_fills_area() {
         let w = TabBarBuilder::<String>::default()
@@ -788,14 +930,16 @@ mod tests {
         };
         let mut b = buffer(1, 6);
         StatefulWidget::render(&w, Rect::new(0, 0, 1, 6), &mut b, &mut st);
-        assert_eq!(st.offset, 3);
-        assert_eq!(b[(0, 0)].symbol(), "D");
-        assert_eq!(b[(0, 1)].symbol(), "e");
-        assert_eq!(b[(0, 2)].symbol(), "f");
-        for y in 3..6 {
-            assert_eq!(b[(0, y)].symbol(), " ");
-            assert!(cell_has_style(&b[(0, y)], ratatui::style::Style::default()));
-        }
+        // Natural height exactly fills the area: no stretch, but also no
+        // overflow, so the retained offset is cleared and the whole list is
+        // visible rather than a stale window leaving rows blank.
+        assert_eq!(st.offset, 0);
+        assert_eq!(b[(0, 0)].symbol(), "A");
+        assert_eq!(b[(0, 1)].symbol(), "b");
+        assert_eq!(b[(0, 2)].symbol(), "c");
+        assert_eq!(b[(0, 3)].symbol(), "D");
+        assert_eq!(b[(0, 4)].symbol(), "e");
+        assert_eq!(b[(0, 5)].symbol(), "f");
     }
 
     /// UI-E-071, UI-R-116 — a single tab with spare height takes every
@@ -843,8 +987,8 @@ mod tests {
         }
     }
 
-    /// UI-E-066 — an out-of-range active leaves the offset untouched even
-    /// while the stretch path applies, and selects no cell.
+    /// UI-E-066, UI-R-175 — an out-of-range active leaves the offset untouched
+    /// even while the stretch path applies, and selects no cell.
     #[test]
     fn ut_out_of_range_active_keeps_offset_when_stretching() {
         let w = TabBarBuilder::<String>::default()
@@ -885,8 +1029,8 @@ mod tests {
         assert!(cell_has_style(&b[(0, 1)], style.selected));
     }
 
-    /// UI-R-122 — a scroll offset retained from a smaller area is cleared
-    /// once a later render finds spare height to stretch into.
+    /// UI-R-117, UI-R-122 — a scroll offset retained from a smaller area is
+    /// cleared once a later render finds spare height to stretch into.
     #[test]
     fn ut_stretch_clears_a_retained_offset() {
         let w = TabBarBuilder::<String>::default()
@@ -1191,8 +1335,8 @@ mod tests {
         assert_eq!(vertical.rendered_extent(), 1 + 2 * 2);
     }
 
-    /// UI-R-116 — every cell of the active tab, padding and gained cells
-    /// included, carries the selected style under `Horizontal` layout too.
+    /// UI-R-116 — every cell of the active tab, its padding cells included,
+    /// carries the selected style under `Horizontal` layout too.
     #[test]
     fn ut_horizontal_active_tab_cells_use_selected_style() {
         let w = TabBarBuilder::<String>::default()

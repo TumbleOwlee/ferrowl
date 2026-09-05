@@ -366,8 +366,8 @@ fn scrolling_tabs_render_variants() {
 
 #[test]
 /// UI-R-114, UI-R-115, UI-R-116, UI-R-120, UI-R-121 — padded title rows
-/// written one character per row, and active-block style matching the
-/// horizontal tab bar's selected style.
+/// written one character per row, and active-block style applying in
+/// either layout direction.
 fn it_vertical_tabs_render_variants() {
     let w = TabBarBuilder::<String>::default()
         .padding(Margin::new(1, 1))
