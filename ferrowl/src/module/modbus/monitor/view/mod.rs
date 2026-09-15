@@ -27,7 +27,7 @@ use crate::config::{ModuleSpec, MonitorDeviceConfig};
 use crate::module::modbus::dialog::parse_raw_value;
 use crate::module::view::{
     CommandDescriptor, CommandFuture, CommandResult, CommandSpec, ModuleView, RefreshFuture,
-    SharedLog, parse_command,
+    SharedLog, StopOutcome, parse_command,
 };
 
 use super::ModbusMonitorModule;
@@ -810,6 +810,9 @@ pub struct ModbusMonitorModuleView {
     /// has signalled `request_stop()` and is waiting for `refresh()` to observe `poll_stop()`
     /// complete before logging its outcome (and, for `Restart`/`Reload`, running the follow-up).
     pending_lifecycle: Option<PendingLifecycle>,
+    /// CL-R-057 — the settled outcome of the most recently completed `PendingLifecycle::Stop`,
+    /// consumed by [`ModuleView::take_stop_outcome`] rather than re-derived from the log.
+    last_stop_outcome: Option<StopOutcome>,
 }
 
 /// UI-R-314/UI-R-315 — the follow-up state a deferred stop-bearing lifecycle command needs once
@@ -846,6 +849,7 @@ impl ModbusMonitorModuleView {
             cached_messages_log: None,
             cached_messages_generation: 0,
             pending_lifecycle: None,
+            last_stop_outcome: None,
         }
     }
 
@@ -1305,6 +1309,10 @@ impl ModuleView for ModbusMonitorModuleView {
                             Err(e) => (Level::Error, format!("Stop monitor failed: {e}")),
                         };
                         self.log().write().await.write(level, &msg);
+                        self.last_stop_outcome = Some(match level {
+                            Level::Error => StopOutcome::Failed(msg),
+                            _ => StopOutcome::Clean,
+                        });
                     }
                     Some(PendingLifecycle::Restart) => {
                         let endpoint = self.spec.endpoint.to_string();
@@ -1472,6 +1480,7 @@ impl ModuleView for ModbusMonitorModuleView {
                 // defer, exactly as UI-R-314 asks.
                 let _ = self.module.request_stop().await;
                 self.pending_lifecycle = Some(PendingLifecycle::Stop);
+                self.last_stop_outcome = None;
                 CommandResult::Handled(None)
             }),
 
@@ -1594,6 +1603,10 @@ impl ModuleView for ModbusMonitorModuleView {
 
     fn lifecycle_pending(&self) -> bool {
         self.pending_lifecycle.is_some()
+    }
+
+    fn take_stop_outcome(&mut self) -> Option<StopOutcome> {
+        self.last_stop_outcome.take()
     }
 
     fn session_spec(&self) -> Option<serde_json::Value> {

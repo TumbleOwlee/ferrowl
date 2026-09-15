@@ -35,6 +35,7 @@ use crate::module::modbus::SerialPathRegistry;
 use crate::module::type_descriptor::{ModuleViewFactory, SetupView};
 use crate::module::view::{
     CommandDescriptor, CommandFuture, CommandResult, ModuleView, RefreshFuture, SharedLog,
+    StopOutcome,
 };
 
 /// A `DrawSurface` test double backed by ratatui's `TestBackend`, letting an `App` be built and
@@ -109,7 +110,7 @@ const MOCK_CMDS: &[CommandDescriptor] = &[CommandDescriptor {
 /// Handles a test keeps after moving a [`MockView`] into a `Tab`, to observe the calls `App` made
 /// to it. All fields are `Arc`-shared with the live view.
 #[derive(Clone)]
-pub(super) struct MockHandle {
+pub(crate) struct MockHandle {
     refreshes: Arc<AtomicUsize>,
     renders: Arc<AtomicUsize>,
     commands: Arc<Mutex<Vec<String>>>,
@@ -131,7 +132,7 @@ impl MockHandle {
     }
 
     /// Every command string `App` forwarded to this view, in order.
-    pub(super) fn commands(&self) -> Vec<String> {
+    pub(crate) fn commands(&self) -> Vec<String> {
         self.commands.lock().unwrap().clone()
     }
 
@@ -148,7 +149,7 @@ impl MockHandle {
 
 /// A `ModuleView` test double: renders nothing, records `refresh`/`handle_command`, and can be
 /// pre-loaded with a session spec, a one-shot replacement, and a module host.
-pub(super) struct MockView {
+pub(crate) struct MockView {
     name: String,
     log: SharedLog,
     focused: bool,
@@ -166,13 +167,21 @@ pub(super) struct MockView {
     /// deferred stop that never settles; otherwise the number of `refresh()` calls still needed
     /// before it clears.
     pending_stop: Arc<AtomicUsize>,
+    /// Mirrors a real view's deferred-lifecycle shape (`ferrowl-modbus`'s `refresh()`): written to
+    /// `log` only once `pending_stop` clears, never returned as `handle_command`'s immediate
+    /// result. May carry a line unrelated to the stop's own outcome (CL-R-057's negative case).
+    deferred_log: Arc<Mutex<Option<(Level, String)>>>,
+    /// The stop's own settled outcome, consumed by [`ModuleView::take_stop_outcome`] once
+    /// `pending_stop` clears. Independent of `deferred_log`: a real view may log an unrelated
+    /// line during the same settle window without that line being the stop's outcome.
+    deferred_outcome: Arc<Mutex<Option<StopOutcome>>>,
 }
 
 impl MockView {
     /// A view plus the handle to observe it. `name` is the module/tab identity. Not `new` because
     /// it returns the observation handle alongside the view, not `Self`; chain builder methods on
     /// the returned view and `.boxed()` it for [`build_app`].
-    pub(super) fn pair(name: &str) -> (MockView, MockHandle) {
+    pub(crate) fn pair(name: &str) -> (MockView, MockHandle) {
         let refreshes = Arc::new(AtomicUsize::new(0));
         let renders = Arc::new(AtomicUsize::new(0));
         let commands = Arc::new(Mutex::new(Vec::new()));
@@ -200,6 +209,8 @@ impl MockView {
             keys,
             command_result: None,
             pending_stop: Arc::new(AtomicUsize::new(0)),
+            deferred_log: Arc::new(Mutex::new(None)),
+            deferred_outcome: Arc::new(Mutex::new(None)),
         };
         (view, handle)
     }
@@ -208,6 +219,32 @@ impl MockView {
     /// `refresh()` calls.
     pub(super) fn with_pending_stop_settling_after(self, refreshes: usize) -> Self {
         self.pending_stop.store(refreshes.max(1), Ordering::Relaxed);
+        self
+    }
+
+    /// Make this view report a pending deferred stop (`handle_command` answers `Handled(None)`,
+    /// same as a real view) whose failure is the stop's own settled outcome, reaching both `log`
+    /// and [`ModuleView::take_stop_outcome`] only once it settles after `refreshes` more
+    /// `refresh()` calls — the shape `ferrowl-modbus`'s view produces post-settle-bound.
+    pub(crate) fn with_deferred_stop_error(self, refreshes: usize, message: &str) -> Self {
+        self.pending_stop.store(refreshes.max(1), Ordering::Relaxed);
+        *self.deferred_log.lock().unwrap() = Some((Level::Error, message.to_string()));
+        *self.deferred_outcome.lock().unwrap() = Some(StopOutcome::Failed(message.to_string()));
+        self
+    }
+
+    /// Make this view report a pending deferred stop that settles cleanly but, during the same
+    /// settle window, logs an `Error`-level line unrelated to the stop itself (CL-R-057's
+    /// negative case: a network callback line, not the stop's own outcome). Unlike
+    /// [`with_deferred_stop_error`], `take_stop_outcome` reports nothing — the line reaches only
+    /// `log`.
+    pub(crate) fn with_unrelated_error_during_settle(
+        self,
+        refreshes: usize,
+        message: &str,
+    ) -> Self {
+        self.pending_stop.store(refreshes.max(1), Ordering::Relaxed);
+        *self.deferred_log.lock().unwrap() = Some((Level::Error, message.to_string()));
         self
     }
 
@@ -220,7 +257,7 @@ impl MockView {
 
     /// Make the next `handle_command` call return `Handled(Some((level, message)))` instead of
     /// the default `Handled(None)`.
-    pub(super) fn with_command_message(mut self, level: Level, message: &str) -> Self {
+    pub(crate) fn with_command_message(mut self, level: Level, message: &str) -> Self {
         self.command_result = Some(CommandResult::Handled(Some((level, message.to_string()))));
         self
     }
@@ -250,7 +287,7 @@ impl MockView {
     }
 
     /// Re-box after a builder chain that started from an already-boxed `new`.
-    pub(super) fn boxed(self) -> Box<dyn ModuleView> {
+    pub(crate) fn boxed(self) -> Box<dyn ModuleView> {
         Box::new(self)
     }
 }
@@ -286,12 +323,20 @@ impl ModuleView for MockView {
     fn refresh<'a>(&'a mut self) -> RefreshFuture<'a> {
         let refreshes = self.refreshes.clone();
         let pending_stop = self.pending_stop.clone();
+        let deferred_log = self.deferred_log.clone();
+        let log = self.log.clone();
         Box::pin(async move {
             refreshes.fetch_add(1, Ordering::Relaxed);
-            let _ = pending_stop.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| match n {
-                0 | usize::MAX => None,
-                n => Some(n - 1),
-            });
+            let prev =
+                pending_stop.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| match n {
+                    0 | usize::MAX => None,
+                    n => Some(n - 1),
+                });
+            if prev == Ok(1)
+                && let Some((level, message)) = deferred_log.lock().unwrap().take()
+            {
+                log.write().await.write(level, &message);
+            }
         })
     }
 
@@ -301,6 +346,10 @@ impl ModuleView for MockView {
 
     fn lifecycle_pending(&self) -> bool {
         self.pending_stop.load(Ordering::Relaxed) > 0
+    }
+
+    fn take_stop_outcome(&mut self) -> Option<StopOutcome> {
+        self.deferred_outcome.lock().unwrap().take()
     }
 
     fn handle_command<'a>(&'a mut self, cmd: &'a str) -> CommandFuture<'a> {

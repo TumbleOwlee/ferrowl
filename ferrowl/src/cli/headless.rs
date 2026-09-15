@@ -58,9 +58,10 @@ struct RunModule {
 
 /// Build every configured module, starting each one and failing hard (unlike the TUI's
 /// `build_tabs`, which skips a bad module with an `eprintln!` and keeps going) if a device config
-/// fails to load or `start` reports an error.
-async fn build_modules(args: &RunArgs) -> Result<Vec<RunModule>, String> {
-    let mut modules = Vec::new();
+/// fails to load or `start` reports an error. Pushes each started module into `modules` as it
+/// goes, so on `Err` the caller still finds every module started before the failing one in
+/// `modules` and can stop them (CL-R-050).
+async fn build_modules_into(args: &RunArgs, modules: &mut Vec<RunModule>) -> Result<(), String> {
     // MB-R-150 — one session-wide registry for this headless run, attached to every Rtu/Ascii
     // module immediately after construction and before it starts. No race: modules are built and
     // started one at a time in this same loop, unlike `App`'s tabs (all pre-started before the
@@ -93,7 +94,7 @@ async fn build_modules(args: &RunArgs) -> Result<Vec<RunModule>, String> {
         modules.push(build_ocpp_module(spec).await?);
     }
 
-    Ok(modules)
+    Ok(())
 }
 
 async fn build_ocpp_module(module: OcppModuleSpec) -> Result<RunModule, String> {
@@ -248,14 +249,33 @@ fn emit_drained(
     }
 }
 
+/// Format one teardown outcome for stderr (CL-R-056, CL-R-057). Anything other than an
+/// `Error`-level stop message — no message, an informational one, or a view that does not handle
+/// `stop` — counts as a clean stop.
+fn teardown_line(name: &str, outcome: Option<(Level, String)>) -> String {
+    match outcome {
+        Some((Level::Error, detail)) => format!("Error: failed to stop '{name}': {detail}"),
+        _ => format!("Stopped '{name}'"),
+    }
+}
+
 /// Stop every module (best-effort: a stop failure is logged but does not change the exit code —
-/// we're already tearing down).
-async fn stop_all(modules: &mut [RunModule]) {
-    for module in modules.iter_mut() {
-        if let CommandResult::Handled(Some((level, msg))) = module.view.handle_command("stop").await
-        {
-            module.log.write().await.write(level, &msg);
-        }
+/// we're already tearing down). Returns the teardown line reported for each module, in order
+/// (CL-R-056, CL-R-057, CL-R-059). Reported names are deduped the same way [`build_registry`]
+/// dedupes `C_Module` keys, so a repeated `--module`/`--ocpp` name is distinguishable in the
+/// teardown report just as it is in the registry.
+async fn stop_all(modules: &mut [RunModule]) -> Vec<String> {
+    let names: Vec<String> = modules.iter().map(|m| m.name.clone()).collect();
+    let deduped = dedupe_names(&names);
+    let mut lines = Vec::new();
+    for (module, name) in modules.iter_mut().zip(deduped.iter()) {
+        let result = module.view.handle_command("stop").await;
+        let mut outcome = if let CommandResult::Handled(Some((level, msg))) = &result {
+            module.log.write().await.write(*level, msg);
+            Some((*level, msg.clone()))
+        } else {
+            None
+        };
         // CL-R-055 — a deferred stop only signals the task; drive it to completion (bounded) so
         // teardown actually joins the task before moving to the next module. A slow/never-
         // settling module never becomes an error (CL-R-026): the runner moves on regardless once
@@ -267,19 +287,39 @@ async fn stop_all(modules: &mut [RunModule]) {
             module.view.refresh().await;
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
+        let timed_out = module.view.lifecycle_pending();
+        // CL-R-057 — a view whose stop is deferred (`Handled(None)`) only settles its own
+        // outcome once `refresh()` observes the completed task; read it back through the typed
+        // accessor rather than the log, which may carry lines unrelated to the stop itself
+        // (e.g. a network callback logged during the same settle window).
+        if !timed_out && outcome.is_none() {
+            outcome = match module.view.take_stop_outcome() {
+                Some(crate::module::view::StopOutcome::Failed(detail)) => {
+                    Some((Level::Error, detail))
+                }
+                Some(crate::module::view::StopOutcome::Clean) | None => None,
+            };
+        }
+        let line = if timed_out {
+            format!("Error: timed out stopping '{name}'")
+        } else {
+            teardown_line(name, outcome)
+        };
+        eprintln!("{line}");
+        lines.push(line);
     }
+    lines
 }
 
 /// Run the headless session described by `args`. Returns the process exit code; never panics on
 /// a module's own runtime errors (those surface as log lines), only on setup failure.
 pub async fn run(args: &RunArgs) -> i32 {
-    let mut modules = match build_modules(args).await {
-        Ok(modules) => modules,
-        Err(e) => {
-            eprintln!("Error: {e}");
-            return 1;
-        }
-    };
+    let mut modules = Vec::new();
+    if let Err(e) = build_modules_into(args, &mut modules).await {
+        eprintln!("Error: {e}");
+        stop_all(&mut modules).await;
+        return 1;
+    }
 
     let mut log_file = match crate::cli::open_log_file(args.log_file.as_deref()) {
         Ok(f) => f,
@@ -367,6 +407,7 @@ pub async fn run(args: &RunArgs) -> i32 {
 
     if let Some((sim, ..)) = session_sim.as_mut() {
         sim.stop();
+        eprintln!("{}", teardown_line(SESSION_SOURCE, None));
     }
     stop_all(&mut modules).await;
     exit_code
@@ -764,15 +805,25 @@ mod tests {
 
     #[tokio::test]
     /// CL-R-021 — the headless runner treats a module's device-config load failure as fatal to
-    /// startup, rather than skipping the module like the TUI.
+    /// startup, rather than skipping the module like the TUI. A module started before the
+    /// failing one is still handed back to the caller via the out-param.
     async fn ut_build_modules_fails_hard_on_bad_device() {
         let dir = reserve_temp_dir("ferrowl_cl");
-        let mut args = modbus_run_args(&dir, reserve_tcp_port().release(), 1);
+        let device = write_device(&dir);
+        let port = reserve_tcp_port().release();
+        let mut args = modbus_run_args(&dir, port, 1);
         args.modules = vec![
+            format!("name=good,device={device},transport=tcp,ip=127.0.0.1,port={port},role=server"),
             "name=m,device=/no/such/device.toml,transport=tcp,ip=127.0.0.1,port=0,role=server"
                 .into(),
         ];
-        assert!(build_modules(&args).await.is_err());
+        let mut modules = Vec::new();
+        assert!(build_modules_into(&args, &mut modules).await.is_err());
+        assert_eq!(
+            modules.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(),
+            vec!["good"],
+            "the module started before the failing one must still be returned for teardown"
+        );
     }
 
     #[tokio::test]
@@ -849,14 +900,116 @@ mod tests {
     }
 
     #[tokio::test]
-    /// CL-R-026 — on loop exit the runner stops every module: a second run rebinds the same port,
-    /// which only succeeds if the first run released it.
+    /// CL-R-026 — on loop exit the runner stops every module: the listener refuses a connect
+    /// afterward, rather than merely accepting a rebind (which OS address reuse can mask).
     async fn ut_run_stops_modules_on_exit() {
         let dir = reserve_temp_dir("ferrowl_cl");
         let port = reserve_tcp_port().release();
         assert_eq!(run(&modbus_run_args(&dir, port, 1)).await, 0);
-        // If the first run had not stopped its listener, this bind (inside start) would fail.
-        assert_eq!(run(&modbus_run_args(&dir, port, 1)).await, 0);
+        assert!(
+            std::net::TcpStream::connect(("127.0.0.1", port)).is_err(),
+            "expected the module's listener to be gone after teardown"
+        );
+    }
+
+    #[tokio::test]
+    /// CL-R-056 — each module the headless runner stops is reported, in list order, as
+    /// `Stopped '<name>'`, `<name>` deduped the same way `build_registry` dedupes module names
+    /// (two modules sharing a raw name get distinct reported names).
+    async fn ut_stop_all_reports_each_module_in_order() {
+        let (view_a, _handle_a) = crate::app::testkit::MockView::pair("a");
+        let (view_b, _handle_b) = crate::app::testkit::MockView::pair("b");
+        let mut modules = vec![
+            RunModule {
+                name: "a".to_string(),
+                view: view_a.boxed(),
+                log: new_log(),
+                last_written: 0,
+            },
+            RunModule {
+                name: "a".to_string(),
+                view: view_b.boxed(),
+                log: new_log(),
+                last_written: 0,
+            },
+        ];
+        let lines = stop_all(&mut modules).await;
+        assert_eq!(
+            lines,
+            vec!["Stopped 'a'".to_string(), "Stopped 'a (2)'".to_string()],
+            "CL-R-056 reports the deduped name, matching build_registry's dedupe_names key"
+        );
+    }
+
+    #[tokio::test]
+    /// CL-R-057 — a module whose stop reports an `Error`-level message synchronously (before any
+    /// settle wait) is reported as `Error: failed to stop '<name>': <detail>`.
+    async fn ut_stop_all_reports_a_failing_stop() {
+        let (view_b, _handle_b) = crate::app::testkit::MockView::pair("b");
+        let view_b = view_b.with_command_message(Level::Error, "Stop server failed: boom");
+        let log = new_log();
+        let mut modules = vec![RunModule {
+            name: "b".to_string(),
+            view: view_b.boxed(),
+            log: log.clone(),
+            last_written: 0,
+        }];
+        let lines = stop_all(&mut modules).await;
+        assert_eq!(
+            lines,
+            vec!["Error: failed to stop 'b': Stop server failed: boom".to_string()]
+        );
+        let window = log.read().await.peek_n(LOG_PEEK);
+        assert!(
+            window
+                .iter()
+                .any(|(_, _, msg)| msg == "Stop server failed: boom"),
+            "the stop message must still reach the module's log ring"
+        );
+    }
+
+    #[tokio::test]
+    /// CL-R-057 — a module whose stop has completed with an error only by the end of its settle
+    /// bound (the shape a real view produces: `handle_command("stop")` answers `Handled(None)`,
+    /// the error reaches the log only once `refresh()` observes the completed stop) is still
+    /// reported as `Error: failed to stop '<name>': <detail>`, not `Stopped '<name>'`.
+    async fn ut_stop_all_reports_a_deferred_failing_stop() {
+        let (view_b, _handle_b) = crate::app::testkit::MockView::pair("b");
+        let view_b = view_b.with_deferred_stop_error(1, "Stop server failed: boom");
+        let view_b = view_b.boxed();
+        let log = view_b.log();
+        let mut modules = vec![RunModule {
+            name: "b".to_string(),
+            view: view_b,
+            log,
+            last_written: 0,
+        }];
+        let lines = stop_all(&mut modules).await;
+        assert_eq!(
+            lines,
+            vec!["Error: failed to stop 'b': Stop server failed: boom".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    /// CL-R-057 — a module that logs an `Error`-level line unrelated to its own stop during the
+    /// same settle window (e.g. a network callback), but whose stop itself completes cleanly, is
+    /// still reported as `Stopped '<name>'`, never `Error: failed to stop ...` derived from that
+    /// unrelated line.
+    async fn ut_stop_all_ignores_unrelated_error_logged_during_settle() {
+        let (view_b, _handle_b) = crate::app::testkit::MockView::pair("b");
+        let view_b =
+            view_b.with_unrelated_error_during_settle(1, "peer disconnecting unexpectedly");
+        let view_b = view_b.boxed();
+        let log = view_b.log();
+        let mut modules = vec![RunModule {
+            name: "b".to_string(),
+            view: view_b,
+            log,
+            last_written: 0,
+        }];
+        let lines = stop_all(&mut modules).await;
+        assert_eq!(lines, vec!["Stopped 'b'".to_string()]);
     }
 
     /// A `ModuleView` double whose `lifecycle_pending()` never clears and whose `handle_command`
@@ -914,9 +1067,10 @@ mod tests {
     }
 
     #[tokio::test]
-    /// CL-R-055 — a module whose deferred stop never settles still gets its settle bound waited
-    /// out (not skipped) and does not stall teardown of the next module, which is itself stopped
-    /// and waited out too.
+    /// CL-R-055, CL-R-059 — a module whose deferred stop never settles still gets its settle
+    /// bound waited out (not skipped), does not stall teardown of the next module (itself
+    /// stopped and waited out too), and is reported as `Error: timed out stopping '<name>'`
+    /// rather than the `Stopped` line.
     async fn ut_stop_all_moves_on_when_a_module_settle_bound_expires() {
         let stopped_a = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let stopped_b = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -942,7 +1096,7 @@ mod tests {
         ];
 
         let before = Instant::now();
-        stop_all(&mut modules).await;
+        let lines = stop_all(&mut modules).await;
         let elapsed = before.elapsed();
         assert!(
             elapsed >= crate::module::view::SETTLE_BOUND * 2,
@@ -960,6 +1114,14 @@ mod tests {
         assert!(
             stopped_b.load(std::sync::atomic::Ordering::Relaxed),
             "module b must still be stopped even after a's settle bound expired"
+        );
+        assert_eq!(
+            lines,
+            vec![
+                "Error: timed out stopping 'a'".to_string(),
+                "Error: timed out stopping 'b'".to_string(),
+            ],
+            "CL-R-059 — a settle-bound expiry is reported as a timeout, not a plain Stopped line"
         );
     }
 

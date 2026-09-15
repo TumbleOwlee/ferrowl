@@ -380,6 +380,9 @@ pub struct ServerView<V: ServerVersion> {
     /// signalled `request_stop()` and is waiting for `refresh()` to observe `poll_stop()`
     /// complete before logging its outcome (and, for `Restart`, running the follow-up start).
     pending_lifecycle: Option<PendingLifecycle>,
+    /// CL-R-057 — the settled outcome of the most recently completed `PendingLifecycle::Stop`,
+    /// consumed by [`ModuleView::take_stop_outcome`] rather than re-derived from the log.
+    last_stop_outcome: Option<crate::module::view::StopOutcome>,
 }
 
 /// UI-R-314/UI-R-315 — the follow-up state a deferred stop-bearing lifecycle command needs once
@@ -425,6 +428,7 @@ where
             lua_states: Arc::new(RwLock::new(ServerStates::default())),
             runtime: SimRuntime::default(),
             pending_lifecycle: None,
+            last_stop_outcome: None,
         };
         view.start_sim();
         view
@@ -475,6 +479,10 @@ where
 
     fn lifecycle_pending(&self) -> bool {
         self.pending_lifecycle.is_some()
+    }
+
+    fn take_stop_outcome(&mut self) -> Option<crate::module::view::StopOutcome> {
+        self.last_stop_outcome.take()
     }
 
     fn commands(&self) -> &[CommandDescriptor] {
