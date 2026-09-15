@@ -122,6 +122,14 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 
 ---
 
+## Register dialog boundaries
+
+| ID | Condition | Behavior |
+|---|---|---|
+| **MB-E-094** | Value or Default Value input holding only whitespace | non-empty for MB-R-222/MB-R-225/MB-R-227 (emptiness is zero length, never trimmed) and evaluated per MB-R-223/MB-R-226: an `Ascii` register takes the all-space value, a numeric register reports a parse error rather than silently falling back to its default |
+
+---
+
 ## Known limitations — intentional constraints
 
 ### No max-registers-per-request bound at the protocol layer

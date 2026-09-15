@@ -496,6 +496,18 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-151** — The add/edit register dialog's Value and Default Value inputs are hidden and unfocusable for a `ReadOnly` register on a **client** module (MB-R-159 excludes it from client writes). On a **server**, where MB-R-090 bypasses access checks, they stay shown and editable regardless of access.
 
+**MB-R-222** — An empty Value input in the add/edit register dialog is valid: confirming evaluates nothing for that input and issues no value write, so a newly added register keeps its `default` seeding (MB-R-079, MB-R-080) and an edited register keeps its currently stored value.
+
+**MB-R-223** — A non-empty Value input in the add/edit register dialog is evaluated against the register's format on confirm exactly as a `:set` write is (MB-R-007, MB-R-008), and the resulting value is written on confirm.
+
+**MB-R-224** — An MB-R-223 evaluation failure refuses the confirm: the dialog stays open with an inline error on the Value input and neither the register definition nor any store cell is changed.
+
+**MB-R-225** — An empty Default Value input in the add/edit register dialog leaves the register definition's `default` unset (MB-R-079, MB-R-080 seeding applies) and is never a validation error.
+
+**MB-R-226** — A non-empty Default Value input in the add/edit register dialog is evaluated against the register's format on confirm and, on failure, refuses the confirm under MB-R-224's rule with the inline error on the Default Value input.
+
+**MB-R-227** — A Value or Default Value input hidden by MB-R-151 counts as empty for MB-R-222 and MB-R-225 regardless of any text it held before being hidden, so a `ReadOnly` register on a client module is always confirmable.
+
 **MB-R-152** — A monitor module's displayed status follows MB-R-137's three-state rule with "serial port open" for "transport connected": `CONNECTED` while the port is open and read; `RECONNECTING` while the task runs but the port is not open (MB-R-130–MB-R-134, MB-R-192); `DISCONNECTED` while the task is not running.
 
 **MB-R-154** — A format's display text is its name followed by a parenthesized qualifier: numeric → byte order (`Big Endian` or `Little Endian`); `Ascii` → alignment (`Left` or `Right`).
