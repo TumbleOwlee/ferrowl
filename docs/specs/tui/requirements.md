@@ -398,9 +398,9 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-223** — The diff widget has two modes, `Normal` and `Visual`: `v` and `V` enter Visual from Normal, `Esc` in Visual returns to Normal, `Esc` in Normal is left unhandled so it reaches the enclosing layer (UI-R-028), and no Insert mode exists.
 
-**UI-R-224** — The active row is drawn in the theme's read-only highlighted-row style on every pane at once (UI-R-138), so the reader sees the same row marked on both sides.
+**UI-R-224** — The active row is drawn in the theme's read-only highlighted-row style on every pane at once (UI-R-138), its background replaced where a marked range covers it (UI-R-331), so the reader sees the same row marked on both sides.
 
-**UI-R-225** — In Visual mode every row from the selection anchor to the active row inclusive is drawn in the selection style on every pane at once.
+**UI-R-225** — In Visual mode every row from the selection anchor to the active row inclusive is drawn in the selection style on every pane at once, each row's background replaced where a marked range covers it (UI-R-332).
 
 **UI-R-226** — The diff widget reports its selected rows as the active row alone in `Normal` mode and as the inclusive range between the selection anchor row and the active row, ordered ascending, in Visual mode.
 
@@ -449,6 +449,12 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 **UI-R-267** — For every row a marked range covers (UI-R-266), the widget fills that side's gutter cell with the range's colour, so a marked span reads as one continuous block down the gutter.
 
 **UI-R-268** — Marked ranges and gutter labels coexist on the same row: the label supplies the gutter's text (UI-R-218) and the range its colour (UI-R-267).
+
+**UI-R-330** — The diff widget takes a marked-range highlight option, builder-settable and defaulting to on, deciding whether a covering marked range colours the highlight of the active and selected rows (UI-R-331, UI-R-332).
+
+**UI-R-331** — With the marked-range highlight option on (UI-R-330) and a marked range (UI-R-266) covering the active row on either side, the active row is drawn on every pane in the theme's highlighted-row style of UI-R-224 with its background replaced by that range's colour, every other attribute of that style unchanged.
+
+**UI-R-332** — With the marked-range highlight option on (UI-R-330), each Visual-mode selected row (UI-R-225) a marked range (UI-R-266) covers on either side is drawn on every pane in the selection style with its background replaced by that range's colour, row by row, so an unmarked row inside the selection keeps the plain selection style.
 
 **UI-R-269** — The diff widget takes a list of annotations, each naming a side, a file line range on that side and a markdown text, settable when built and afterwards.
 

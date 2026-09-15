@@ -189,6 +189,7 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-156** | Tab list replaced on a tab widget state (UI-R-329) with an empty list | there is no valid index to clamp to, so the active index becomes `0` |
 | **UI-E-157** | Tab widget state whose active index was written out of range directly, the caller owning that field (UI-R-119), read back | the reported active index is `0` (UI-R-325) and the reported active tab value is the first tab (UI-R-324), never the written value and never absent for a non-empty tab list |
 | **UI-E-158** | Tab widget state whose active index is out of range (UI-E-157) advanced to the next or previous tab (UI-R-327, UI-R-328) | the operation starts from the normalized index `0`, so advancing selects index `1` — index `0` again with a single tab (UI-E-154) — and retreating wraps to the last tab; never panics |
+| **UI-E-159** | Several marked ranges covering the same highlighted row, on one side or on both (UI-R-331, UI-R-332) | the first covering range in the supplied list wins and supplies the background; the later ones never blend with it |
 
 ## Known limitations and stated constraints
 
