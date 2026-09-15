@@ -637,7 +637,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-E-147 — a badge on a status-free file draws with no leading status marker; the
+    /// UI-E-159 — a badge on a status-free file draws with no leading status marker; the
     /// badge still follows the name one space later.
     fn ut_badge_on_a_status_free_file_draws_with_no_status_marker() {
         let badge = Marker("*", None);
