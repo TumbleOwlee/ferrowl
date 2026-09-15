@@ -1019,7 +1019,7 @@ mod tests {
     /// an out-of-range active index, resets to `0` and the first tab takes
     /// the active style (UI-E-066), not an unstyled render.
     #[test]
-    fn ut_stale_offset_past_end_is_clamped_to_show_tabs() {
+    fn ut_stale_offset_past_end_resets_offset_to_zero() {
         let w = TabBarBuilder::<String>::default()
             .direction(Direction::Vertical)
             .build()
