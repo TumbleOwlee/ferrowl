@@ -502,11 +502,13 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-224** — An MB-R-223 evaluation failure refuses the confirm: the dialog stays open with an inline error on the Value input and neither the register definition nor any store cell is changed.
 
-**MB-R-225** — An empty Default Value input in the add/edit register dialog leaves the register definition's `default` unset (MB-R-079, MB-R-080 seeding applies) and is never a validation error.
+**MB-R-225** — An empty *shown* Default Value input in the add/edit register dialog leaves the register definition's `default` unset (MB-R-079, MB-R-080 seeding applies) and is never a validation error.
 
 **MB-R-226** — A non-empty Default Value input in the add/edit register dialog is evaluated against the register's format on confirm and, on failure, refuses the confirm under MB-R-224's rule with the inline error on the Default Value input.
 
-**MB-R-227** — A Value or Default Value input hidden by MB-R-151 counts as empty for MB-R-222 and MB-R-225 regardless of any text it held before being hidden, so a `ReadOnly` register on a client module is always confirmable.
+**MB-R-227** — A Value or Default Value pane hidden by MB-R-151 is never evaluated and never blocks confirm, regardless of any text it held before being hidden, so a `ReadOnly` register on a client module is always confirmable.
+
+**MB-R-228** — Confirming with a pane hidden by MB-R-151 writes no value through that pane and carries the register's existing stored value and configured `default` through unchanged, on add as on edit; a hidden pane never unsets `default` (MB-R-225 applies to shown inputs only).
 
 **MB-R-152** — A monitor module's displayed status follows MB-R-137's three-state rule with "serial port open" for "transport connected": `CONNECTED` while the port is open and read; `RECONNECTING` while the task runs but the port is not open (MB-R-130–MB-R-134, MB-R-192); `DISCONNECTED` while the task is not running.
 

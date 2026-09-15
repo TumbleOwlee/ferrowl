@@ -92,6 +92,11 @@ pub struct EditInputDialog {
     // Confirm-close popup, opened with Esc.
     #[builder(default)]
     pub close_confirm: Option<CloseConfirmDialog>,
+    // The register's configured default at dialog open (MB-R-228): carried through unchanged
+    // when the Default Value pane is hidden, regardless of any text the pane holds or a later
+    // Access toggle — never re-derived from `default_value`'s (possibly unvalidated) raw input.
+    #[builder(default)]
+    pub seeded_default: Option<Scalar>,
 }
 
 /// The result of confirming the edit dialog: updated register metadata + an optional value to
@@ -251,6 +256,7 @@ impl EditInputDialog {
         dialog.is_server = is_server;
         set_input(&mut dialog.label, name);
         set_input(&mut dialog.description, description);
+        dialog.seeded_default = default.cloned();
         if let Some(def) = default {
             set_input(&mut dialog.default_value, &def.to_string());
         }
@@ -368,13 +374,19 @@ impl EditInputDialog {
             Some(self.pending_named_values.clone())
         };
 
-        let default = {
+        // MB-R-228: a pane hidden by MB-R-151 carries the configured default through unchanged
+        // rather than unsetting it, so this carries `seeded_default` verbatim — the pane's raw
+        // text is never trustworthy here, since Access can toggle it hidden after unchecked text
+        // was typed while it was still visible.
+        let default = if self.value_inputs_visible() {
             let s = self.default_value_input();
             if s.is_empty() {
                 None
             } else {
                 Some(Scalar::from_input(s))
             }
+        } else {
+            self.seeded_default.clone()
         };
 
         Ok(EditedRegister {
@@ -834,8 +846,8 @@ mod apply_tests {
     }
 
     #[test]
-    /// MB-R-227 — inputs hidden by MB-R-151 (client, ReadOnly) count as empty regardless of the
-    /// text they hold.
+    /// MB-R-227 — a Value or Default Value pane hidden by MB-R-151 (client, ReadOnly) is never
+    /// evaluated and never blocks confirm, regardless of the text it holds.
     fn ut_hidden_value_inputs_count_as_empty() {
         let ro = reg(
             Kind::HoldingRegister,
@@ -852,9 +864,69 @@ mod apply_tests {
         let mut dialog = EditInputDialog::from_register("n", "", &ro, "", None, false);
         crate::module::modbus::dialog::set_input(&mut dialog.value, "abc");
         crate::module::modbus::dialog::set_input(&mut dialog.default_value, "abc");
-        let edited = dialog.apply().expect("hidden inputs count as empty");
+        let edited = dialog
+            .apply()
+            .expect("hidden panes are never evaluated and never block confirm");
         assert_eq!(edited.value, None);
-        assert_eq!(edited.default, None);
+    }
+
+    #[test]
+    /// MB-R-228 — confirming with a pane hidden by MB-R-151 writes no value and carries the
+    /// register's existing stored value and configured default through unchanged: editing a
+    /// client `ReadOnly` register must not unset a previously configured default.
+    fn ut_hidden_panes_preserve_existing_value_and_default() {
+        let ro = reg(
+            Kind::HoldingRegister,
+            Access::ReadOnly,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let default = crate::config::device::Scalar::from_input("3");
+        let dialog = EditInputDialog::from_register("n", "", &ro, "5", Some(&default), false);
+        let edited = dialog.apply().expect("hidden panes never block confirm");
+        assert_eq!(edited.value, None);
+        assert_eq!(edited.default, Some(default));
+    }
+
+    #[test]
+    /// MB-R-228 — hiding the Default Value pane by toggling Access to `ReadOnly` after typing an
+    /// unchecked value into it must not carry that raw, never-validated text through as the
+    /// applied default: a hidden pane carries the register's existing configured default,
+    /// unchanged, not whatever text happens to still sit in the widget.
+    fn ut_access_toggle_hiding_default_pane_does_not_leak_raw_text() {
+        let rw = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let seeded_default = crate::config::device::Scalar::from_input("3");
+        // Client dialog (`is_server: false`): the Default Value pane starts visible under
+        // `ReadWrite` and typing into it works normally.
+        let mut dialog =
+            EditInputDialog::from_register("n", "", &rw, "5", Some(&seeded_default), false);
+        crate::module::modbus::dialog::set_input(&mut dialog.default_value, "not-a-number");
+        // Switch Access to ReadOnly, hiding the pane (MB-R-151) without clearing its raw text.
+        dialog
+            .access
+            .state
+            .set_selection(crate::module::modbus::dialog::access_index(
+                &Access::ReadOnly,
+            ));
+        let edited = dialog.apply().expect("hidden panes never block confirm");
+        assert_eq!(edited.default, Some(seeded_default));
     }
 
     #[test]
@@ -949,8 +1021,8 @@ mod apply_tests {
     }
 
     #[test]
-    /// MB-R-223 — a virtual register's Value/Default Value inputs are evaluated exactly as a
-    /// `:set` write is: `:set` on a virtual register goes through `str_to_value`
+    /// MB-R-223, MB-E-095 — a virtual register's Value/Default Value inputs are evaluated exactly
+    /// as a `:set` write is: `:set` on a virtual register goes through `str_to_value`
     /// (`Scalar::from_input`), never `encode`, so confirm must not reject text `encode` would.
     fn ut_virtual_register_value_input_is_not_format_encoded() {
         let virtual_coil = reg(
