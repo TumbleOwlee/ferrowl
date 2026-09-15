@@ -186,7 +186,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-202, UI-R-203 — `Enter` commits the trimmed field content, `Esc` cancels.
+    /// UI-R-338, UI-R-339 — `Enter` commits the trimmed field content, `Esc` cancels.
     fn ut_enter_commits_trimmed_and_esc_cancels() {
         let mut prompt = RenamePrompt::new("boot");
         assert_eq!(
@@ -214,7 +214,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-202, UI-R-203 — `Esc` clears the prompt; a commit leaves it in place for the host to judge.
+    /// UI-R-338, UI-R-339 — `Esc` clears the prompt; a commit leaves it in place for the host to judge.
     fn ut_route_cancel_clears_commit_keeps() {
         let mut rename = Some(RenamePrompt::new("a"));
         assert_eq!(

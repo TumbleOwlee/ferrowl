@@ -315,7 +315,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-200 — `Esc` and `q` close the overlay without picking anything.
+    /// UI-R-336 — `Esc` and `q` close the overlay without picking anything.
     fn ut_esc_and_q_close() {
         let mut browser = TemplateBrowser::new(ScriptContext::Session);
         assert_eq!(
@@ -370,7 +370,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-200 — a close key clears the browser overlay.
+    /// UI-R-336 — a close key clears the browser overlay.
     fn ut_route_close_clears_overlay() {
         let mut browser = Some(TemplateBrowser::new(ScriptContext::Session));
         assert_eq!(

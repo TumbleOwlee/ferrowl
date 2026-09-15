@@ -77,7 +77,7 @@ CI runs these as separate steps of the `check` pipeline — on every push **and 
 - Branch off `main` and open your PR against `main`. Branch naming: `<type>/<slug>` with a conventional-commit type (`feat/`, `fix/`, `docs/`).
 - Keep PRs focused — one feature or fix per PR.
 - Add or update tests for behavior changes; the existing unit tests live in `#[cfg(test)]` modules next to the code (`ut_*` naming); integration tests live in each crate's `tests/` (`it_*` naming).
-- **Update the spec in the same PR.** When you change behavior, update the relevant `docs/specs/<area>/` file(s) — they are the authoritative source, not a one-time snapshot. New requirements get a fresh, appended ID (never renumber or reuse). A behavior change with no spec change is incomplete.
+- **Update the spec in the same PR.** When you change behavior, update the relevant `docs/specs/<area>/` file(s) — they are the authoritative source, not a one-time snapshot. New requirements get a fresh, appended ID (never renumber or reuse; the sole exception, one ID that already defines two different entries, is spelled out in `docs/specs/README.md` rule 2). A behavior change with no spec change is incomplete.
 - Reference requirement IDs in the PR body.
 - Update the README when you change user-facing commands, keybindings, configuration fields, or the Lua API.
 - PRs are merged to `main` by **squash merge**.

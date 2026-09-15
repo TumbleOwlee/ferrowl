@@ -14,7 +14,7 @@ Ferrowl — Rust TUI simulator for Modbus (client/server, TCP/RTU) and OCPP (Cha
 - `main` never holds unfinished spec: a requirement on `main` describes code that exists and is tested. A branch may hold a spec commit ahead of its code; squash merge keeps it off `main`.
 - Pre-existing spec/code disagreement outside your task: stop, raise separately. Folding it in widens approved work and skips its own review.
 - Specs carry no `file:line`. Locate code with search tools.
-- Requirement and edge-case IDs (`-R-`, `-E-`) stable, append-only. Cite in commits and PRs.
+- Requirement and edge-case IDs (`-R-`, `-E-`) stable, append-only (the sole exception, one ID that already defines two different entries, is spelled out in `docs/specs/README.md` rule 2). Cite in commits and PRs.
 
 ## TDD — fixed order, every stage
 
