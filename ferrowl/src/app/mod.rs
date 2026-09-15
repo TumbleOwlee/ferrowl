@@ -22,6 +22,8 @@ use ratatui::{buffer::Buffer, layout::Rect};
 use std::io::Stdout;
 use std::time::{Duration, Instant};
 
+use ferrowl_ui::state::TabBarState;
+
 use crate::config::script::ScriptDef;
 use crate::dialog::scripts::ScriptDialog;
 use crate::module::type_descriptor::SetupView;
@@ -223,6 +225,12 @@ pub struct Tab {
     pub log_view: LogView,
 }
 
+impl ferrowl_ui::traits::ToLabel for Tab {
+    fn to_label(&self) -> String {
+        self.name.clone()
+    }
+}
+
 impl Tab {
     pub fn new_from_view(name: String, view: Box<dyn ModuleView>) -> Self {
         let log = view.log();
@@ -268,8 +276,9 @@ pub enum KeyMode {
 /// event/redraw loop inside the tokio runtime.
 pub struct App<S: DrawSurface = AlternateScreen<Stdout>> {
     screen: S,
-    tabs: Vec<Tab>,
-    active: usize,
+    /// The tab list, active selection and scroll offset, owned by the tab bar widget's state
+    /// (UI-R-119).
+    tabs: TabBarState<Tab>,
     focus: Focus,
     command: CommandLine,
     overlay: Option<Overlay>,
@@ -277,8 +286,6 @@ pub struct App<S: DrawSurface = AlternateScreen<Stdout>> {
     /// The `?` keybind help dialog: whether it is open and its scroll offset.
     help_open: bool,
     help_scroll: u16,
-    /// The tab bar's scroll offset, owned by the widget (UI-R-119).
-    tab_scroll: usize,
     /// Live `C_Module` session registry, rebuilt from `tabs` whenever the tab set or a view
     /// changes (see [`Self::rebuild_registry`]).
     registry: ModuleRegistry,
@@ -355,15 +362,17 @@ impl<S: DrawSurface> App<S> {
         session_sim.set_scripts(session_scripts.clone());
         let mut app = Self {
             screen,
-            tabs,
-            active: 0,
+            tabs: TabBarState {
+                titles: tabs,
+                active: 0,
+                offset: 0,
+            },
             focus,
             command: new_command_line(),
             overlay,
             keymode: None,
             help_open: false,
             help_scroll: 0,
-            tab_scroll: 0,
             registry,
             serial_paths,
             session_dialog: None,
@@ -386,22 +395,34 @@ impl<S: DrawSurface> App<S> {
     /// `C_Module` scripts see the current modules and every Rtu/Ascii view shares the same
     /// conflict registry.
     pub(crate) fn rebuild_registry(&mut self) {
-        for tab in &mut self.tabs {
+        for tab in &mut self.tabs.titles {
             tab.view.set_serial_paths(self.serial_paths.clone());
         }
         let modules = self
             .tabs
+            .titles
             .iter()
             .filter_map(|tab| Some((tab.name.clone(), tab.view.module_host()?)))
             .collect();
         self.registry.replace_all(modules);
     }
 
+    /// The active tab, or `None` when the tab list is empty (UI-R-324).
+    fn active_tab(&self) -> Option<&Tab> {
+        self.tabs.selected()
+    }
+
+    /// The active tab, or `None` when the tab list is empty (UI-R-324).
+    fn active_tab_mut(&mut self) -> Option<&mut Tab> {
+        let idx = self.tabs.selected_index();
+        self.tabs.titles.get_mut(idx)
+    }
+
     /// Focus (or unfocus) the active tab's content/log panes. The single choke point for the
     /// event-driven focus model: every transition that changes `self.focus` routes through here so
     /// the tab's stored widget focus never goes stale.
     fn set_content_focus(&mut self, on: bool) {
-        if let Some(tab) = self.tabs.get_mut(self.active) {
+        if let Some(tab) = self.active_tab_mut() {
             tab.set_focused(on);
         }
     }
@@ -461,15 +482,15 @@ impl<S: DrawSurface> App<S> {
         // sim so a CS tab sees inbound traffic live, instead of only when the tab is switched).
         // Poll all refreshes concurrently so tick latency is bounded by the slowest tab, not the
         // sum of all tabs.
-        let refreshes = self.tabs.iter_mut().map(|tab| tab.view.refresh());
+        let refreshes = self.tabs.titles.iter_mut().map(|tab| tab.view.refresh());
         futures_util::future::join_all(refreshes).await;
         // One flush per tick amortizes the file sink instead of flushing per log line.
-        for tab in self.tabs.iter() {
+        for tab in self.tabs.titles.iter() {
             tab.log.write().await.flush();
         }
         self.session_log.write().await.flush();
         let mut registry_stale = false;
-        for tab in self.tabs.iter_mut() {
+        for tab in self.tabs.titles.iter_mut() {
             // A view may request to be replaced (e.g. OCPP role switched in the edit dialog).
             if let Some(new_view) = tab.view.take_replacement() {
                 tab.replace_view(new_view);
@@ -491,14 +512,12 @@ impl<S: DrawSurface> App<S> {
             dialog.set_log_entries(entries);
         }
 
-        if self.active >= self.tabs.len() {
+        let Some(active_tab) = self.active_tab() else {
             return;
-        }
-        let active = self.active;
+        };
         // Tail the log ring unless the user is reading the log pane of the active tab.
-        let follow = !self.tabs[active].is_log_focused();
-
-        let log = self.tabs[active].log.clone();
+        let follow = !active_tab.is_log_focused();
+        let log = active_tab.log.clone();
         let lines = {
             let guard = log.read().await;
             guard.peek_n(LOG_SIZE)
@@ -513,7 +532,9 @@ impl<S: DrawSurface> App<S> {
             })
             .collect();
 
-        let tab = &mut self.tabs[active];
+        let Some(tab) = self.active_tab_mut() else {
+            return;
+        };
         tab.log_view.state.set_values(entries);
         if follow {
             tab.log_view.state.move_to_bottom();
@@ -525,10 +546,13 @@ impl<S: DrawSurface> App<S> {
     /// warns into the renamed tab's own log. Keeps `Tab::name` unique at all times so `C_Module`
     /// lookups by name are never ambiguous.
     async fn resolve_duplicate_tab_names(&mut self) {
-        let names: Vec<String> = self.tabs.iter().map(|t| t.name.clone()).collect();
+        let names: Vec<String> = self.tabs.titles.iter().map(|t| t.name.clone()).collect();
         let resolved = dedupe_names(&names);
-        for (tab, (original, resolved)) in
-            self.tabs.iter_mut().zip(names.iter().zip(resolved.iter()))
+        for (tab, (original, resolved)) in self
+            .tabs
+            .titles
+            .iter_mut()
+            .zip(names.iter().zip(resolved.iter()))
         {
             if resolved != original {
                 tab.name = resolved.clone();
@@ -548,23 +572,19 @@ impl<S: DrawSurface> App<S> {
         let command = &mut self.command;
         let overlay = self.overlay.as_mut();
         let session_dialog = self.session_dialog.as_deref_mut();
-        let active = self.active;
         let focus = self.focus;
         let help_open = self.help_open;
         let help_scroll = &mut self.help_scroll;
-        let tab_scroll = &mut self.tab_scroll;
         screen.draw(|f| {
             render(
                 f,
                 tabs,
-                active,
                 focus,
                 command,
                 overlay,
                 session_dialog,
                 help_open,
                 help_scroll,
-                tab_scroll,
             )
         })?;
         Ok(())
@@ -611,7 +631,7 @@ impl<S: DrawSurface> App<S> {
     /// session dialog, or keybind-help), i.e. there is nothing left to interact with.
     fn should_exit_empty(&self) -> bool {
         let modal_open = self.overlay.is_some() || self.session_dialog.is_some() || self.help_open;
-        is_empty_shell(self.tabs.len(), modal_open)
+        is_empty_shell(self.tabs.titles.len(), modal_open)
     }
 
     fn close_overlay(&mut self) {
@@ -621,7 +641,7 @@ impl<S: DrawSurface> App<S> {
     }
 
     async fn log_active(&self, level: Level, message: String) {
-        if let Some(tab) = self.tabs.get(self.active) {
+        if let Some(tab) = self.active_tab() {
             tab.log.write().await.write(level, &message);
         }
     }
@@ -768,16 +788,17 @@ mod tests {
                 .map(|n| MockView::pair(n).0.boxed())
                 .collect(),
         );
-        let names: Vec<String> = app.tabs.iter().map(|t| t.name.clone()).collect();
+        let names: Vec<String> = app.tabs.titles.iter().map(|t| t.name.clone()).collect();
         assert_eq!(names, ["a", "b", "c"]);
         assert_eq!(
-            app.active, 0,
+            app.tabs.selected_index(),
+            0,
             "exactly one active tab, defaulting to the first"
         );
 
         app.switch_tab(2);
-        assert_eq!(app.active, 2);
-        let names_after: Vec<String> = app.tabs.iter().map(|t| t.name.clone()).collect();
+        assert_eq!(app.tabs.selected_index(), 2);
+        let names_after: Vec<String> = app.tabs.titles.iter().map(|t| t.name.clone()).collect();
         assert_eq!(
             names_after,
             ["a", "b", "c"],
@@ -796,7 +817,10 @@ mod tests {
                 .map(|n| MockView::pair(n).0.boxed())
                 .collect(),
         );
-        assert!(!std::sync::Arc::ptr_eq(&app.tabs[0].log, &app.tabs[1].log));
+        assert!(!std::sync::Arc::ptr_eq(
+            &app.tabs.titles[0].log,
+            &app.tabs.titles[1].log
+        ));
     }
 
     #[test]
@@ -806,7 +830,7 @@ mod tests {
         let (a, ha) = MockView::pair("a");
         let (b, hb) = MockView::pair("b");
         let mut app = build_app(vec![a.boxed(), b.boxed()]);
-        app.active = 1;
+        app.tabs.select_index(1);
         app.draw().unwrap();
         assert_eq!(ha.renders(), 0, "inactive tab's view must not render");
         assert_eq!(
@@ -942,13 +966,13 @@ mod tests {
         ]);
         // `with_screen` already called `rebuild_registry()` once, attaching the shared registry
         // to both tabs before either starts.
-        for tab in &mut app.tabs {
+        for tab in &mut app.tabs.titles {
             let _ = tab.view.handle_command("start").await;
         }
         // Let the background reconnect loop run its first attempt and log it.
         tokio::time::sleep(Duration::from_millis(200)).await;
 
-        for tab in &app.tabs {
+        for tab in &app.tabs.titles {
             let log = tab.view.log();
             let lines: Vec<String> = log
                 .read()
@@ -972,7 +996,7 @@ mod tests {
             );
         }
 
-        for tab in &mut app.tabs {
+        for tab in &mut app.tabs.titles {
             let _ = tab.view.handle_command("stop").await;
         }
     }
@@ -986,12 +1010,12 @@ mod tests {
             mb_r_150_rtu_server_view("a"),
             mb_r_150_rtu_server_view("b"),
         ]);
-        for tab in &mut app.tabs {
+        for tab in &mut app.tabs.titles {
             let _ = tab.view.handle_command("start").await;
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
         assert!(
-            app.tabs[0]
+            app.tabs.titles[0]
                 .view
                 .log()
                 .read()
@@ -1002,11 +1026,11 @@ mod tests {
             "both instances must be in conflict before the recovery step"
         );
 
-        let log_a = app.tabs[0].view.log();
+        let log_a = app.tabs.titles[0].view.log();
         let written_before_stop = log_a.read().await.written();
 
         // Stop "b"; "a" is left alone on the path.
-        let _ = app.tabs[1].view.handle_command("stop").await;
+        let _ = app.tabs.titles[1].view.handle_command("stop").await;
 
         // MB-R-150's own registry (App::serial_paths) drives this, not each tab's log content —
         // the shared registry is the single source of truth for "who's still claiming the path".
@@ -1046,7 +1070,7 @@ mod tests {
         );
         drop(after_stop);
 
-        let _ = app.tabs[0].view.handle_command("stop").await;
+        let _ = app.tabs.titles[0].view.handle_command("stop").await;
     }
 
     #[tokio::test]
@@ -1095,18 +1119,25 @@ mod tests {
         let orig = orig.with_replacement(replacement).with_host("mock").boxed();
         let mut app = build_app(vec![orig]);
 
-        assert!(app.tabs[0].view.is_focused(), "active tab starts focused");
+        assert!(
+            app.tabs.titles[0].view.is_focused(),
+            "active tab starts focused"
+        );
         assert_eq!(app.registry.list(), vec!["original".to_string()]);
 
         app.refresh_snapshot().await;
 
-        assert_eq!(app.tabs[0].view.name(), "replacement", "view swapped");
+        assert_eq!(
+            app.tabs.titles[0].view.name(),
+            "replacement",
+            "view swapped"
+        );
         assert!(
-            app.tabs[0].view.is_focused(),
+            app.tabs.titles[0].view.is_focused(),
             "focus carried onto the replacement view"
         );
         assert!(
-            Arc::ptr_eq(&app.tabs[0].log, &app.tabs[0].view.log()),
+            Arc::ptr_eq(&app.tabs.titles[0].log, &app.tabs.titles[0].view.log()),
             "tab's log channel tracks the replacement view"
         );
         assert_eq!(
@@ -1133,10 +1164,13 @@ mod tests {
 
         app.refresh_snapshot().await;
 
-        assert_eq!(app.tabs[0].name, "A", "the first occurrence keeps its name");
-        assert_eq!(app.tabs[1].name, "A (2)");
+        assert_eq!(
+            app.tabs.titles[0].name, "A",
+            "the first occurrence keeps its name"
+        );
+        assert_eq!(app.tabs.titles[1].name, "A (2)");
 
-        let tab1_log = app.tabs[1].log.write().await.peek_n(LOG_SIZE);
+        let tab1_log = app.tabs.titles[1].log.write().await.peek_n(LOG_SIZE);
         assert!(
             tab1_log
                 .iter()
@@ -1146,7 +1180,7 @@ mod tests {
             "renamed tab's log carries the collision warning: {tab1_log:?}"
         );
 
-        let tab0_log = app.tabs[0].log.write().await.peek_n(LOG_SIZE);
+        let tab0_log = app.tabs.titles[0].log.write().await.peek_n(LOG_SIZE);
         assert!(
             !tab0_log
                 .iter()
@@ -1171,7 +1205,7 @@ mod tests {
             deadline: Instant::now() - Duration::from_millis(1),
         });
         app.expire_pending_tab_digit();
-        assert_eq!(app.active, 1);
+        assert_eq!(app.tabs.selected_index(), 1);
         assert!(app.keymode.is_none());
 
         app.keymode = Some(KeyMode::TabDigit {
@@ -1179,7 +1213,11 @@ mod tests {
             deadline: Instant::now() + Duration::from_secs(60),
         });
         app.expire_pending_tab_digit();
-        assert_eq!(app.active, 1, "not yet expired: no jump happened");
+        assert_eq!(
+            app.tabs.selected_index(),
+            1,
+            "not yet expired: no jump happened"
+        );
         assert!(
             matches!(app.keymode, Some(KeyMode::TabDigit { first: 2, .. })),
             "not yet expired: pending chord left intact"
