@@ -979,14 +979,37 @@ impl DiffView {
         let selected = state.mode() == DiffMode::Visual
             && state.selected_rows().is_some_and(|r| r.contains(&row_idx));
         let is_active = row_idx == state.active_row();
+        // The colour replaces only the background of the theme's own selection/highlight
+        // style rather than standing in as a style of its own (UI-R-331, UI-R-332); list
+        // order breaks a tie between overlapping ranges (UI-E-159).
+        let covering_color = state.marked_range_highlight().then(|| {
+            state.row(row_idx).and_then(|info| {
+                state.marked_ranges().iter().find_map(|m| {
+                    let line = match m.side {
+                        Side::Old => info.old_line,
+                        Side::New => info.new_line,
+                    };
+                    line.filter(|l| m.lines.contains(l)).map(|_| m.color)
+                })
+            })
+        });
+        let covering_color = covering_color.flatten();
         if selected {
+            let style = match covering_color {
+                Some(c) => self.style.selection.bg(c),
+                None => self.style.selection,
+            };
             for rect in rects {
-                buf.set_style(*rect, self.style.selection);
+                buf.set_style(*rect, style);
             }
         }
         if is_active {
+            let style = match covering_color {
+                Some(c) => self.style.highlighted_row.bg(c),
+                None => self.style.highlighted_row,
+            };
             for rect in rects {
-                buf.set_style(*rect, self.style.highlighted_row);
+                buf.set_style(*rect, style);
             }
         }
     }
@@ -1840,6 +1863,120 @@ mod tests {
             b[(0, 3)].bg,
             w.style.general.bg.expect("style sets a color")
         );
+    }
+
+    #[test]
+    /// UI-R-331 — a covering marked range colours the active row's background on every
+    /// pane, every other attribute of the highlighted-row style unchanged.
+    fn ut_covering_marked_range_colours_the_active_row_on_every_pane() {
+        let mut st = state_with("@@ -1,3 +1,3 @@\n a\n b\n c\n");
+        st.set_active_row(2);
+        st.set_marked_ranges(vec![MarkedRange {
+            side: Side::Old,
+            lines: 2..=2,
+            color: Color::Yellow,
+        }]);
+        let mut w = DiffView::default();
+        w.style
+            .set_highlighted_row(Style::default().bg(Color::Blue).fg(Color::Cyan));
+        let mut b = buffer(20, 4);
+        StatefulWidget::render(&w, Rect::new(0, 0, 20, 4), &mut b, &mut st);
+        assert_eq!(b[(3, 2)].bg, Color::Yellow);
+        assert_eq!(b[(14, 2)].bg, Color::Yellow);
+        assert_eq!(b[(3, 2)].fg, Color::Cyan);
+        assert_eq!(b[(14, 2)].fg, Color::Cyan);
+    }
+
+    #[test]
+    /// UI-R-332 — a marked range colours each Visual-mode selected row it covers, row by
+    /// row, so an unmarked row inside the selection keeps the plain selection style.
+    fn ut_marked_range_colours_each_covered_visual_selected_row() {
+        let mut st = state_with("@@ -1,3 +1,3 @@\n a\n b\n c\n");
+        st.set_mode(DiffMode::Visual);
+        st.set_anchor(Some(1));
+        st.set_active_row(3);
+        st.set_marked_ranges(vec![MarkedRange {
+            side: Side::Old,
+            lines: 1..=1,
+            color: Color::Yellow,
+        }]);
+        let mut w = DiffView::default();
+        w.style.set_selection(Style::default().bg(Color::Magenta));
+        let mut b = buffer(20, 4);
+        StatefulWidget::render(&w, Rect::new(0, 0, 20, 4), &mut b, &mut st);
+        assert_eq!(b[(3, 1)].bg, Color::Yellow);
+        assert_eq!(b[(3, 2)].bg, Color::Magenta);
+    }
+
+    #[test]
+    /// UI-R-330 — with the marked-range highlight option off, the active row keeps the
+    /// plain highlighted-row style even where a marked range covers it, and UI-R-267's
+    /// gutter fill on a non-active covered row is unaffected.
+    fn ut_marked_range_highlight_off_leaves_the_plain_highlight() {
+        let mut st = DiffViewStateBuilder::default()
+            .marked_range_highlight(false)
+            .build_with_diff("@@ -1,3 +1,3 @@\n a\n b\n c\n")
+            .unwrap();
+        st.set_active_row(2);
+        st.set_marked_ranges(vec![MarkedRange {
+            side: Side::Old,
+            lines: 1..=2,
+            color: Color::Yellow,
+        }]);
+        let w = DiffView::default();
+        let mut b = buffer(20, 4);
+        StatefulWidget::render(&w, Rect::new(0, 0, 20, 4), &mut b, &mut st);
+        assert_eq!(
+            b[(0, 2)].bg,
+            w.style.highlighted_row.bg.expect("style sets a color")
+        );
+        assert_eq!(
+            b[(0, 1)].bg,
+            Color::Yellow,
+            "non-active covered row keeps the gutter fill"
+        );
+    }
+
+    #[test]
+    /// UI-E-159 — several marked ranges covering the same highlighted row: the first
+    /// covering range in the supplied list wins and supplies the background, on either
+    /// side or overlapping within one side.
+    fn ut_first_covering_marked_range_supplies_the_highlight_background() {
+        let mut st = state_with("@@ -1,3 +1,3 @@\n a\n b\n c\n");
+        st.set_active_row(2);
+        st.set_marked_ranges(vec![
+            MarkedRange {
+                side: Side::Old,
+                lines: 2..=2,
+                color: Color::Yellow,
+            },
+            MarkedRange {
+                side: Side::New,
+                lines: 2..=2,
+                color: Color::Magenta,
+            },
+        ]);
+        let w = DiffView::default();
+        let mut b = buffer(20, 4);
+        StatefulWidget::render(&w, Rect::new(0, 0, 20, 4), &mut b, &mut st);
+        assert_eq!(b[(3, 2)].bg, Color::Yellow);
+        assert_eq!(b[(14, 2)].bg, Color::Yellow);
+
+        st.set_marked_ranges(vec![
+            MarkedRange {
+                side: Side::Old,
+                lines: 1..=2,
+                color: Color::Yellow,
+            },
+            MarkedRange {
+                side: Side::Old,
+                lines: 2..=3,
+                color: Color::Magenta,
+            },
+        ]);
+        let mut b2 = buffer(20, 4);
+        StatefulWidget::render(&w, Rect::new(0, 0, 20, 4), &mut b2, &mut st);
+        assert_eq!(b2[(3, 2)].bg, Color::Yellow);
     }
 
     #[test]
