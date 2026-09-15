@@ -41,11 +41,12 @@ impl<V: Version, H: CsActionHandler<V>> InboundDispatch<V> for CsDispatch<V, H> 
 }
 
 /// Run the CS connection until `Terminate`, channel close, or the peer disconnects.
-pub(crate) async fn run<V, H, S, L>(
+pub(crate) async fn run<V, H, S, L, Stat>(
     ws: S,
     handler: Arc<H>,
     commands: &mut super::Commands<'_, Command<V>>,
     log: L,
+    status: Stat,
     timeout: Duration,
 ) -> RunEnd
 where
@@ -57,12 +58,13 @@ where
         + 'static,
     S::Error: Send,
     L: LogFn + Clone,
+    Stat: LogFn + Clone,
 {
     let dispatch = Arc::new(CsDispatch {
         handler: handler.clone(),
         _v: PhantomData,
     });
-    let connection = Connection::<V>::start(ws, dispatch, log.clone(), timeout);
+    let connection = Connection::<V>::start(ws, dispatch, status, timeout);
     handler.on_connected().await;
 
     let shutdown = connection.shutdown.clone();

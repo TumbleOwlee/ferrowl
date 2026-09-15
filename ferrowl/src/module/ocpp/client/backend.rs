@@ -321,11 +321,12 @@ impl<V: Version> OcppClient<V> {
         }
         let config = build_config(spec, device);
         let wire_log = log_fn(self.messages.clone());
-        // OC-R-120: connection-status lines (currently just "Client disconnected", emitted once
-        // the client task ends regardless of why) go to the module log, not the message table —
-        // the message table records only request/response pairs (§9). General diagnostic strings
-        // (`wire_log`, e.g. "Command dropped...") are unaffected and keep going to the message
-        // table as before.
+        // OC-R-120: connection-status lines (failed-dial reason, "Connection dropped.", the
+        // backoff-wait line, and the final "Client disconnected" once the client task ends
+        // regardless of why) go to the module log, not the message table — the message table
+        // records only request/response pairs (`docs/specs/ocpp/data-contract.md` `## Message
+        // log`). General diagnostic strings (`wire_log`, e.g. "Command dropped...") are
+        // unaffected and keep going to the message table as before.
         let status = status_fn(log.clone());
         let client = ClientBuilder::<V>::new(
             Arc::new(RwLock::new(config)),
@@ -583,9 +584,11 @@ fn log_fn(
     }
 }
 
-/// A `LogFn` that records connection-status lines (currently just "Client disconnected",
-/// emitted once the client task ends regardless of why) into the module log (OC-R-120), not the
-/// message table — the message table records only request/response message pairs (§9).
+/// A `LogFn` that records connection-status lines (failed-dial reason, "Connection dropped.",
+/// the backoff-wait line, and the final "Client disconnected" once the client task ends
+/// regardless of why) into the module log (OC-R-120), not the message table — the message table
+/// records only request/response message pairs (`docs/specs/ocpp/data-contract.md`
+/// `## Message log`).
 fn status_fn(
     log: SharedLog,
 ) -> impl Fn(String) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> + Clone {
@@ -928,6 +931,59 @@ mod tests {
                 .iter()
                 .any(|m| m.payload.as_str().is_some_and(|s| s.contains("disconnect"))),
             "the disconnect status line must not be recorded in the message table"
+        );
+
+        let _ = backend.stop().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// OC-R-120 — a CS reconnect attempt against an unreachable CSMS logs its status lines to
+    /// the module log only; the message table records request/response pairs (data-contract.md
+    /// `## Message log`) and stays empty here.
+    async fn ut_reconnect_status_lines_land_in_module_log_not_message_table() {
+        let spec = OcppSpec {
+            name: "cs".to_owned(),
+            version: Default::default(),
+            role: Default::default(),
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".to_owned(),
+            port: reserve_tcp_port().release(),
+            path: "/ocpp/CS001".to_owned(),
+            timeout_ms: Some(200),
+            reconnect: Some(true),
+            security: OcppSecurityConfig::default(),
+        };
+
+        let log = test_log();
+        let mut backend = OcppClient::<ferrowl_ocpp::V1_6>::new();
+        backend
+            .start(&spec, &OcppDeviceConfig::default(), &log, NoopCsHandler)
+            .await
+            .expect("start must not fail synchronously");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut found = false;
+        while std::time::Instant::now() < deadline {
+            let lines = log.write().await.peek_n(crate::app::LOG_SIZE);
+            if lines
+                .iter()
+                .any(|(_, _, line)| line.contains("Reconnecting in"))
+            {
+                found = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(
+            found,
+            "the module log must receive a 'Reconnecting in' status line while backing off"
+        );
+
+        let messages = backend.messages_snapshot().await;
+        assert!(
+            messages.is_empty(),
+            "a CS that never completed a handshake exchanged no request/response pair, so the \
+             message table must stay empty, got: {messages:?}"
         );
 
         let _ = backend.stop().await;
