@@ -269,7 +269,6 @@ async fn stop_all(modules: &mut [RunModule]) -> Vec<String> {
     let deduped = dedupe_names(&names);
     let mut lines = Vec::new();
     for (module, name) in modules.iter_mut().zip(deduped.iter()) {
-        let before = module.log.read().await.written();
         let result = module.view.handle_command("stop").await;
         let mut outcome = if let CommandResult::Handled(Some((level, msg))) = &result {
             module.log.write().await.write(*level, msg);
@@ -289,25 +288,12 @@ async fn stop_all(modules: &mut [RunModule]) -> Vec<String> {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
         let timed_out = module.view.lifecycle_pending();
-        // CL-R-057 — a view whose stop is deferred (`Handled(None)`) only writes its outcome
-        // into the log once `refresh()` observes the settled task; read it back rather than
-        // trust the immediate `handle_command` result, which for such a view is always clean.
-        if outcome.is_none() {
-            let guard = module.log.read().await;
-            let written = guard.written();
-            let new_count = written.saturating_sub(before) as usize;
-            if new_count > 0 {
-                let window = guard.peek_n(LOG_PEEK);
-                let take = new_count.min(window.len());
-                let start = window.len() - take;
-                if let Some((_, level, msg)) = window[start..]
-                    .iter()
-                    .rev()
-                    .find(|(_, level, _)| *level == Level::Error)
-                {
-                    outcome = Some((*level, msg.clone()));
-                }
-            }
+        // CL-R-057 — a view whose stop is deferred (`Handled(None)`) only settles its own
+        // outcome once `refresh()` observes the completed task; read it back through the typed
+        // accessor rather than the log, which may carry lines unrelated to the stop itself
+        // (e.g. a network callback logged during the same settle window).
+        if !timed_out && outcome.is_none() {
+            outcome = module.view.take_stop_outcome();
         }
         let line = if timed_out {
             format!("Error: timed out stopping '{name}'")
@@ -998,6 +984,27 @@ mod tests {
             lines,
             vec!["Error: failed to stop 'b': Stop server failed: boom".to_string()]
         );
+    }
+
+    #[tokio::test]
+    /// CL-R-057 — a module that logs an `Error`-level line unrelated to its own stop during the
+    /// same settle window (e.g. a network callback), but whose stop itself completes cleanly, is
+    /// still reported as `Stopped '<name>'`, never `Error: failed to stop ...` derived from that
+    /// unrelated line.
+    async fn ut_stop_all_ignores_unrelated_error_logged_during_settle() {
+        let (view_b, _handle_b) = crate::app::testkit::MockView::pair("b");
+        let view_b =
+            view_b.with_unrelated_error_during_settle(1, "peer disconnecting unexpectedly");
+        let view_b = view_b.boxed();
+        let log = view_b.log();
+        let mut modules = vec![RunModule {
+            name: "b".to_string(),
+            view: view_b,
+            log,
+            last_written: 0,
+        }];
+        let lines = stop_all(&mut modules).await;
+        assert_eq!(lines, vec!["Stopped 'b'".to_string()]);
     }
 
     /// A `ModuleView` double whose `lifecycle_pending()` never clears and whose `handle_command`

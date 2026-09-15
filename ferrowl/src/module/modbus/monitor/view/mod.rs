@@ -810,6 +810,9 @@ pub struct ModbusMonitorModuleView {
     /// has signalled `request_stop()` and is waiting for `refresh()` to observe `poll_stop()`
     /// complete before logging its outcome (and, for `Restart`/`Reload`, running the follow-up).
     pending_lifecycle: Option<PendingLifecycle>,
+    /// CL-R-057 — the settled outcome of the most recently completed `PendingLifecycle::Stop`,
+    /// consumed by [`ModuleView::take_stop_outcome`] rather than re-derived from the log.
+    last_stop_outcome: Option<(Level, String)>,
 }
 
 /// UI-R-314/UI-R-315 — the follow-up state a deferred stop-bearing lifecycle command needs once
@@ -846,6 +849,7 @@ impl ModbusMonitorModuleView {
             cached_messages_log: None,
             cached_messages_generation: 0,
             pending_lifecycle: None,
+            last_stop_outcome: None,
         }
     }
 
@@ -1305,6 +1309,7 @@ impl ModuleView for ModbusMonitorModuleView {
                             Err(e) => (Level::Error, format!("Stop monitor failed: {e}")),
                         };
                         self.log().write().await.write(level, &msg);
+                        self.last_stop_outcome = Some((level, msg));
                     }
                     Some(PendingLifecycle::Restart) => {
                         let endpoint = self.spec.endpoint.to_string();
@@ -1594,6 +1599,10 @@ impl ModuleView for ModbusMonitorModuleView {
 
     fn lifecycle_pending(&self) -> bool {
         self.pending_lifecycle.is_some()
+    }
+
+    fn take_stop_outcome(&mut self) -> Option<(Level, String)> {
+        self.last_stop_outcome.take()
     }
 
     fn session_spec(&self) -> Option<serde_json::Value> {

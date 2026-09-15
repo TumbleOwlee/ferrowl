@@ -113,6 +113,15 @@ pub trait ModuleView: SetFocus + IsFocus {
         false
     }
 
+    /// CL-R-057 — the outcome of the most recently settled deferred stop (`Ok` = clean, `Err` =
+    /// the failure's own level/message), consumed once `lifecycle_pending()` clears. A caller
+    /// that needs to know whether a settled stop failed must read this rather than scan the
+    /// view's log, which may carry unrelated lines written during the same settle window.
+    /// Default: no deferred-stop outcome to report.
+    fn take_stop_outcome(&mut self) -> Option<(Level, String)> {
+        None
+    }
+
     /// Module-specific commands shown in the help popup.
     fn commands(&self) -> &[CommandDescriptor];
 

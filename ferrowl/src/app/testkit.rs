@@ -168,8 +168,12 @@ pub(crate) struct MockView {
     pending_stop: Arc<AtomicUsize>,
     /// Mirrors a real view's deferred-lifecycle shape (`ferrowl-modbus`'s `refresh()`): written to
     /// `log` only once `pending_stop` clears, never returned as `handle_command`'s immediate
-    /// result.
+    /// result. May carry a line unrelated to the stop's own outcome (CL-R-057's negative case).
     deferred_log: Arc<Mutex<Option<(Level, String)>>>,
+    /// The stop's own settled outcome, consumed by [`ModuleView::take_stop_outcome`] once
+    /// `pending_stop` clears. Independent of `deferred_log`: a real view may log an unrelated
+    /// line during the same settle window without that line being the stop's outcome.
+    deferred_outcome: Arc<Mutex<Option<(Level, String)>>>,
 }
 
 impl MockView {
@@ -205,6 +209,7 @@ impl MockView {
             command_result: None,
             pending_stop: Arc::new(AtomicUsize::new(0)),
             deferred_log: Arc::new(Mutex::new(None)),
+            deferred_outcome: Arc::new(Mutex::new(None)),
         };
         (view, handle)
     }
@@ -217,9 +222,26 @@ impl MockView {
     }
 
     /// Make this view report a pending deferred stop (`handle_command` answers `Handled(None)`,
-    /// same as a real view) whose failure only reaches `log` once it settles after `refreshes`
-    /// more `refresh()` calls — the shape `ferrowl-modbus`'s view produces post-settle-bound.
+    /// same as a real view) whose failure is the stop's own settled outcome, reaching both `log`
+    /// and [`ModuleView::take_stop_outcome`] only once it settles after `refreshes` more
+    /// `refresh()` calls — the shape `ferrowl-modbus`'s view produces post-settle-bound.
     pub(crate) fn with_deferred_stop_error(self, refreshes: usize, message: &str) -> Self {
+        self.pending_stop.store(refreshes.max(1), Ordering::Relaxed);
+        *self.deferred_log.lock().unwrap() = Some((Level::Error, message.to_string()));
+        *self.deferred_outcome.lock().unwrap() = Some((Level::Error, message.to_string()));
+        self
+    }
+
+    /// Make this view report a pending deferred stop that settles cleanly but, during the same
+    /// settle window, logs an `Error`-level line unrelated to the stop itself (CL-R-057's
+    /// negative case: a network callback line, not the stop's own outcome). Unlike
+    /// [`with_deferred_stop_error`], `take_stop_outcome` reports nothing — the line reaches only
+    /// `log`.
+    pub(crate) fn with_unrelated_error_during_settle(
+        self,
+        refreshes: usize,
+        message: &str,
+    ) -> Self {
         self.pending_stop.store(refreshes.max(1), Ordering::Relaxed);
         *self.deferred_log.lock().unwrap() = Some((Level::Error, message.to_string()));
         self
@@ -323,6 +345,10 @@ impl ModuleView for MockView {
 
     fn lifecycle_pending(&self) -> bool {
         self.pending_stop.load(Ordering::Relaxed) > 0
+    }
+
+    fn take_stop_outcome(&mut self) -> Option<(Level, String)> {
+        self.deferred_outcome.lock().unwrap().take()
     }
 
     fn handle_command<'a>(&'a mut self, cmd: &'a str) -> CommandFuture<'a> {
