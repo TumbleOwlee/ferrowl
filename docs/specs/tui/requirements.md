@@ -16,9 +16,9 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-003** — The application owns an ordered list of tabs and one active index.
 
-**UI-R-325** — Each tab (UI-R-003) pairs one module content view with its own log pane.
+**UI-R-345** — Each tab (UI-R-003) pairs one module content view with its own log pane.
 
-**UI-R-326** — Exactly one tab (UI-R-003) is active and rendered; the others keep running in the background (UI-R-030).
+**UI-R-346** — Exactly one tab (UI-R-003) is active and rendered; the others keep running in the background (UI-R-030).
 
 **UI-R-004** — Every tab has a unique display name.
 
@@ -74,11 +74,11 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-018** — A command not handled at the app level is forwarded to the active tab's view.
 
-**UI-R-327** — A command the active tab's view handles (UI-R-018) has any `(level, message)` it returns appended to that tab's log.
+**UI-R-347** — A command the active tab's view handles (UI-R-018) has any `(level, message)` it returns appended to that tab's log.
 
-**UI-R-328** — A command the active tab's view leaves unhandled (UI-R-018) makes the application log `Unknown command ':<input>'` at Warning.
+**UI-R-348** — A command the active tab's view leaves unhandled (UI-R-018) makes the application log `Unknown command ':<input>'` at Warning.
 
-**UI-R-329** — The level of a command result message (UI-R-327) is chosen by the producer, never re-derived from message text.
+**UI-R-349** — The level of a command result message (UI-R-347) is chosen by the producer, never re-derived from message text.
 
 **UI-R-019** — `:quit` closes the active tab, stopping its module first, and quits the application only when it was the last tab. `:qall` quits immediately regardless of tab count.
 
@@ -204,7 +204,7 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-187** — While the script-table keybind-help overlay (UI-R-056) is open it takes precedence over all other dialog keys.
 
-**UI-R-324** — While the script table is focused, its title advertises the keybind-help overlay (UI-R-056) and no other binding.
+**UI-R-344** — While the script table is focused, its title advertises the keybind-help overlay (UI-R-056) and no other binding.
 
 **UI-R-058** — In the script-manager dialog, while the script table is focused, the table supports editing its working list: a non-empty name in the new-script input plus confirm adds a new enabled, empty script (empty or already-used name refused, per UI-R-089).
 

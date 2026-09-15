@@ -373,7 +373,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-324 — the script table's title advertises only the help overlay, not individual bindings.
+    /// UI-R-344 — the script table's title advertises only the help overlay, not individual bindings.
     fn ut_script_table_title_advertises_help_only() {
         let table = script_table(rows(&[]));
         let title = format!("{:?}", table.widget);

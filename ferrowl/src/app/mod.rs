@@ -811,7 +811,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-325 — each tab pairs one module content view with its own log pane: two tabs' log
+    /// UI-R-345 — each tab pairs one module content view with its own log pane: two tabs' log
     /// panes are distinct, not shared.
     fn ut_tab_pairs_view_with_its_own_log_pane() {
         use super::testkit::{MockView, build_app};
@@ -828,7 +828,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-326 — exactly one tab is active and rendered; the others are not.
+    /// UI-R-346 — exactly one tab is active and rendered; the others are not.
     fn ut_only_active_tab_is_rendered() {
         use super::testkit::{MockView, build_app};
         let (a, ha) = MockView::pair("a");

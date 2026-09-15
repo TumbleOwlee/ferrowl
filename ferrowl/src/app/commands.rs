@@ -197,7 +197,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// UI-R-327 — a command the active tab's view handles has any `(level, message)` it returns
+    /// UI-R-347 — a command the active tab's view handles has any `(level, message)` it returns
     /// appended to that tab's log.
     async fn ut_handled_command_message_appended_to_tab_log() {
         use crate::app::testkit::{MockView, build_app};
@@ -215,7 +215,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// UI-R-328 — a command the active tab's view leaves unhandled makes the application log
+    /// UI-R-348 — a command the active tab's view leaves unhandled makes the application log
     /// `Unknown command ':<input>'` at Warning.
     async fn ut_unhandled_command_logs_unknown_command_warning() {
         use crate::app::testkit::{MockView, build_app};
@@ -233,7 +233,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// UI-R-329 — the level of a command result message is chosen by the producer, never
+    /// UI-R-349 — the level of a command result message is chosen by the producer, never
     /// re-derived from message text: a message that reads like an error, tagged Info by its
     /// producer, is logged at Info.
     async fn ut_command_message_level_is_the_producers_not_derived_from_text() {
