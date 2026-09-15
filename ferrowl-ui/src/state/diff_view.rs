@@ -214,6 +214,11 @@ pub struct DiffViewState {
     #[getset(get = "pub", set = "pub")]
     #[builder(default)]
     marked_ranges: Vec<MarkedRange>,
+    /// Whether a covering marked range colours the active and selected rows' highlight
+    /// (UI-R-330, UI-R-331, UI-R-332); on by default, so a consumer opts out.
+    #[getset(get_copy = "pub")]
+    #[builder(default = "true")]
+    marked_range_highlight: bool,
     /// Markdown blocks anchored to a file line range (UI-R-269), settable when built and
     /// afterwards.
     #[getset(get = "pub", set = "pub")]
@@ -1561,6 +1566,20 @@ mod tests {
         }];
         s.set_marked_ranges(after.clone());
         assert_eq!(s.marked_ranges(), &after);
+    }
+
+    #[test]
+    /// UI-R-330 — `marked_range_highlight` defaults to on and is settable through the
+    /// builder.
+    fn ut_marked_range_highlight_defaults_on_and_is_builder_settable() {
+        let on = DiffViewStateBuilder::default().build().unwrap();
+        assert!(on.marked_range_highlight());
+
+        let off = DiffViewStateBuilder::default()
+            .marked_range_highlight(false)
+            .build()
+            .unwrap();
+        assert!(!off.marked_range_highlight());
     }
 
     #[test]
