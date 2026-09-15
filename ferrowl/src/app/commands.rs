@@ -375,7 +375,7 @@ mod tests {
 
         assert!(!app.run_command("quit").await);
         assert_eq!(
-            app.tabs.len(),
+            app.tabs.titles.len(),
             1,
             "the tab is removed once the stop settles"
         );
@@ -398,7 +398,7 @@ mod tests {
         assert!(!app.run_command("quit").await);
         let elapsed = before.elapsed();
         assert_eq!(
-            app.tabs.len(),
+            app.tabs.titles.len(),
             1,
             "the tab must still be removed once the settle bound expires"
         );
