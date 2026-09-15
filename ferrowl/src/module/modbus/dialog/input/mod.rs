@@ -116,6 +116,72 @@ impl EditInputDialog {
         )
     }
 
+    fn value_inputs_visible(&self) -> bool {
+        self.is_server || self.access.get_value().0 != ferrowl_codec::Access::ReadOnly
+    }
+
+    fn value_input(&self) -> &str {
+        if self.value_inputs_visible() {
+            self.value.state.input()
+        } else {
+            ""
+        }
+    }
+
+    fn default_value_input(&self) -> &str {
+        if self.value_inputs_visible() {
+            self.default_value.state.input()
+        } else {
+            ""
+        }
+    }
+
+    fn resolved_format(&self) -> Result<RegisterFormat, String> {
+        Ok(if self.is_boolean_kind() {
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            )
+        } else {
+            match self.value_type.state.get_value() {
+                ValueType::Number => {
+                    let selected = self.number_format.state.get_value();
+                    let endian = self.number_endian.state.get_value().0;
+                    let word_order = self.number_word_order.state.get_value().0;
+                    let resolution = Resolution(
+                        self.number_resolution
+                            .state
+                            .input()
+                            .trim()
+                            .parse::<f64>()
+                            .map_err(|_| "Resolution must be a number.".to_string())?,
+                    );
+                    // Bitmask applies to integer formats only; floats ignore it.
+                    let bitfield = if is_integer_format(&selected.0) {
+                        parse_bitmask(self.number_bitmask.state.input())
+                            .map_err(|e| format!("Bitmask {e}."))?
+                    } else {
+                        BitField::default()
+                    };
+                    with_numeric_parts(&selected.0, endian, word_order, resolution, bitfield)
+                }
+                ValueType::Text => {
+                    let alignment = self.text_alignment.state.get_value().0;
+                    let width = self
+                        .text_width
+                        .state
+                        .input()
+                        .trim()
+                        .parse::<usize>()
+                        .map_err(|_| "Width must be a number.".to_string())?;
+                    RegisterFormat::Ascii(alignment, Width(width))
+                }
+            }
+        })
+    }
+
     fn validate(&self) -> Result<(), String> {
         if let ValidateResult::Error(e) = String::validate(self.label.state.input()) {
             return Err(format!("Label: {e}"));
@@ -140,18 +206,6 @@ impl EditInputDialog {
                     {
                         return Err(format!("Bitmask: {e}"));
                     }
-                    let v = self.value.state.input();
-                    let s = v.trim();
-                    if let Err(e) = encode(format, s) {
-                        return Err(format!("Value: cannot convert '{s}' to number [{e}]"));
-                    }
-                    let v = self.default_value.state.input();
-                    let s = v.trim();
-                    if !s.is_empty()
-                        && let Err(e) = encode(format, s)
-                    {
-                        return Err(format!("Value: cannot convert '{s}' to number [{e}]"));
-                    }
                 }
                 ValueType::Text => {
                     if let ValidateResult::Error(e) = usize::validate(self.text_width.state.input())
@@ -159,6 +213,25 @@ impl EditInputDialog {
                         return Err(format!("Width: {e}"));
                     }
                 }
+            }
+        }
+        // A virtual register's value goes through `str_to_value` (`Scalar::from_input`) on write,
+        // never `encode` (see `set_register_value`), so confirm must not format-check it either.
+        if parse_address(self.address.state.input()) != Ok(Address::Virtual) {
+            let format = self.resolved_format()?;
+            let s = self.value_input();
+            if !s.is_empty()
+                && let Err(e) = encode(&format, s)
+            {
+                return Err(format!("Value: cannot convert '{s}' to number [{e}]"));
+            }
+            let s = self.default_value_input();
+            if !s.is_empty()
+                && let Err(e) = encode(&format, s)
+            {
+                return Err(format!(
+                    "Default Value: cannot convert '{s}' to number [{e}]"
+                ));
             }
         }
         Ok(())
@@ -264,50 +337,7 @@ impl EditInputDialog {
         let description = self.description.state.input().trim().to_string();
         let address = parse_address(self.address.state.input())?;
 
-        let format = if self.is_boolean_kind() {
-            RegisterFormat::u16(
-                RegisterEndian::Big,
-                RegisterWordOrder::Normal,
-                Resolution(1.0),
-                BitField::default(),
-            )
-        } else {
-            match self.value_type.state.get_value() {
-                ValueType::Number => {
-                    let selected = self.number_format.state.get_value();
-                    let endian = self.number_endian.state.get_value().0;
-                    let word_order = self.number_word_order.state.get_value().0;
-                    let resolution = Resolution(
-                        self.number_resolution
-                            .state
-                            .input()
-                            .trim()
-                            .parse::<f64>()
-                            .map_err(|_| "Resolution must be a number.".to_string())?,
-                    );
-                    // Bitmask applies to integer formats only; floats ignore it.
-                    let bitfield = if is_integer_format(&selected.0) {
-                        parse_bitmask(self.number_bitmask.state.input())
-                            .map_err(|e| format!("Bitmask {e}."))?
-                    } else {
-                        BitField::default()
-                    };
-                    with_numeric_parts(&selected.0, endian, word_order, resolution, bitfield)
-                }
-                ValueType::Text => {
-                    let alignment = self.text_alignment.state.get_value().0;
-                    let width = self
-                        .text_width
-                        .state
-                        .input()
-                        .trim()
-                        .parse::<usize>()
-                        .map_err(|_| "Width must be a number.".to_string())?;
-                    RegisterFormat::Ascii(alignment, Width(width))
-                }
-            }
-        };
-        let is_ascii = matches!(format, RegisterFormat::Ascii(_, _));
+        let format = self.resolved_format()?;
 
         let slave_id = self
             .slave_id
@@ -326,11 +356,11 @@ impl EditInputDialog {
             .build()
             .expect("all register fields are set");
 
-        let input = self.value.state.input().to_string();
-        let value = if is_ascii || !input.trim().is_empty() {
-            Some(input)
-        } else {
+        let s = self.value_input();
+        let value = if s.is_empty() {
             None
+        } else {
+            Some(s.to_string())
         };
         let named_values = if self.pending_named_values.is_empty() {
             None
@@ -339,7 +369,7 @@ impl EditInputDialog {
         };
 
         let default = {
-            let s = self.default_value.state.input().trim();
+            let s = self.default_value_input();
             if s.is_empty() {
                 None
             } else {
@@ -673,9 +703,273 @@ mod apply_tests {
 
     #[test]
     fn ut_empty_add_dialog_does_not_apply() {
-        // A freshly opened "Add" dialog has empty fields (no slave id / value), so confirming it
-        // must fail validation rather than produce a bogus register.
+        // A freshly opened "Add" dialog has an empty Label, so confirming it must fail validation
+        // rather than produce a bogus register.
         assert!(EditInputDialog::new().apply().is_err());
+    }
+
+    #[test]
+    /// MB-R-222 — an empty Value input applies with no value to write, both for a numeric
+    /// register and (since MB-R-227 governs hidden inputs only) for an Ascii register too.
+    fn ut_empty_value_input_applies_with_no_write() {
+        let numeric = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let edited = EditInputDialog::from_register("n", "", &numeric, "", None, true)
+            .apply()
+            .expect("empty value input should apply");
+        assert_eq!(edited.value, None);
+
+        let ascii = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::Ascii(TextAlignment::Left, Width(4)),
+        );
+        let edited = EditInputDialog::from_register("n", "", &ascii, "", None, true)
+            .apply()
+            .expect("empty value input should apply");
+        assert_eq!(edited.value, None);
+    }
+
+    #[test]
+    /// MB-R-223 — a non-empty Value input is evaluated and carried through on confirm.
+    fn ut_non_empty_value_input_is_evaluated_and_carried() {
+        let numeric = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let edited = EditInputDialog::from_register("n", "", &numeric, "42", None, true)
+            .apply()
+            .expect("valid value input should apply");
+        assert_eq!(edited.value, Some("42".to_string()));
+    }
+
+    #[test]
+    /// MB-R-224 — an invalid Value input refuses confirm with an inline error, repeatably.
+    fn ut_invalid_value_input_refuses_confirm() {
+        let numeric = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let dialog = EditInputDialog::from_register("n", "", &numeric, "abc", None, true);
+        let err = dialog
+            .apply()
+            .expect_err("invalid value should refuse confirm");
+        assert!(err.starts_with("Value: "));
+        let err2 = dialog
+            .apply()
+            .expect_err("second apply should refuse the same way");
+        assert!(err2.starts_with("Value: "));
+    }
+
+    #[test]
+    /// MB-R-225 — an empty Default Value input is never a validation error.
+    fn ut_empty_default_value_is_not_an_error() {
+        let numeric = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let edited = EditInputDialog::from_register("n", "", &numeric, "1", None, true)
+            .apply()
+            .expect("empty default value should apply");
+        assert_eq!(edited.default, None);
+    }
+
+    #[test]
+    /// MB-R-226 — an invalid Default Value input refuses confirm with the error on its own input.
+    fn ut_invalid_default_value_refuses_confirm_on_its_own_input() {
+        let numeric = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let mut dialog = EditInputDialog::from_register("n", "", &numeric, "1", None, true);
+        crate::module::modbus::dialog::set_input(&mut dialog.default_value, "abc");
+        let err = dialog
+            .apply()
+            .expect_err("invalid default value should refuse confirm");
+        assert!(err.starts_with("Default Value: "));
+    }
+
+    #[test]
+    /// MB-R-227 — inputs hidden by MB-R-151 (client, ReadOnly) count as empty regardless of the
+    /// text they hold.
+    fn ut_hidden_value_inputs_count_as_empty() {
+        let ro = reg(
+            Kind::HoldingRegister,
+            Access::ReadOnly,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let mut dialog = EditInputDialog::from_register("n", "", &ro, "", None, false);
+        crate::module::modbus::dialog::set_input(&mut dialog.value, "abc");
+        crate::module::modbus::dialog::set_input(&mut dialog.default_value, "abc");
+        let edited = dialog.apply().expect("hidden inputs count as empty");
+        assert_eq!(edited.value, None);
+        assert_eq!(edited.default, None);
+    }
+
+    #[test]
+    /// MB-R-223, MB-R-226, MB-E-094 — a whitespace-only input is non-empty (emptiness is zero
+    /// length, never trimmed): an Ascii register takes the all-space value, a numeric register
+    /// reports a parse error, on both the Value and Default Value inputs.
+    fn ut_whitespace_value_input_is_not_empty() {
+        let ascii = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::Ascii(TextAlignment::Left, Width(4)),
+        );
+        let mut ascii_dialog = EditInputDialog::from_register("n", "", &ascii, "", None, true);
+        crate::module::modbus::dialog::set_input(&mut ascii_dialog.value, "  ");
+        let edited = ascii_dialog
+            .apply()
+            .expect("all-space Ascii value should apply");
+        assert_eq!(edited.value, Some("  ".to_string()));
+
+        let numeric = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let mut numeric_dialog = EditInputDialog::from_register("n", "", &numeric, "1", None, true);
+        crate::module::modbus::dialog::set_input(&mut numeric_dialog.value, " ");
+        let err = numeric_dialog
+            .apply()
+            .expect_err("all-space numeric value should refuse confirm");
+        assert!(err.starts_with("Value: "));
+        assert!(err.contains("' '"));
+
+        let mut numeric_default_dialog =
+            EditInputDialog::from_register("n", "", &numeric, "1", None, true);
+        crate::module::modbus::dialog::set_input(&mut numeric_default_dialog.default_value, " ");
+        let err = numeric_default_dialog
+            .apply()
+            .expect_err("all-space numeric default value should refuse confirm");
+        assert!(err.starts_with("Default Value: "));
+
+        let mut ascii_default_dialog =
+            EditInputDialog::from_register("n", "", &ascii, "1", None, true);
+        crate::module::modbus::dialog::set_input(&mut ascii_default_dialog.default_value, " ");
+        let edited = ascii_default_dialog
+            .apply()
+            .expect("all-space Ascii default value should apply");
+        assert_eq!(
+            edited.default,
+            Some(crate::config::device::Scalar::from_input(" "))
+        );
+    }
+
+    #[test]
+    /// MB-R-222, MB-R-223, MB-R-224 — a boolean-kind (Coil/DiscreteInput) Value input is
+    /// evaluated the same as any other kind: empty applies with no write, valid text applies and
+    /// carries, invalid text refuses confirm.
+    fn ut_boolean_kind_value_input_is_evaluated() {
+        let coil = reg(
+            Kind::Coil,
+            Access::ReadWrite,
+            Address::Fixed(1),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let dialog = EditInputDialog::from_register("n", "", &coil, "abc", None, true);
+        let err = dialog
+            .apply()
+            .expect_err("invalid boolean value should refuse confirm");
+        assert!(err.starts_with("Value: "));
+
+        let dialog = EditInputDialog::from_register("n", "", &coil, "1", None, true);
+        let edited = dialog.apply().expect("valid boolean value should apply");
+        assert_eq!(edited.value, Some("1".to_string()));
+
+        let dialog = EditInputDialog::from_register("n", "", &coil, "", None, true);
+        let edited = dialog.apply().expect("empty boolean value should apply");
+        assert_eq!(edited.value, None);
+    }
+
+    #[test]
+    /// MB-R-223 — a virtual register's Value/Default Value inputs are evaluated exactly as a
+    /// `:set` write is: `:set` on a virtual register goes through `str_to_value`
+    /// (`Scalar::from_input`), never `encode`, so confirm must not reject text `encode` would.
+    fn ut_virtual_register_value_input_is_not_format_encoded() {
+        let virtual_coil = reg(
+            Kind::Coil,
+            Access::ReadWrite,
+            Address::Virtual,
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let dialog = EditInputDialog::from_register("n", "", &virtual_coil, "abc", None, true);
+        let edited = dialog
+            .apply()
+            .expect("virtual register's value is not encode-checked");
+        assert_eq!(edited.value, Some("abc".to_string()));
     }
 }
 
