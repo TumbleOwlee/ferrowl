@@ -36,10 +36,11 @@ impl<S: DrawSurface> App<S> {
         match crate::command::parse(input) {
             Cmd::Empty => {}
             Cmd::Quit => {
-                if self.tabs.len() <= 1 {
+                if self.tabs.titles.len() <= 1 {
                     return true;
                 }
-                if let Some(tab) = self.tabs.get_mut(self.active) {
+                let idx = self.tabs.selected_index();
+                if let Some(tab) = self.tabs.titles.get_mut(idx) {
                     tab.view.handle_command("stop").await;
                     // UI-R-316 — a deferred stop only signals the task; join it (bounded) before
                     // the tab is dropped, so the tab close never abandons the task detached.
@@ -51,8 +52,8 @@ impl<S: DrawSurface> App<S> {
                         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
                     }
                 }
-                self.tabs.remove(self.active);
-                self.active = self.active.min(self.tabs.len() - 1);
+                self.tabs.titles.remove(idx);
+                self.tabs.select_index(idx);
                 self.rebuild_registry();
             }
             Cmd::QuitAll => return true,
@@ -74,7 +75,7 @@ impl<S: DrawSurface> App<S> {
             }
             Cmd::Log(file) => match file.as_deref() {
                 Some("clear") => {
-                    if let Some(tab) = self.tabs.get(self.active) {
+                    if let Some(tab) = self.active_tab() {
                         tab.log.write().await.clear();
                     }
                 }
@@ -86,14 +87,14 @@ impl<S: DrawSurface> App<S> {
                 self.log_active(level, msg).await;
             }
             Cmd::Swap(from, to) => {
-                let len = self.tabs.len();
+                let len = self.tabs.titles.len();
                 if from != to && from < len && to < len {
-                    self.tabs.swap(from, to);
+                    self.tabs.titles.swap(from, to);
                 }
             }
             // Everything not recognised at the app level is forwarded to the active view.
             Cmd::Unknown(_) => {
-                let result = if let Some(tab) = self.tabs.get_mut(self.active) {
+                let result = if let Some(tab) = self.active_tab_mut() {
                     tab.view.handle_command(input).await
                 } else {
                     CommandResult::Unhandled
@@ -103,7 +104,7 @@ impl<S: DrawSurface> App<S> {
                         if let Some((level, m)) = msg {
                             self.log_active(level, m).await;
                         }
-                        if let Some(tab) = self.tabs.get_mut(self.active) {
+                        if let Some(tab) = self.active_tab_mut() {
                             tab.log = tab.view.log();
                         }
                     }
@@ -119,7 +120,7 @@ impl<S: DrawSurface> App<S> {
 
     /// Forward a raw command string to the active view and log any returned message.
     async fn forward_to_view(&mut self, cmd: &str) {
-        let result = if let Some(tab) = self.tabs.get_mut(self.active) {
+        let result = if let Some(tab) = self.active_tab_mut() {
             tab.view.handle_command(cmd).await
         } else {
             CommandResult::Unhandled
@@ -135,6 +136,7 @@ impl<S: DrawSurface> App<S> {
             .ok_or_else(|| format!("unknown format for '{path}' (use .toml or .json)"))?;
         let modules: Vec<serde_json::Value> = self
             .tabs
+            .titles
             .iter()
             .filter_map(|t| t.view.session_spec())
             .collect();
@@ -149,16 +151,17 @@ impl<S: DrawSurface> App<S> {
 
     /// `:script copy <idx>` — replace the active tab's script list with tab `<idx>`'s.
     fn copy_scripts(&mut self, idx: Option<usize>) -> (Level, String) {
-        let src = match validate_copy_index(idx, self.tabs.len(), self.active) {
+        let src = match validate_copy_index(idx, self.tabs.titles.len(), self.tabs.selected_index())
+        {
             Ok(i) => i,
             Err(e) => return (Level::Warning, e),
         };
         // Clone source list first; avoids a split borrow across tabs.
-        let Some(scripts) = self.tabs[src].view.scripts().map(<[_]>::to_vec) else {
+        let Some(scripts) = self.tabs.titles[src].view.scripts().map(<[_]>::to_vec) else {
             return (Level::Warning, format!("tab [{src}] has no script support"));
         };
         let n = scripts.len();
-        let Some(tab) = self.tabs.get_mut(self.active) else {
+        let Some(tab) = self.active_tab_mut() else {
             return (
                 Level::Warning,
                 "active module has no script support".to_string(),
@@ -183,7 +186,7 @@ mod tests {
     use super::*;
 
     async fn active_log_lines(app: &App<crate::app::testkit::MockScreen>) -> Vec<(Level, String)> {
-        app.tabs[app.active]
+        app.tabs.titles[app.tabs.selected_index()]
             .log
             .read()
             .await
@@ -320,21 +323,33 @@ mod tests {
     #[tokio::test]
     /// UI-R-019 — `:quit` closes the active tab (stopping its module first) and quits only when it
     /// is the last tab; `:qall` quits immediately regardless of tab count.
+    /// UI-R-326 — the surviving active index comes from `select_index`'s clamp: closing the last
+    /// of three tabs lands the active index on the new last tab (1), not on 0.
     async fn ut_quit_closes_active_tab_qall_quits_immediately() {
-        let (a, ha) = MockView::pair("a");
+        let (a, _ha) = MockView::pair("a");
         let (b, _hb) = MockView::pair("b");
-        let mut app = build_app(vec![a.boxed(), b.boxed()]);
+        let (c, hc) = MockView::pair("c");
+        let mut app = build_app(vec![a.boxed(), b.boxed(), c.boxed()]);
+        app.tabs.select_index(2);
 
-        // With two tabs, :quit closes the active one (stopping it) but does not quit the app.
+        // Closing the active (last) tab of three leaves two: the surviving active index is
+        // select_index's clamp to the new last tab (1), not a hand-rolled fallback to 0.
         assert!(!app.run_command("quit").await);
-        assert_eq!(app.tabs.len(), 1);
+        assert_eq!(app.tabs.titles.len(), 2);
         assert!(
-            ha.commands().contains(&"stop".to_string()),
+            hc.commands().contains(&"stop".to_string()),
             "the closed tab's module was stopped before removal"
         );
-        assert_eq!(app.tabs[0].name, "b", "the surviving tab becomes active");
+        assert_eq!(
+            app.tabs.selected_index(),
+            1,
+            "select_index clamps to the new last tab, not to 0"
+        );
+        assert_eq!(app.tabs.titles[1].name, "b", "the surviving tab is 'b'");
 
-        // On the last remaining tab, :quit quits the app.
+        // Closing down to one tab, then that last tab: :quit quits the app only on the last tab.
+        assert!(!app.run_command("quit").await);
+        assert_eq!(app.tabs.titles.len(), 1);
         assert!(app.run_command("quit").await);
 
         // :qall quits immediately without closing tabs one by one.
@@ -343,7 +358,7 @@ mod tests {
         let mut app = build_app(vec![x.boxed(), y.boxed()]);
         assert!(app.run_command("qall").await);
         assert_eq!(
-            app.tabs.len(),
+            app.tabs.titles.len(),
             2,
             ":qall signals quit without removing tabs"
         );
@@ -360,7 +375,7 @@ mod tests {
 
         assert!(!app.run_command("quit").await);
         assert_eq!(
-            app.tabs.len(),
+            app.tabs.titles.len(),
             1,
             "the tab is removed once the stop settles"
         );
@@ -383,7 +398,7 @@ mod tests {
         assert!(!app.run_command("quit").await);
         let elapsed = before.elapsed();
         assert_eq!(
-            app.tabs.len(),
+            app.tabs.titles.len(),
             1,
             "the tab must still be removed once the settle bound expires"
         );

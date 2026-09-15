@@ -69,7 +69,7 @@ impl<S: DrawSurface> App<S> {
             _ => None,
         };
         if let Some((name, view)) = action {
-            if self.tabs.iter().any(|t| t.name == name) {
+            if self.tabs.titles.iter().any(|t| t.name == name) {
                 // No error slot on `SetupView` to surface this in-dialog (the field-level
                 // red-border validation is purely static, see `dialog::NonEmpty`); leave the
                 // dialog open and nudge via the active tab's log instead.
@@ -123,10 +123,16 @@ impl<S: DrawSurface> App<S> {
     /// Create and append a new tab from a `Box<dyn ModuleView>`, start its module, then
     /// close the overlay.
     async fn create_tab(&mut self, name: String, view: Box<dyn ModuleView>) {
-        self.tabs.push(Tab::new_from_view(name, view));
-        self.active = self.tabs.len() - 1;
+        self.tabs.titles.push(Tab::new_from_view(name, view));
+        self.tabs
+            .select_index(self.tabs.titles.len().saturating_sub(1));
         self.rebuild_registry();
-        let result = self.tabs[self.active].view.handle_command("start").await;
+        let result = self
+            .active_tab_mut()
+            .expect("just pushed a tab, so the list is non-empty")
+            .view
+            .handle_command("start")
+            .await;
         if let crate::module::view::CommandResult::Handled(Some((level, msg))) = result {
             self.log_active(level, msg).await;
         }
@@ -144,7 +150,7 @@ mod tests {
     }
 
     async fn active_log_lines(app: &App<crate::app::testkit::MockScreen>) -> Vec<String> {
-        app.tabs[app.active]
+        app.tabs.titles[app.tabs.selected_index()]
             .log
             .read()
             .await
@@ -175,7 +181,11 @@ mod tests {
         app.overlay = Some(Overlay::Creation(Box::new(MockSetup::invalid("bad"))));
         app.confirm_overlay().await;
 
-        assert_eq!(app.tabs.len(), 0, "an invalid dialog must not create a tab");
+        assert_eq!(
+            app.tabs.titles.len(),
+            0,
+            "an invalid dialog must not create a tab"
+        );
         assert!(
             app.overlay.is_some(),
             "an invalid dialog stays open on confirm"
@@ -194,7 +204,11 @@ mod tests {
         app.focus = Focus::Dialog;
         app.confirm_overlay().await;
 
-        assert_eq!(app.tabs.len(), 1, "a colliding name must not add a tab");
+        assert_eq!(
+            app.tabs.titles.len(),
+            1,
+            "a colliding name must not add a tab"
+        );
         assert!(
             app.overlay.is_some(),
             "the setup dialog stays open on refusal"
@@ -211,7 +225,7 @@ mod tests {
         let (setup, handle_slot) = MockSetup::new_with_handle("b");
         app.overlay = Some(Overlay::Creation(Box::new(setup)));
         app.confirm_overlay().await;
-        assert_eq!(app.tabs.len(), 2, "a unique name creates the tab");
+        assert_eq!(app.tabs.titles.len(), 2, "a unique name creates the tab");
         assert!(app.overlay.is_none(), "the dialog closes after creation");
         assert_eq!(
             handle_slot.lock().unwrap().as_ref().unwrap().commands(),

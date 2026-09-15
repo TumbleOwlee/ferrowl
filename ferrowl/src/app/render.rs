@@ -10,6 +10,8 @@ use ratatui::{
     widgets::{Block, Clear, Paragraph, StatefulWidget},
 };
 
+use ferrowl_ui::state::TabBarState;
+
 use crate::dialog::scripts::ScriptDialog;
 use crate::module::view::CommandDescriptor;
 use crate::view::command::CommandLine;
@@ -20,15 +22,13 @@ use super::{Focus, Overlay, Tab, help};
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render(
     frame: &mut Frame,
-    tabs: &mut [Tab],
-    active: usize,
+    tabs: &mut TabBarState<Tab>,
     focus: Focus,
     command: &mut CommandLine,
     overlay: Option<&mut Overlay>,
     session_dialog: Option<&mut ScriptDialog>,
     help_open: bool,
     help_scroll: &mut u16,
-    tab_scroll: &mut usize,
 ) {
     let area = frame.area();
     let [tabs_area, view_area, log_area, cmd_area] = Layout::vertical([
@@ -40,28 +40,31 @@ pub(super) fn render(
     .areas(area);
 
     // Phase 1: background and tab bar.
-    {
+    let active = {
         let buf = frame.buffer_mut();
         buf.set_style(area, Style::default().bg(COLOR_SCHEME.bg));
 
         let names: Vec<String> = tabs
+            .titles
             .iter()
             .enumerate()
             .map(|(i, t)| format!(" [{i}] {} ", t.name))
             .collect();
-        render_tabs(&names, active, tabs_area, buf, tab_scroll);
-    }
+        let active = tabs.selected_index();
+        render_tabs(&names, active, tabs_area, buf, &mut tabs.offset);
+        active
+    };
 
     // Phase 2: module content view (includes its own status bar). Focus is carried by the view's
     // own stored state (set at focus-change time), not recomputed here.
-    if let Some(tab) = tabs.get_mut(active) {
+    if let Some(tab) = tabs.titles.get_mut(active) {
         tab.view.render(frame, view_area);
     }
 
     // Phase 3: log pane and command line.
     {
         let buf = frame.buffer_mut();
-        if let Some(tab) = tabs.get_mut(active) {
+        if let Some(tab) = tabs.titles.get_mut(active) {
             StatefulWidget::render(&tab.log_view.widget, log_area, buf, &mut tab.log_view.state);
         }
         render_command(command, focus, cmd_area, buf);
@@ -70,7 +73,7 @@ pub(super) fn render(
     // Phase 4: overlays, painted on top of content and log (bottom-to-top z-order).
     // 1. Module dialogs. Drawn first so command help and the app dialog sit above them. The view's
     //    own match no-ops when no overlay is open, so this is called unconditionally.
-    if let Some(tab) = tabs.get_mut(active) {
+    if let Some(tab) = tabs.titles.get_mut(active) {
         tab.view.render_overlay(frame, view_area);
     }
     // 2. Command help popup and 3. app-level modal dialog. Both draw to the buffer; the module
@@ -79,7 +82,7 @@ pub(super) fn render(
         let buf = frame.buffer_mut();
         if focus == Focus::Command {
             let module_cmds: &[CommandDescriptor] =
-                tabs.get(active).map_or(&[], |t| t.view.commands());
+                tabs.titles.get(active).map_or(&[], |t| t.view.commands());
             render_command_help(cmd_area, buf, module_cmds);
         }
         if let Some(dialog) = overlay {
@@ -91,6 +94,7 @@ pub(super) fn render(
         // 4. Keybind help dialog, always topmost.
         if help_open {
             let module = tabs
+                .titles
                 .get(active)
                 .map(|t| (t.name.as_str(), t.view.keybinds()));
             render_help(area, buf, module, help_scroll);

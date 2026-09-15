@@ -112,7 +112,7 @@ impl<S: DrawSurface> App<S> {
                     .to_digit(10)
                     .expect("c is an ASCII digit, matched by the guard above")
                     as usize;
-                match digit_outcome(None, d, self.tabs.len()) {
+                match digit_outcome(None, d, self.tabs.titles.len()) {
                     DigitOutcome::Wait(first) => {
                         self.keymode = Some(KeyMode::TabDigit {
                             first,
@@ -134,15 +134,16 @@ impl<S: DrawSurface> App<S> {
                     .expect("c is an ASCII digit, matched by the guard above")
                     as usize;
                 self.keymode = None;
-                if let DigitOutcome::Jump(idx) = digit_outcome(Some(first), d, self.tabs.len()) {
+                if let DigitOutcome::Jump(idx) =
+                    digit_outcome(Some(first), d, self.tabs.titles.len())
+                {
                     self.switch_tab(idx);
                 }
             }
             // Command
             (None, _, KeyCode::Char(':'))
                 if !self
-                    .tabs
-                    .get_mut(self.active)
+                    .active_tab()
                     .is_some_and(|t| t.view.is_overlay_active()) =>
             {
                 self.enter_command()
@@ -150,8 +151,7 @@ impl<S: DrawSurface> App<S> {
             // Keybind help, guarded like `:` so `?` still types into module edit fields.
             (None, _, KeyCode::Char('?'))
                 if !self
-                    .tabs
-                    .get_mut(self.active)
+                    .active_tab()
                     .is_some_and(|t| t.view.is_overlay_active()) =>
             {
                 self.help_open = true
@@ -172,7 +172,8 @@ impl<S: DrawSurface> App<S> {
     /// Forward a key to the active tab, which dispatches to whichever of its panes (content view or
     /// log) currently holds focus. Returns `true` if consumed.
     fn forward_nav(&mut self, modifiers: KeyModifiers, code: KeyCode) -> bool {
-        let Some(tab) = self.tabs.get_mut(self.active) else {
+        let idx = self.tabs.selected_index();
+        let Some(tab) = self.tabs.titles.get_mut(idx) else {
             return false;
         };
         match self.focus {
@@ -200,32 +201,34 @@ impl<S: DrawSurface> App<S> {
     /// `Ctrl+w` j/k: toggle focus between the active tab's content view and its log pane. Only
     /// reachable while the content surface is focused (the modal layers route keys elsewhere).
     fn toggle_pane(&mut self) {
-        if let Some(tab) = self.tabs.get_mut(self.active) {
+        if let Some(tab) = self.active_tab_mut() {
             tab.focus_next();
         }
     }
 
     pub(super) fn next_tab(&mut self) {
-        if !self.tabs.is_empty() {
+        if !self.tabs.titles.is_empty() {
             self.set_content_focus(false);
-            self.active = (self.active + 1) % self.tabs.len();
+            self.tabs.next();
             self.set_content_focus(self.focus == Focus::Content);
         }
     }
 
     pub(super) fn prev_tab(&mut self) {
-        if !self.tabs.is_empty() {
+        if !self.tabs.titles.is_empty() {
             self.set_content_focus(false);
-            self.active = (self.active + self.tabs.len() - 1) % self.tabs.len();
+            self.tabs.previous();
             self.set_content_focus(self.focus == Focus::Content);
         }
     }
 
-    /// Jump straight to tab `idx`. Out-of-range indices are a silent no-op.
+    /// Jump straight to tab `idx`. Out-of-range or already-active indices are a silent no-op
+    /// (UI-R-012): the range check stays here, above the state, whose own `select_index`
+    /// (UI-R-326) would otherwise clamp an out-of-range jump onto the last tab.
     pub(super) fn switch_tab(&mut self, idx: usize) {
-        if idx < self.tabs.len() && idx != self.active {
+        if idx < self.tabs.titles.len() && idx != self.tabs.selected_index() {
             self.set_content_focus(false);
-            self.active = idx;
+            self.tabs.select_index(idx);
             self.set_content_focus(self.focus == Focus::Content);
         }
     }
@@ -288,23 +291,26 @@ mod tests {
     /// it on close, and every transition routes through the single focus choke point.
     fn ut_command_line_removes_and_restores_content_focus() {
         let mut app = app_with(&["a"]);
-        assert!(app.tabs[0].view.is_focused(), "content starts focused");
         assert!(
-            !app.tabs[0].is_log_focused(),
+            app.tabs.titles[0].view.is_focused(),
+            "content starts focused"
+        );
+        assert!(
+            !app.tabs.titles[0].is_log_focused(),
             "focus is content, not log — never both"
         );
 
         app.enter_command();
         assert_eq!(app.focus, Focus::Command);
         assert!(
-            !app.tabs[0].view.is_focused(),
+            !app.tabs.titles[0].view.is_focused(),
             "content unfocused while command open"
         );
 
         app.exit_command();
         assert_eq!(app.focus, Focus::Content);
         assert!(
-            app.tabs[0].view.is_focused(),
+            app.tabs.titles[0].view.is_focused(),
             "content focus restored on close"
         );
     }
@@ -339,17 +345,17 @@ mod tests {
     /// log pane.
     fn ut_ctrl_w_chord_toggles_content_and_log_focus() {
         let mut app = app_with(&["a"]);
-        assert!(!app.tabs[0].is_log_focused());
+        assert!(!app.tabs.titles[0].is_log_focused());
 
         chord(&mut app, 'w', KeyCode::Char('j'));
         assert!(
-            app.tabs[0].is_log_focused(),
+            app.tabs.titles[0].is_log_focused(),
             "Ctrl+w j moves focus to the log pane"
         );
 
         chord(&mut app, 'w', KeyCode::Char('k'));
         assert!(
-            !app.tabs[0].is_log_focused(),
+            !app.tabs.titles[0].is_log_focused(),
             "Ctrl+w k moves focus back to content"
         );
     }
@@ -359,19 +365,51 @@ mod tests {
     /// and a digit begins an index jump.
     fn ut_ctrl_t_chord_switches_tabs_wrapping_and_by_digit() {
         let mut app = app_with(&["a", "b", "c"]);
-        assert_eq!(app.active, 0);
+        assert_eq!(app.tabs.selected_index(), 0);
 
         chord(&mut app, 't', KeyCode::Char('l'));
-        assert_eq!(app.active, 1, "l advances");
+        assert_eq!(app.tabs.selected_index(), 1, "l advances");
         chord(&mut app, 't', KeyCode::Char('l'));
         chord(&mut app, 't', KeyCode::Char('l'));
-        assert_eq!(app.active, 0, "l wraps past the last tab");
+        assert_eq!(app.tabs.selected_index(), 0, "l wraps past the last tab");
 
         chord(&mut app, 't', KeyCode::Char('h'));
-        assert_eq!(app.active, 2, "h wraps past the first tab");
+        assert_eq!(app.tabs.selected_index(), 2, "h wraps past the first tab");
 
         chord(&mut app, 't', KeyCode::Char('1'));
-        assert_eq!(app.active, 1, "a digit jumps straight to that index");
+        assert_eq!(
+            app.tabs.selected_index(),
+            1,
+            "a digit jumps straight to that index"
+        );
+    }
+
+    /// UI-R-010, UI-R-327, UI-R-328 — the `Ctrl+t` chord drives the tab bar state's own
+    /// selection helpers, not a hand-rolled index: `l`/`h` delegate to `next`/`previous`,
+    /// which step from the normalized active index (UI-R-325), not a stale raw value.
+    #[test]
+    fn ut_tab_chord_drives_the_tab_bar_state() {
+        let mut app = app_with(&["a", "b", "c"]);
+
+        chord(&mut app, 't', KeyCode::Char('l'));
+        assert_eq!(app.tabs.selected_index(), 1);
+        assert_eq!(app.tabs.selected().map(|t| t.name.as_str()), Some("b"));
+
+        chord(&mut app, 't', KeyCode::Char('h'));
+        chord(&mut app, 't', KeyCode::Char('h'));
+        assert_eq!(app.tabs.selected_index(), 2, "h wraps back to the last tab");
+
+        // An active index written out of range directly (as UI-E-157/UI-E-158 permit) must not
+        // leak into the chord: `h` steps from the normalized `0` (UI-R-325), landing on the last
+        // tab. Raw modular arithmetic on the stored `10` would instead land on `0`
+        // (`(10 + 3 - 1) % 3 == 0`), so the two readings disagree here.
+        app.tabs.active = 10;
+        chord(&mut app, 't', KeyCode::Char('h'));
+        assert_eq!(
+            app.tabs.selected_index(),
+            2,
+            "previous from an out-of-range active steps from the normalized 0, wrapping to the last tab"
+        );
     }
 
     #[test]
@@ -380,25 +418,25 @@ mod tests {
     fn ut_tab_jump_out_of_range_or_active_is_a_noop_and_safe_at_edges() {
         let mut app = app_with(&["a", "b"]);
         app.switch_tab(9);
-        assert_eq!(app.active, 0, "out-of-range index ignored");
+        assert_eq!(app.tabs.selected_index(), 0, "out-of-range index ignored");
         app.switch_tab(0);
-        assert_eq!(app.active, 0, "already-active index ignored");
+        assert_eq!(app.tabs.selected_index(), 0, "already-active index ignored");
         app.switch_tab(1);
-        assert_eq!(app.active, 1, "valid index switches");
+        assert_eq!(app.tabs.selected_index(), 1, "valid index switches");
 
         // One tab: every switch is a no-op, no panic.
         let mut one = app_with(&["only"]);
         one.switch_tab(3);
         one.next_tab();
         one.prev_tab();
-        assert_eq!(one.active, 0);
+        assert_eq!(one.tabs.selected_index(), 0);
 
         // Zero tabs (startup selector open): switching must not panic.
         let mut none = build_app(vec![]);
         none.switch_tab(0);
         none.next_tab();
         none.prev_tab();
-        assert_eq!(none.active, 0);
+        assert_eq!(none.tabs.selected_index(), 0);
     }
 
     #[test]
@@ -419,11 +457,11 @@ mod tests {
             app.keymode,
             Some(KeyMode::TabDigit { first: 1, .. })
         ));
-        assert_eq!(app.active, 0, "the jump has not landed yet");
+        assert_eq!(app.tabs.selected_index(), 0, "the jump has not landed yet");
 
         app.handle_nav_key(KeyModifiers::empty(), KeyCode::Char('j'));
 
-        assert_eq!(app.active, 1, "the pending jump committed");
+        assert_eq!(app.tabs.selected_index(), 1, "the pending jump committed");
         assert!(app.keymode.is_none());
         assert_eq!(
             h1.keys(),
