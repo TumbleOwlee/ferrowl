@@ -161,7 +161,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// UI-R-196 — confirming the new-module type selector swaps in the chosen type's setup dialog.
+    /// UI-R-332 — confirming the new-module type selector swaps in the chosen type's setup dialog.
     async fn ut_confirm_type_selector_swaps_in_setup_dialog() {
         let mut app = app_with(&[]);
         app.enter_new();
@@ -175,7 +175,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// UI-R-198 — a new-module dialog failing validation stays open: confirming it creates no tab.
+    /// UI-R-334 — a new-module dialog failing validation stays open: confirming it creates no tab.
     async fn ut_confirm_invalid_setup_dialog_stays_open() {
         let mut app = app_with(&[]);
         app.overlay = Some(Overlay::Creation(Box::new(MockSetup::invalid("bad"))));
@@ -193,7 +193,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// UI-R-025, UI-R-197 — confirming a creation dialog whose name collides with an existing tab is refused
+    /// UI-R-025, UI-R-333 — confirming a creation dialog whose name collides with an existing tab is refused
     /// with a warning in the active tab's log and leaves the dialog open, never overwriting or
     /// duplicating the name; a non-colliding name creates and starts the tab and closes the dialog.
     async fn ut_creating_a_colliding_tab_name_is_refused_with_the_dialog_left_open() {

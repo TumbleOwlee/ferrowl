@@ -947,7 +947,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-314 — a badge supplied at construction is stored against the file's path and
+    /// UI-R-341 — a badge supplied at construction is stored against the file's path and
     /// surfaced by `visible_rows()`.
     fn ut_badge_from_the_construction_input_is_stored_against_the_path() {
         let s: FileTreeState<FileStatus, Marker> = FileTreeStateBuilder::default()

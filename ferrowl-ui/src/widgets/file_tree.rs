@@ -541,7 +541,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-314 — a badge's text and style are drawn as its type reports them.
+    /// UI-R-341 — a badge's text and style are drawn as its type reports them.
     fn ut_badge_marker_and_style_are_drawn_as_given() {
         let badge = Marker("*", Some(ratatui::style::Color::Cyan));
         let mut s = badged_tree(&[("a.rs", None, Some(badge))]);
@@ -553,7 +553,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-315 — a badge draws after the node's name, separated from it by one space,
+    /// UI-R-342 — a badge draws after the node's name, separated from it by one space,
     /// while the status marker stays leading.
     fn ut_badge_draws_after_the_name_and_one_space_after_it() {
         let badge = Marker("*", None);
@@ -565,7 +565,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-316 — the badge's cells carry its own style, while the leading status
+    /// UI-R-343 — the badge's cells carry its own style, while the leading status
     /// marker, separating space and name cells carry the row's status style.
     fn ut_badge_keeps_its_own_style_while_the_row_keeps_the_status_style() {
         let badge = Marker("*", Some(ratatui::style::Color::Cyan));
@@ -582,7 +582,7 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-316, UI-R-252 — the badge keeps its own foreground even on the selected row,
+    /// UI-R-343, UI-R-252 — the badge keeps its own foreground even on the selected row,
     /// where the row background is patched to the highlighted-row style across the full
     /// width.
     fn ut_badge_keeps_its_foreground_over_the_highlighted_row_background() {

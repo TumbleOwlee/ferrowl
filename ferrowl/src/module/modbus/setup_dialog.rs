@@ -1097,7 +1097,7 @@ mod tests {
         assert!(text.contains("src"), "missing suggestion popup:\n{text}");
     }
 
-    /// UI-R-067, UI-R-194 — the `:edit` open path establishes the same single-focus state as
+    /// UI-R-067, UI-R-330 — the `:edit` open path establishes the same single-focus state as
     /// `create`, including the nested TLS section opening unfocused.
     /// Compared against the `Focus` derive's own normalisation rather than a hand-listed field
     /// set, so a field added later is covered as soon as it renders.
@@ -1177,7 +1177,7 @@ mod tests {
         }
     }
 
-    /// UI-R-067, UI-R-195 — a freshly created dialog focuses exactly one field (`name`, first in
+    /// UI-R-067, UI-R-331 — a freshly created dialog focuses exactly one field (`name`, first in
     /// the Tab cycle) and paints exactly one text cursor for it. The cursor rather than the border,
     /// because `name` opens empty against `NonEmpty` and so paints its error border, not its
     /// focused one — border color alone would not identify the focused field.
