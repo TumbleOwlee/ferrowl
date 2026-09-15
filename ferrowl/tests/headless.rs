@@ -56,7 +56,7 @@ fn it_fails_hard_on_a_missing_device_config() {
 }
 
 #[test]
-/// CL-R-050, CL-R-055 — a setup failure on the `build_modules_into` arm (a later module's device
+/// CL-R-050, CL-R-056 — a setup failure on the `build_modules_into` arm (a later module's device
 /// config fails to load) still stops every already-started module and reports it on stderr,
 /// the same as the other setup-failure arms.
 fn it_setup_failure_reports_teardown_on_stderr() {
@@ -85,7 +85,7 @@ fn it_setup_failure_reports_teardown_on_stderr() {
 }
 
 #[test]
-/// CL-R-055, CL-R-042, CL-E-029 — each stopped module is reported on stderr, one line per
+/// CL-R-056, CL-R-042, CL-E-029 — each stopped module is reported on stderr, one line per
 /// module in start order, after that module's stop completes; the lines never reach stdout
 /// nor the mirrored `--log-file`.
 fn it_headless_reports_module_teardown_on_stderr() {
@@ -147,7 +147,7 @@ fn it_headless_reports_module_teardown_on_stderr() {
 }
 
 #[test]
-/// CL-R-057 — the session sim, when stopped during teardown, is reported under source name
+/// CL-R-058 — the session sim, when stopped during teardown, is reported under source name
 /// `session` by the same lines as a module.
 fn it_headless_reports_session_sim_teardown_on_stderr() {
     let dir = reserve_temp_dir("ferrowl_cl_it");

@@ -166,6 +166,10 @@ pub(crate) struct MockView {
     /// deferred stop that never settles; otherwise the number of `refresh()` calls still needed
     /// before it clears.
     pending_stop: Arc<AtomicUsize>,
+    /// Mirrors a real view's deferred-lifecycle shape (`ferrowl-modbus`'s `refresh()`): written to
+    /// `log` only once `pending_stop` clears, never returned as `handle_command`'s immediate
+    /// result.
+    deferred_log: Arc<Mutex<Option<(Level, String)>>>,
 }
 
 impl MockView {
@@ -200,6 +204,7 @@ impl MockView {
             keys,
             command_result: None,
             pending_stop: Arc::new(AtomicUsize::new(0)),
+            deferred_log: Arc::new(Mutex::new(None)),
         };
         (view, handle)
     }
@@ -208,6 +213,15 @@ impl MockView {
     /// `refresh()` calls.
     pub(super) fn with_pending_stop_settling_after(self, refreshes: usize) -> Self {
         self.pending_stop.store(refreshes.max(1), Ordering::Relaxed);
+        self
+    }
+
+    /// Make this view report a pending deferred stop (`handle_command` answers `Handled(None)`,
+    /// same as a real view) whose failure only reaches `log` once it settles after `refreshes`
+    /// more `refresh()` calls — the shape `ferrowl-modbus`'s view produces post-settle-bound.
+    pub(crate) fn with_deferred_stop_error(self, refreshes: usize, message: &str) -> Self {
+        self.pending_stop.store(refreshes.max(1), Ordering::Relaxed);
+        *self.deferred_log.lock().unwrap() = Some((Level::Error, message.to_string()));
         self
     }
 
@@ -286,12 +300,20 @@ impl ModuleView for MockView {
     fn refresh<'a>(&'a mut self) -> RefreshFuture<'a> {
         let refreshes = self.refreshes.clone();
         let pending_stop = self.pending_stop.clone();
+        let deferred_log = self.deferred_log.clone();
+        let log = self.log.clone();
         Box::pin(async move {
             refreshes.fetch_add(1, Ordering::Relaxed);
-            let _ = pending_stop.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| match n {
-                0 | usize::MAX => None,
-                n => Some(n - 1),
-            });
+            let prev =
+                pending_stop.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| match n {
+                    0 | usize::MAX => None,
+                    n => Some(n - 1),
+                });
+            if prev == Ok(1)
+                && let Some((level, message)) = deferred_log.lock().unwrap().take()
+            {
+                log.write().await.write(level, &message);
+            }
         })
     }
 
