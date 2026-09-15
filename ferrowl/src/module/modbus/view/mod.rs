@@ -21,7 +21,7 @@ use crate::module::modbus::setup_dialog::SetupDialog;
 use crate::module::modbus::table::{Definition, TableView, cmp_definitions};
 use crate::module::view::{
     CommandDescriptor, CommandFuture, CommandResult, CommandSpec, ModuleView, RefreshFuture,
-    SharedLog, parse_command,
+    SharedLog, StopOutcome, parse_command,
 };
 
 use super::ModbusModule;
@@ -66,7 +66,7 @@ pub struct ModbusModuleView {
     pending_lifecycle: Option<PendingLifecycle>,
     /// CL-R-057 — the settled outcome of the most recently completed `PendingLifecycle::Stop`,
     /// consumed by [`ModuleView::take_stop_outcome`] rather than re-derived from the log.
-    last_stop_outcome: Option<(Level, String)>,
+    last_stop_outcome: Option<StopOutcome>,
     /// Whether this view (its content pane) currently has keyboard focus, set by the owning `Tab`.
     view_focused: bool,
     /// MB-R-150 — the session-wide serial-path registry attached via `set_serial_paths`, kept so
@@ -505,7 +505,10 @@ impl ModuleView for ModbusModuleView {
                             Err(e) => (Level::Error, format!("Stop {role} failed: {e}")),
                         };
                         self.log().write().await.write(level, &msg);
-                        self.last_stop_outcome = Some((level, msg));
+                        self.last_stop_outcome = Some(match level {
+                            Level::Error => StopOutcome::Failed(msg),
+                            _ => StopOutcome::Clean,
+                        });
                     }
                     Some(PendingLifecycle::Restart) => {
                         let stop_err = stop_result.err().filter(|e| !e.is_not_running());
@@ -639,11 +642,13 @@ impl ModuleView for ModbusModuleView {
                 // stop" and drop the earlier command's outcome (UI-R-315: never discarded).
                 if self.pending_lifecycle.is_some() {
                     self.pending_lifecycle = Some(PendingLifecycle::Stop);
+                    self.last_stop_outcome = None;
                     return CommandResult::Handled(None);
                 }
                 match self.module.request_stop().await {
                     Ok(()) => {
                         self.pending_lifecycle = Some(PendingLifecycle::Stop);
+                        self.last_stop_outcome = None;
                         CommandResult::Handled(None)
                     }
                     // Nothing was running (Idle): no deferred outcome to carry, and nothing for
@@ -882,7 +887,7 @@ impl ModuleView for ModbusModuleView {
         self.pending_lifecycle.is_some()
     }
 
-    fn take_stop_outcome(&mut self) -> Option<(Level, String)> {
+    fn take_stop_outcome(&mut self) -> Option<StopOutcome> {
         self.last_stop_outcome.take()
     }
 
@@ -1154,7 +1159,7 @@ mod tests {
     use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
     use crate::module::modbus::setup_dialog::SetupValues;
     use crate::module::modbus::table::Definition;
-    use crate::module::view::{CommandResult, ModuleView};
+    use crate::module::view::{CommandResult, ModuleView, StopOutcome};
     use crossterm::event::{KeyCode, KeyModifiers};
     use ferrowl_codec::format::{BitField, Endian, Format, Resolution, WordOrder};
     use ferrowl_codec::{Access, Address, Kind, NumericPrimitive, RegisterBuilder, Value};
@@ -1907,6 +1912,32 @@ mod tests {
                 .iter()
                 .any(|(level, l)| *level == Level::Info && l == "Stopped Server"),
             "missing 'Stopped Server' Info line: {lines:?}"
+        );
+    }
+
+    #[tokio::test]
+    /// CL-R-057 — once `refresh()` settles a deferred stop, the outcome is available through
+    /// `take_stop_outcome` on a real (`ferrowl-modbus`) view, not just `MockView` — closing the
+    /// gap a `MockView`-only test suite would leave invisible.
+    async fn ut_take_stop_outcome_reports_a_settled_clean_stop() {
+        let mut view = new_view();
+        view.module.start().await.expect("start");
+
+        let result = view.handle_command("stop").await;
+        assert!(matches!(result, CommandResult::Handled(None)));
+
+        for _ in 0..200 {
+            if !view.lifecycle_pending() {
+                break;
+            }
+            view.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(!view.lifecycle_pending());
+
+        assert!(
+            matches!(view.take_stop_outcome(), Some(StopOutcome::Clean)),
+            "expected the settled stop's own outcome via take_stop_outcome"
         );
     }
 

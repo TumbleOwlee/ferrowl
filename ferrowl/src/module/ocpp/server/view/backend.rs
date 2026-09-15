@@ -550,6 +550,10 @@ where
                             Err(e) => (Level::Error, format!("CSMS server stop failed: {e}")),
                         };
                         self.log.write().await.write(level, &msg);
+                        self.last_stop_outcome = Some(match level {
+                            Level::Error => crate::module::view::StopOutcome::Failed(msg),
+                            _ => crate::module::view::StopOutcome::Clean,
+                        });
                     }
                     Some(PendingLifecycle::Restart) => {
                         if let Err(e) = stop_result {
@@ -712,11 +716,13 @@ where
                     self.want_running = false;
                     if self.pending_lifecycle.is_some() {
                         self.pending_lifecycle = Some(PendingLifecycle::Stop);
+                        self.last_stop_outcome = None;
                         return CommandResult::Handled(None);
                     }
                     match self.backend.request_stop().await {
                         Ok(()) => {
                             self.pending_lifecycle = Some(PendingLifecycle::Stop);
+                            self.last_stop_outcome = None;
                             CommandResult::Handled(None)
                         }
                         Err(e) => {
@@ -961,6 +967,39 @@ mod tests {
                 .iter()
                 .any(|(level, l)| *level == Level::Info && l == "CSMS server stopped"),
             "missing 'CSMS server stopped' Info line: {lines:?}"
+        );
+    }
+
+    /// CL-R-057 — once `refresh()` settles a deferred stop, the outcome is available through
+    /// `take_stop_outcome` (not just the log), so a caller like headless teardown can read the
+    /// stop's own result without scanning for an `Error`-level line that might belong to
+    /// something else entirely.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_take_stop_outcome_reports_a_settled_clean_stop() {
+        let port = ferrowl_test_support::reserve_tcp_port().release();
+
+        let mut v = server_view(port);
+        v.handle_command("start").await;
+        wait_bound(&v).await;
+
+        let result = v.handle_command("stop").await;
+        assert!(matches!(result, CommandResult::Handled(None)));
+
+        for _ in 0..200 {
+            if !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(!v.lifecycle_pending());
+
+        assert!(
+            matches!(
+                v.take_stop_outcome(),
+                Some(crate::module::view::StopOutcome::Clean)
+            ),
+            "expected the settled stop's own outcome via take_stop_outcome"
         );
     }
 

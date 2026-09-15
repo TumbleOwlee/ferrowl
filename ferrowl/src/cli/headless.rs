@@ -293,7 +293,12 @@ async fn stop_all(modules: &mut [RunModule]) -> Vec<String> {
         // accessor rather than the log, which may carry lines unrelated to the stop itself
         // (e.g. a network callback logged during the same settle window).
         if !timed_out && outcome.is_none() {
-            outcome = module.view.take_stop_outcome();
+            outcome = match module.view.take_stop_outcome() {
+                Some(crate::module::view::StopOutcome::Failed(detail)) => {
+                    Some((Level::Error, detail))
+                }
+                Some(crate::module::view::StopOutcome::Clean) | None => None,
+            };
         }
         let line = if timed_out {
             format!("Error: timed out stopping '{name}'")

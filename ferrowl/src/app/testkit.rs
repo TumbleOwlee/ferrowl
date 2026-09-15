@@ -35,6 +35,7 @@ use crate::module::modbus::SerialPathRegistry;
 use crate::module::type_descriptor::{ModuleViewFactory, SetupView};
 use crate::module::view::{
     CommandDescriptor, CommandFuture, CommandResult, ModuleView, RefreshFuture, SharedLog,
+    StopOutcome,
 };
 
 /// A `DrawSurface` test double backed by ratatui's `TestBackend`, letting an `App` be built and
@@ -173,7 +174,7 @@ pub(crate) struct MockView {
     /// The stop's own settled outcome, consumed by [`ModuleView::take_stop_outcome`] once
     /// `pending_stop` clears. Independent of `deferred_log`: a real view may log an unrelated
     /// line during the same settle window without that line being the stop's outcome.
-    deferred_outcome: Arc<Mutex<Option<(Level, String)>>>,
+    deferred_outcome: Arc<Mutex<Option<StopOutcome>>>,
 }
 
 impl MockView {
@@ -228,7 +229,7 @@ impl MockView {
     pub(crate) fn with_deferred_stop_error(self, refreshes: usize, message: &str) -> Self {
         self.pending_stop.store(refreshes.max(1), Ordering::Relaxed);
         *self.deferred_log.lock().unwrap() = Some((Level::Error, message.to_string()));
-        *self.deferred_outcome.lock().unwrap() = Some((Level::Error, message.to_string()));
+        *self.deferred_outcome.lock().unwrap() = Some(StopOutcome::Failed(message.to_string()));
         self
     }
 
@@ -347,7 +348,7 @@ impl ModuleView for MockView {
         self.pending_stop.load(Ordering::Relaxed) > 0
     }
 
-    fn take_stop_outcome(&mut self) -> Option<(Level, String)> {
+    fn take_stop_outcome(&mut self) -> Option<StopOutcome> {
         self.deferred_outcome.lock().unwrap().take()
     }
 

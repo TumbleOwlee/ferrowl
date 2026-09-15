@@ -70,6 +70,17 @@ pub type RefreshFuture<'a> = std::pin::Pin<Box<dyn std::future::Future<Output = 
 /// shared by every settle loop rather than a literal repeated per call site.
 pub const SETTLE_BOUND: std::time::Duration = std::time::Duration::from_secs(1);
 
+/// CL-R-057 — the outcome of a settled deferred stop, returned by
+/// [`ModuleView::take_stop_outcome`]. One variant per state rather than a level/message pair so a
+/// clean stop cannot carry a stray detail string.
+pub enum StopOutcome {
+    /// The stop completed without error.
+    Clean,
+    /// The stop completed with an error; `String` is the same detail already written to the
+    /// view's log at `Level::Error`.
+    Failed(String),
+}
+
 /// The trait every module content view must implement.
 ///
 /// `Tab` and `App` interact with a module exclusively through this interface.
@@ -113,12 +124,11 @@ pub trait ModuleView: SetFocus + IsFocus {
         false
     }
 
-    /// CL-R-057 — the outcome of the most recently settled deferred stop (`Ok` = clean, `Err` =
-    /// the failure's own level/message), consumed once `lifecycle_pending()` clears. A caller
-    /// that needs to know whether a settled stop failed must read this rather than scan the
-    /// view's log, which may carry unrelated lines written during the same settle window.
-    /// Default: no deferred-stop outcome to report.
-    fn take_stop_outcome(&mut self) -> Option<(Level, String)> {
+    /// CL-R-057 — the outcome of the most recently settled deferred stop, consumed once
+    /// `lifecycle_pending()` clears. A caller that needs to know whether a settled stop failed
+    /// must read this rather than scan the view's log, which may carry unrelated lines written
+    /// during the same settle window. Default: no deferred-stop outcome to report.
+    fn take_stop_outcome(&mut self) -> Option<StopOutcome> {
         None
     }
 
