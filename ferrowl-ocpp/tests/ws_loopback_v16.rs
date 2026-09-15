@@ -20,6 +20,22 @@ fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
     |_s: String| async move {}
 }
 
+/// A `LogFn` that records every line into a shared buffer for assertions.
+fn recording_log() -> (
+    impl ferrowl_ocpp::LogFn + Clone,
+    Arc<parking_lot::Mutex<Vec<String>>>,
+) {
+    let lines = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
+    let sink = lines.clone();
+    let log = move |s: String| {
+        let sink = sink.clone();
+        async move {
+            sink.lock().push(s);
+        }
+    };
+    (log, lines)
+}
+
 /// Poll until the CSMS listener has bound: `spawn` binds asynchronously, retrying a
 /// failed bind with backoff (OC-R-083), so `local_addr()` is `None` until the first
 /// successful bind lands.
@@ -910,11 +926,14 @@ impl CsActionHandler<V1_6> for HookCs {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 /// OC-R-023 — a peer's WebSocket close ends the connection: the connection is torn down and the CS's disconnect hook fires.
 /// OC-R-046 — the CS exposes connect and disconnect lifecycle hooks (both observed here).
+/// OC-R-120 — the dropped-connection reason lands on the status sink, not the message sink.
 async fn peer_close_ends_connection_and_fires_disconnect_hook() {
     let connected = Arc::new(AtomicBool::new(false));
     let disconnected = Arc::new(AtomicBool::new(false));
     let server = start_server().await;
     let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
+    let (log, log_lines) = recording_log();
+    let (status, status_lines) = recording_log();
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             extra_headers: Vec::new(),
@@ -931,8 +950,8 @@ async fn peer_close_ends_connection_and_fires_disconnect_hook() {
             connected: connected.clone(),
             disconnected: disconnected.clone(),
         },
-        sink(),
-        sink(),
+        log,
+        status,
     )
     .await
     .expect("client connect");
@@ -960,6 +979,29 @@ async fn peer_close_ends_connection_and_fires_disconnect_hook() {
         sleep(Duration::from_millis(20)).await;
     }
     assert!(fired, "disconnect hook did not fire on peer close");
+
+    let mut dropped = false;
+    for _ in 0..50 {
+        if status_lines
+            .lock()
+            .iter()
+            .any(|l| l == "Connection dropped.")
+        {
+            dropped = true;
+            break;
+        }
+        sleep(Duration::from_millis(20)).await;
+    }
+    assert!(
+        dropped,
+        "expected a 'Connection dropped.' line on the status sink, got: {:?}",
+        status_lines.lock()
+    );
+    assert!(
+        !log_lines.lock().iter().any(|l| l == "Connection dropped."),
+        "the dropped-connection reason must not land on the message sink, got: {:?}",
+        log_lines.lock()
+    );
 
     let _ = client.terminate().await;
 }

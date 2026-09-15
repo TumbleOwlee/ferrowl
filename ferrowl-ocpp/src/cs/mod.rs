@@ -165,8 +165,10 @@ where
 
 /// Drive the retry loop: dial the configured CSMS and run the connection, retrying a failed
 /// dial or a dropped connection per [`BackoffPolicy`] when `config.reconnect` is set (OC-R-048,
-/// OC-R-105–107). `status` receives a "Client disconnected" line once the task ends, regardless
-/// of why (mirrors `ferrowl_modbus`'s server tasks logging "Server stopped" the same way).
+/// OC-R-105–107). `status` carries every connection-status line (OC-R-120): a failed dial's
+/// reason, "Connection dropped.", the backoff-wait duration, and finally "Client disconnected"
+/// once the task ends, regardless of why (mirrors `ferrowl_modbus`'s server tasks logging
+/// "Server stopped" the same way).
 async fn run_reconnect_loop<V, H, L, St>(
     config: Arc<RwLock<Config>>,
     cache: SelfSignedCache,
@@ -191,6 +193,7 @@ where
         let cache = cache.clone();
         let handler = handler.clone();
         let log = log.clone();
+        let status = status.clone();
         let receiver = &receiver;
         async move {
             let guard = config.read().await;
@@ -227,16 +230,17 @@ where
                         )
                         .await;
                     }
-                    log.invoke(format!("{e}")).await;
+                    status.invoke(format!("{e}")).await;
                     classify_attempt(AttemptResult::DialFailed(e), reconnect)
                 }
                 Ok(ws) => {
                     let mut commands = Commands::new(&mut receiver, parked);
-                    let run_end = core::run::<V, H, _, _>(
+                    let run_end = core::run::<V, H, _, _, _>(
                         ws,
                         handler.clone(),
                         &mut commands,
                         log.clone(),
+                        status.clone(),
                         timeout,
                     )
                     .await;
@@ -245,11 +249,11 @@ where
                         core::RunEnd::Disconnected => {
                             // `core::RunEnd::Disconnected` carries no underlying error — the
                             // reader task already logs the specific reason ("websocket error:
-                            // {e}", "OCPP-J framing error: {e}") for most drops, but a clean
-                            // peer-initiated close carries none, so OC-R-114's "log the failure
-                            // reason" is satisfied here with a fixed reason string covering every
-                            // path uniformly.
-                            log.invoke("Connection dropped.".to_string()).await;
+                            // {e}", "OCPP-J framing error: {e}") on the status sink for most
+                            // drops, but a clean peer-initiated close carries none, so OC-R-114's
+                            // "log the failure reason" is satisfied here with a fixed reason
+                            // string covering every path uniformly.
+                            status.invoke("Connection dropped.".to_string()).await;
                             AttemptResult::Disconnected
                         }
                     };
@@ -262,8 +266,10 @@ where
     let wait_abortable = |backoff: Duration| {
         let receiver = &receiver;
         let log = log.clone();
+        let status = status.clone();
         async move {
-            log.invoke(format!("Reconnecting in {}s.", backoff.as_secs()))
+            status
+                .invoke(format!("Reconnecting in {}s.", backoff.as_secs()))
                 .await;
             let mut receiver = receiver.lock().await;
             // Any command other than `Terminate` received while disconnected is dropped with a
@@ -316,8 +322,9 @@ impl<V: Version> ClientBuilder<V> {
     /// start synchronously; it surfaces from [`Client::join`] (OC-R-048/OC-R-105). With
     /// `config.reconnect` set (the default), a failed dial or a dropped connection does not end
     /// the task: it logs, waits an exponential backoff (capped, reset after a connection whose
-    /// handshake completed), and retries. `status` receives a "Client disconnected" line once
-    /// the task ends, regardless of why.
+    /// handshake completed), and retries. `status` carries every connection-status line
+    /// (OC-R-120) — failed-dial reason, "Connection dropped.", the backoff-wait line, and the
+    /// final "Client disconnected" once the task ends, regardless of why.
     pub async fn spawn<H, L, St>(self, handler: H, log: L, status: St) -> Result<Client<V>, Error>
     where
         H: CsActionHandler<V>,
@@ -524,12 +531,13 @@ mod tests {
         }))
     }
 
-    /// OC-R-114 — a failed dial (`reconnect: false`, so the task ends after the single attempt)
-    /// logs the dial error's `Display` text before the task returns.
+    /// OC-R-114, OC-R-120 — a failed dial (`reconnect: false`, so the task ends after the single
+    /// attempt) logs the dial error's `Display` text as a connection-status line, on the status
+    /// sink rather than the message sink.
     #[tokio::test]
     async fn ut_dial_failure_logs_reason() {
         let (log, lines) = recording_log();
-        let (status, _status_lines) = recording_log();
+        let (status, status_lines) = recording_log();
         let mut client = ClientBuilder::<V1_6>::new(config(false), new_self_signed_cache())
             .spawn(TestCs, log, status)
             .await
@@ -541,18 +549,24 @@ mod tests {
             result.expect_err("a refused dial with reconnect: false ends the task with an error");
         let err_text = err.to_string();
         assert!(
-            lines.lock().iter().any(|l| l.contains(&err_text)),
-            "expected the dial failure reason ({err_text:?}) to be logged, got: {:?}",
+            status_lines.lock().iter().any(|l| l.contains(&err_text)),
+            "expected the dial failure reason ({err_text:?}) on the status sink, got: {:?}",
+            status_lines.lock()
+        );
+        assert!(
+            !lines.lock().iter().any(|l| l.contains(&err_text)),
+            "the dial failure reason must not land on the message sink, got: {:?}",
             lines.lock()
         );
     }
 
-    /// OC-R-114 — with `reconnect: true` against a dead port, the first backoff wait (MB-R-051's
-    /// shared 1s-start policy, OC-R-106) is logged before the task waits it out.
+    /// OC-R-114, OC-R-120 — with `reconnect: true` against a dead port, the first backoff wait
+    /// (MB-R-051's shared 1s-start policy, OC-R-106) is logged as a connection-status line, on
+    /// the status sink, before the task waits it out.
     #[tokio::test]
     async fn ut_backoff_wait_logs_duration() {
         let (log, lines) = recording_log();
-        let (status, _status_lines) = recording_log();
+        let (status, status_lines) = recording_log();
         let client = ClientBuilder::<V1_6>::new(config(true), new_self_signed_cache())
             .spawn(TestCs, log, status)
             .await
@@ -564,11 +578,19 @@ mod tests {
         client.terminate().await.unwrap();
 
         assert!(
-            lines
+            status_lines
                 .lock()
                 .iter()
                 .any(|l| l.contains("Reconnecting in 1s.")),
-            "expected a logged backoff-wait duration line, got: {:?}",
+            "expected a logged backoff-wait duration line on the status sink, got: {:?}",
+            status_lines.lock()
+        );
+        assert!(
+            !lines
+                .lock()
+                .iter()
+                .any(|l| l.contains("Reconnecting in 1s.")),
+            "the backoff-wait duration line must not land on the message sink, got: {:?}",
             lines.lock()
         );
     }

@@ -154,8 +154,15 @@ pub(crate) struct Connection<V: Version> {
 }
 
 impl<V: Version> Connection<V> {
-    /// Split `ws` and spawn its writer and reader tasks. `dispatch` answers inbound Calls.
-    pub(crate) fn start<S, D, L>(ws: S, dispatch: Arc<D>, log: L, timeout: Duration) -> Self
+    /// Split `ws` and spawn its writer and reader tasks. `dispatch` answers inbound Calls;
+    /// `status` receives the reader's connection-drop reasons ("OCPP-J framing error: …",
+    /// "websocket error: …").
+    pub(crate) fn start<S, D, Stat>(
+        ws: S,
+        dispatch: Arc<D>,
+        status: Stat,
+        timeout: Duration,
+    ) -> Self
     where
         S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
             + futures_util::Sink<Message>
@@ -163,7 +170,7 @@ impl<V: Version> Connection<V> {
             + 'static,
         S::Error: Send,
         D: InboundDispatch<V>,
-        L: LogFn + Clone,
+        Stat: LogFn + Clone,
     {
         let (sink, stream) = ws.split();
         let (out_tx, out_rx) = mpsc::channel::<OcppJMessage>(OUTBOUND_CHANNEL_CAP);
@@ -172,12 +179,12 @@ impl<V: Version> Connection<V> {
         let handlers = HandlerTasks::default();
 
         let writer = tokio::spawn(writer_task(sink, out_rx));
-        let reader = tokio::spawn(reader_task::<V, _, D, L>(
+        let reader = tokio::spawn(reader_task::<V, _, D, Stat>(
             stream,
             out_tx.clone(),
             pending.clone(),
             dispatch,
-            log,
+            status,
             shutdown.clone(),
             handlers.clone(),
         ));
@@ -238,26 +245,26 @@ where
 }
 
 /// Owns the websocket stream; completes correlated replies and spawns a task per inbound Call.
-async fn reader_task<V, St, D, L>(
+async fn reader_task<V, St, D, Stat>(
     mut stream: St,
     out_tx: mpsc::Sender<OcppJMessage>,
     pending: PendingCalls,
     dispatch: Arc<D>,
-    log: L,
+    status: Stat,
     shutdown: Arc<Notify>,
     handlers: HandlerTasks,
 ) where
     V: Version,
     St: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
     D: InboundDispatch<V>,
-    L: LogFn + Clone,
+    Stat: LogFn + Clone,
 {
     while let Some(item) = stream.next().await {
         let msg = match item {
             Ok(Message::Text(text)) => match codec::decode(text.as_str()) {
                 Ok(msg) => msg,
                 Err(e) => {
-                    log.invoke(format!("OCPP-J framing error: {e}")).await;
+                    status.invoke(format!("OCPP-J framing error: {e}")).await;
                     // A malformed Call whose id survives is still owed an answer -- without one
                     // the peer waits out its own call timeout. Anything else (unparseable text,
                     // no id, or a malformed CallResult/CallError) has no one to answer.
@@ -277,7 +284,7 @@ async fn reader_task<V, St, D, L>(
             Ok(Message::Close(_)) => break,
             Ok(_) => continue, // ping/pong/binary/raw frames are not OCPP-J payloads
             Err(e) => {
-                log.invoke(format!("websocket error: {e}")).await;
+                status.invoke(format!("websocket error: {e}")).await;
                 break;
             }
         };
@@ -357,7 +364,111 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
     use std::time::Duration;
+
+    /// A `LogFn` that records every line into a shared buffer for assertions.
+    fn recording_log() -> (impl LogFn + Clone, Arc<parking_lot::Mutex<Vec<String>>>) {
+        let lines = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
+        let sink = lines.clone();
+        let log = move |s: String| {
+            let sink = sink.clone();
+            async move {
+                sink.lock().push(s);
+            }
+        };
+        (log, lines)
+    }
+
+    /// A fixed script of frames fed to the reader task: an unparseable text frame, then a
+    /// websocket-level error, then stream end. Every `Sink` call is a no-op.
+    struct ScriptedStream {
+        items: std::collections::VecDeque<Result<Message, tokio_tungstenite::tungstenite::Error>>,
+    }
+
+    impl futures_util::Stream for ScriptedStream {
+        type Item = Result<Message, tokio_tungstenite::tungstenite::Error>;
+
+        fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            Poll::Ready(self.items.pop_front())
+        }
+    }
+
+    impl futures_util::Sink<Message> for ScriptedStream {
+        type Error = tokio_tungstenite::tungstenite::Error;
+
+        fn poll_ready(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+        fn start_send(self: Pin<&mut Self>, _item: Message) -> Result<(), Self::Error> {
+            Ok(())
+        }
+        fn poll_flush(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+        fn poll_close(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    struct NoopDispatch;
+
+    impl InboundDispatch<crate::V1_6> for NoopDispatch {
+        async fn handle(&self, _action: crate::Action16) -> Result<crate::Response16, CallError> {
+            unreachable!("no Call frame is scripted in this test")
+        }
+    }
+
+    #[tokio::test]
+    /// OC-R-120 — the reader task's connection-drop reasons are connection-status lines: they go
+    /// to the status sink (the module log), not the message sink.
+    async fn ut_reader_drop_reasons_go_to_the_status_sink() {
+        let mut items = std::collections::VecDeque::new();
+        items.push_back(Ok(Message::text("this is not json")));
+        items.push_back(Err(tokio_tungstenite::tungstenite::Error::ConnectionClosed));
+        let double = ScriptedStream { items };
+
+        let (status, status_lines) = recording_log();
+        let connection = Connection::<crate::V1_6>::start(
+            double,
+            Arc::new(NoopDispatch),
+            status,
+            Duration::from_millis(500),
+        );
+
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        while tokio::time::Instant::now() < deadline && status_lines.lock().len() < 2 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        connection.shutdown().await;
+
+        assert!(
+            status_lines
+                .lock()
+                .iter()
+                .any(|l| l.starts_with("OCPP-J framing error:")),
+            "expected a framing-error line on the status sink, got: {:?}",
+            status_lines.lock()
+        );
+        assert!(
+            status_lines
+                .lock()
+                .iter()
+                .any(|l| l.starts_with("websocket error:")),
+            "expected a websocket-error line on the status sink, got: {:?}",
+            status_lines.lock()
+        );
+    }
 
     #[tokio::test]
     /// OC-R-121 — abort_all cancels every tracked task without waiting for it to finish.
