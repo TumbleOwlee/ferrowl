@@ -332,9 +332,12 @@ impl ModuleView for MockView {
                     0 | usize::MAX => None,
                     n => Some(n - 1),
                 });
-            if prev == Ok(1)
-                && let Some((level, message)) = deferred_log.lock().unwrap().take()
-            {
+            let deferred = if prev == Ok(1) {
+                deferred_log.lock().unwrap().take()
+            } else {
+                None
+            };
+            if let Some((level, message)) = deferred {
                 log.write().await.write(level, &message);
             }
         })
