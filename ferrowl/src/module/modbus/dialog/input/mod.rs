@@ -114,7 +114,7 @@ pub struct EditedRegister {
 }
 
 impl EditInputDialog {
-    fn is_boolean_kind(&self) -> bool {
+    pub(crate) fn is_boolean_kind(&self) -> bool {
         matches!(
             self.kind.state.get_value().0,
             Kind::Coil | Kind::DiscreteInput
@@ -422,11 +422,18 @@ impl EditInputDialog {
     pub fn to_edit_selection_dialog(
         &self,
     ) -> super::selection::EditSelectionDialog<crate::config::device::NamedValue> {
+        use super::selection::{NamedValueSource, boolean_kind_values, unset_sentinel};
         use crate::config::device::{NamedValue, Scalar};
         let values = self.pending_named_values.clone();
-        let mut d = super::selection::EditSelectionDialog::new(values.clone());
+        let boolean = self.is_boolean_kind();
+        let mut d = super::selection::EditSelectionDialog::new(if boolean {
+            vec![]
+        } else {
+            values.clone()
+        });
         d.deletable = self.deletable;
         d.is_server = self.is_server;
+        d.seeded_default.clone_from(&self.seeded_default);
         d.label.state = self.label.state.clone();
         d.description.state = self.description.state.clone();
         d.slave_id.state = self.slave_id.state.clone();
@@ -441,6 +448,35 @@ impl EditInputDialog {
         d.number_bitmask.state = self.number_bitmask.state.clone();
         d.text_alignment.state = self.text_alignment.state.clone();
         d.text_width.state = self.text_width.state.clone();
+
+        if boolean {
+            let mut value_vals = vec![unset_sentinel()];
+            value_vals.extend(boolean_kind_values());
+            *d.value.state.values_mut() = value_vals;
+            d.value.state.set_selection(0);
+
+            *d.default_value.state.values_mut() = boolean_kind_values();
+            let typed = self.default_value.state.input().trim().to_string();
+            // A default the user just typed into the text pane takes precedence (MB-R-235,
+            // the mirror of the reverse conversion's typed-text preference); otherwise fall
+            // back to the carried `seeded_default` under the same canonical-string rule.
+            let on_selected = match typed.as_str() {
+                "1" => true,
+                "0" => false,
+                _ => {
+                    self.seeded_default
+                        .as_ref()
+                        .map(|d| d.to_string())
+                        .as_deref()
+                        == Some("1")
+                }
+            };
+            d.default_value
+                .state
+                .set_selection(if on_selected { 0 } else { 1 });
+            d.value_source = NamedValueSource::BooleanFixed;
+            return d;
+        }
 
         // Index 0 is the "(no default)" sentinel.
         let mut default_vals = vec![NamedValue {
@@ -895,6 +931,73 @@ mod apply_tests {
     }
 
     #[test]
+    /// MB-R-228 — a configured default carried by `seeded_default` survives a round trip through
+    /// `EditSelectionDialog` and back: converting a hidden-panes dialog to the selection variant
+    /// and immediately back must not lose the default the middle hop never got to show.
+    fn ut_seeded_default_survives_a_dialog_round_trip() {
+        let ro = reg(
+            Kind::HoldingRegister,
+            Access::ReadOnly,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let default = crate::config::device::Scalar::from_input("1");
+        let dialog = EditInputDialog::from_register("n", "", &ro, "5", Some(&default), false);
+        let selection = dialog.to_edit_selection_dialog();
+        let round_tripped = selection.to_edit_input_dialog();
+        let edited = round_tripped
+            .apply()
+            .expect("hidden panes never block confirm");
+        assert_eq!(edited.default, Some(default));
+    }
+
+    #[test]
+    /// MB-R-235 — switching Kind from a non-boolean to a boolean kind must not drop a default
+    /// just typed into the text Default pane: the resulting selection dialog's Default pane opens
+    /// preselected on `ON`/`OFF` from that typed text, not solely from `seeded_default`.
+    fn ut_typed_default_survives_a_switch_into_a_boolean_kind() {
+        let holding = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let mut dialog = EditInputDialog::from_register("n", "", &holding, "1", None, true);
+        crate::module::modbus::dialog::set_input(&mut dialog.default_value, "1");
+        dialog
+            .kind
+            .state
+            .set_selection(crate::module::modbus::dialog::kind_index(&Kind::Coil));
+        let selection = dialog.to_edit_selection_dialog();
+        assert_eq!(selection.default_value.state.selection(), 0); // ON
+        let edited = selection.apply().expect("boolean dialog should apply");
+        assert_eq!(edited.default, Some(crate::config::device::Scalar::Int(1)));
+
+        let mut dialog2 = EditInputDialog::from_register("n", "", &holding, "0", None, true);
+        crate::module::modbus::dialog::set_input(&mut dialog2.default_value, "0");
+        dialog2
+            .kind
+            .state
+            .set_selection(crate::module::modbus::dialog::kind_index(&Kind::Coil));
+        let selection2 = dialog2.to_edit_selection_dialog();
+        assert_eq!(selection2.default_value.state.selection(), 1); // OFF
+        let edited2 = selection2.apply().expect("boolean dialog should apply");
+        assert_eq!(edited2.default, Some(crate::config::device::Scalar::Int(0)));
+    }
+
+    #[test]
     /// MB-R-228 — hiding the Default Value pane by toggling Access to `ReadOnly` after typing an
     /// unchecked value into it must not carry that raw, never-validated text through as the
     /// applied default: a hidden pane carries the register's existing configured default,
@@ -989,44 +1092,13 @@ mod apply_tests {
     }
 
     #[test]
-    /// MB-R-222, MB-R-223, MB-R-224 — a boolean-kind (Coil/DiscreteInput) Value input is
-    /// evaluated the same as any other kind: empty applies with no write, valid text applies and
-    /// carries, invalid text refuses confirm.
-    fn ut_boolean_kind_value_input_is_evaluated() {
-        let coil = reg(
-            Kind::Coil,
-            Access::ReadWrite,
-            Address::Fixed(1),
-            1,
-            RegisterFormat::u16(
-                RegisterEndian::Big,
-                RegisterWordOrder::Normal,
-                Resolution(1.0),
-                BitField::default(),
-            ),
-        );
-        let dialog = EditInputDialog::from_register("n", "", &coil, "abc", None, true);
-        let err = dialog
-            .apply()
-            .expect_err("invalid boolean value should refuse confirm");
-        assert!(err.starts_with("Value: "));
-
-        let dialog = EditInputDialog::from_register("n", "", &coil, "1", None, true);
-        let edited = dialog.apply().expect("valid boolean value should apply");
-        assert_eq!(edited.value, Some("1".to_string()));
-
-        let dialog = EditInputDialog::from_register("n", "", &coil, "", None, true);
-        let edited = dialog.apply().expect("empty boolean value should apply");
-        assert_eq!(edited.value, None);
-    }
-
-    #[test]
     /// MB-R-223, MB-E-095 — a virtual register's Value/Default Value inputs are evaluated exactly
     /// as a `:set` write is: `:set` on a virtual register goes through `str_to_value`
     /// (`Scalar::from_input`), never `encode`, so confirm must not reject text `encode` would.
+    /// A `HoldingRegister`, not `Coil`: a boolean kind no longer stays in this dialog (MB-R-229).
     fn ut_virtual_register_value_input_is_not_format_encoded() {
-        let virtual_coil = reg(
-            Kind::Coil,
+        let virtual_holding = reg(
+            Kind::HoldingRegister,
             Access::ReadWrite,
             Address::Virtual,
             1,
@@ -1037,7 +1109,7 @@ mod apply_tests {
                 BitField::default(),
             ),
         );
-        let dialog = EditInputDialog::from_register("n", "", &virtual_coil, "abc", None, true);
+        let dialog = EditInputDialog::from_register("n", "", &virtual_holding, "abc", None, true);
         let edited = dialog
             .apply()
             .expect("virtual register's value is not encode-checked");

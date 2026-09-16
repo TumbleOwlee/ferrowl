@@ -157,6 +157,11 @@ pub(crate) fn kind_index(kind: &Kind) -> usize {
     }
 }
 
+/// Whether a register `Kind` is boolean-valued (`Coil`/`DiscreteInput`, MB-R-229).
+pub(crate) fn is_boolean_kind(kind: &Kind) -> bool {
+    matches!(kind, Kind::Coil | Kind::DiscreteInput)
+}
+
 pub(crate) fn set_input<T: Validate>(
     widget: &mut Widget<InputFieldState, InputField<T>>,
     value: &str,

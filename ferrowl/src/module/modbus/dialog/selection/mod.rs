@@ -29,6 +29,38 @@ use std::fmt::Debug;
 mod build;
 mod render;
 
+/// The fixed named-value pair a `Coil`/`DiscreteInput` register's Value/Default panes offer
+/// (MB-R-230): `ON` = 1, `OFF` = 0, replacing whatever the register declared (MB-R-232).
+pub(crate) fn boolean_kind_values() -> Vec<NamedValue> {
+    vec![
+        NamedValue {
+            name: "ON".to_string(),
+            value: Scalar::Int(1),
+        },
+        NamedValue {
+            name: "OFF".to_string(),
+            value: Scalar::Int(0),
+        },
+    ]
+}
+
+/// The Value pane's not-set state for a boolean kind (MB-R-229). Never shown on the Default
+/// pane (MB-R-234).
+pub(crate) fn unset_sentinel() -> NamedValue {
+    NamedValue {
+        name: "UNSET".to_string(),
+        value: Scalar::Text(String::new()),
+    }
+}
+
+/// Where an `EditSelectionDialog`'s named-value list came from, so leaving a boolean kind drops
+/// the injected pair (MB-R-232) without touching a list the user authored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NamedValueSource {
+    Config,
+    BooleanFixed,
+}
+
 /// Parse a raw memory string like `[00a0 0001]` into an i64 (big-endian word combination).
 pub fn parse_raw_value(raw: &str) -> Option<i64> {
     let inner = raw.trim().strip_prefix('[')?.strip_suffix(']')?;
@@ -87,30 +119,31 @@ where
     pub kind: Widget<SelectionState<KindOption>, Selection<KindOption>>,
     #[focus]
     pub access: Widget<SelectionState<AccessOption>, Selection<AccessOption>>,
-    #[focus]
+    #[focus(when = {!self.is_boolean_kind()})]
     pub value_type: Widget<SelectionState<ValueType>, Selection<ValueType>>,
-    #[focus(when = {self.value_type.get_value() == ValueType::Number})]
+    #[focus(when = {!self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number})]
     pub number_format: Widget<SelectionState<Format>, Selection<Format>>,
-    #[focus(when = {self.value_type.get_value() == ValueType::Number})]
+    #[focus(when = {!self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number})]
     pub number_endian: Widget<SelectionState<Endian>, Selection<Endian>>,
-    #[focus(when = {self.value_type.get_value() == ValueType::Number && is_multi_register_format(&self.number_format.get_value().0)})]
+    #[focus(when = {!self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number && is_multi_register_format(&self.number_format.get_value().0)})]
     pub number_word_order: Widget<SelectionState<WordOrder>, Selection<WordOrder>>,
-    #[focus(when = {self.value_type.get_value() == ValueType::Number})]
+    #[focus(when = {!self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number})]
     pub number_resolution: Widget<InputFieldState, InputField<f64>>,
-    #[focus(when = {self.value_type.get_value() == ValueType::Number && is_integer_format(&self.number_format.get_value().0)})]
+    #[focus(when = {!self.is_boolean_kind() && self.value_type.get_value() == ValueType::Number && is_integer_format(&self.number_format.get_value().0)})]
     pub number_bitmask: Widget<InputFieldState, InputField<crate::dialog::Bitmask>>,
-    #[focus(when = {self.value_type.get_value() == ValueType::Text})]
+    #[focus(when = {!self.is_boolean_kind() && self.value_type.get_value() == ValueType::Text})]
     pub text_alignment: Widget<SelectionState<Alignment>, Selection<Alignment>>,
-    #[focus(when = {self.value_type.get_value() == ValueType::Text})]
+    #[focus(when = {!self.is_boolean_kind() && self.value_type.get_value() == ValueType::Text})]
     pub text_width: Widget<InputFieldState, InputField<usize>>,
-    #[focus(when = {!self.value.state.values().is_empty()})]
+    #[focus(when = {self.value_pane_visible()})]
     pub value: Widget<SelectionState<V>, Selection<V>>,
-    #[focus]
+    #[focus(when = {!self.is_boolean_kind()})]
     pub add_button: Widget<ButtonState, Button>,
-    #[focus(when = {!self.value.state.values().is_empty()})]
+    #[focus(when = {!self.is_boolean_kind() && !self.value.state.values().is_empty()})]
     pub delete_button: Widget<ButtonState, Button>,
-    // Default value selection (same options as value, plus a leading "no default" sentinel)
-    #[focus(when = {!self.value.state.values().is_empty() && (self.access.get_value().0 != ferrowl_codec::Access::ReadOnly || self.is_server) })]
+    // Default value selection (same options as value, plus a leading "no default" sentinel for
+    // a non-boolean kind; a boolean kind's list is the fixed ON/OFF pair with no sentinel).
+    #[focus(when = {self.default_pane_visible()})]
     pub default_value: Widget<SelectionState<V>, Selection<V>>,
     #[focus]
     pub confirm_button: Widget<ButtonState, Button>,
@@ -136,9 +169,40 @@ where
     // Confirm-close popup, opened with Esc.
     #[builder(default)]
     pub close_confirm: Option<CloseConfirmDialog>,
+    // The register's configured default at dialog open (MB-R-228), carried across a round trip
+    // through `EditInputDialog` so a pane MB-R-151 hides never loses it — mirrors the field
+    // `EditInputDialog` carries for the same reason.
+    #[builder(default)]
+    pub seeded_default: Option<Scalar>,
+    // Where the Value/Default panes' named-value list came from (MB-R-232): the register's own
+    // declared list, or the fixed pair injected for a boolean kind.
+    #[builder(default = "NamedValueSource::Config")]
+    pub value_source: NamedValueSource,
 }
 
 impl<V: ToLabel + Clone> EditSelectionDialog<V> {
+    pub(crate) fn is_boolean_kind(&self) -> bool {
+        matches!(
+            self.kind.state.get_value().0,
+            ferrowl_codec::Kind::Coil | ferrowl_codec::Kind::DiscreteInput
+        )
+    }
+
+    /// Whether the Value pane is shown at all (MB-R-151): hidden for a `ReadOnly` register on a
+    /// client module, shown otherwise — exactly the predicate the text dialog's `value` field
+    /// already gates on (`EditInputDialog::value_inputs_visible`). Spelled once so the pane's
+    /// `#[focus(when = …)]`, `render.rs`, and `apply()` cannot drift apart.
+    fn value_pane_visible(&self) -> bool {
+        !self.value.state.values().is_empty()
+            && (self.access.get_value().0 != ferrowl_codec::Access::ReadOnly || self.is_server)
+    }
+
+    /// Whether the Default Value pane is shown at all (MB-R-151): the same predicate as the
+    /// Value pane.
+    fn default_pane_visible(&self) -> bool {
+        self.value_pane_visible()
+    }
+
     fn validate(&self) -> Result<(), String> {
         if let ValidateResult::Error(e) = String::validate(self.label.state.input()) {
             return Err(format!("Label: {e}"));
@@ -174,6 +238,29 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
 }
 
 impl EditSelectionDialog<NamedValue> {
+    /// Keeps the Value/Default panes in step with the Kind field (MB-R-240, MB-R-241): a Kind
+    /// change is caught here, not at `from_register`/`apply()` alone, because the dialog's own
+    /// Kind selector can change Kind without the enclosing overlay ever rebuilding this dialog
+    /// (both a `Coil` and a `HoldingRegister`-with-aliases open the selection variant, so no
+    /// `Input`/`Selection` switch fires). Called after every keystroke and before every render.
+    pub(crate) fn sync_boolean_kind_panes(&mut self) {
+        // The reverse direction (boolean -> non-boolean) needs no branch here: once
+        // `value_source` is `BooleanFixed` and `is_boolean_kind()` turns false,
+        // `ModbusOverlay::maybe_switch_to_input`'s existing guard converts the whole dialog to
+        // the text-input kind (MB-R-241 — its `pending_named_values` starts empty), which is
+        // checked before this method runs.
+        if self.is_boolean_kind() && self.value_source != NamedValueSource::BooleanFixed {
+            let mut value_vals = vec![unset_sentinel()];
+            value_vals.extend(boolean_kind_values());
+            *self.value.state.values_mut() = value_vals;
+            self.value.state.set_selection(0);
+
+            *self.default_value.state.values_mut() = boolean_kind_values();
+            self.default_value.state.set_selection(1); // OFF (MB-R-235's no-default case)
+            self.value_source = NamedValueSource::BooleanFixed;
+        }
+    }
+
     /// Build the dialog pre-filled from an existing register, its named values, and current value.
     /// `raw_value` is the hex memory string (e.g. `[000a]`) used for accurate integer matching.
     #[allow(clippy::too_many_arguments)]
@@ -187,27 +274,20 @@ impl EditSelectionDialog<NamedValue> {
         default: Option<&Scalar>,
         is_server: bool,
     ) -> Self {
-        let mut dialog = Self::new(named_values.clone());
+        let boolean = crate::module::modbus::dialog::is_boolean_kind(register.kind());
+        // A boolean kind's Value/Default lists are the fixed pair (plus `UNSET` on Value), never
+        // the register's declared list (MB-R-229, MB-R-232): built below, after `dialog.kind` is
+        // set, so `Self::new` never sees `named_values` for such a register.
+        let mut dialog = Self::new(if boolean {
+            vec![]
+        } else {
+            named_values.clone()
+        });
         dialog.deletable = true;
         dialog.is_server = is_server;
+        dialog.seeded_default = default.cloned();
         set_input(&mut dialog.label, name);
         set_input(&mut dialog.description, description);
-        // Populate default selection: sentinel at index 0, then all named values.
-        let mut default_vals = vec![NamedValue {
-            name: "(no default)".to_string(),
-            value: Scalar::Text("".into()),
-        }];
-        default_vals.extend_from_slice(&named_values);
-        *dialog.default_value.state.values_mut() = default_vals;
-        if let Some(def) = default {
-            let def_str = def.to_string();
-            if let Some(idx) = named_values
-                .iter()
-                .position(|nv| nv.value.to_string() == def_str)
-            {
-                dialog.default_value.state.set_selection(idx + 1);
-            }
-        }
         dialog.label.state.set_focused(false);
         dialog.value.state.set_focused(true);
         dialog.focus = EditSelectionDialogFocus::Value;
@@ -221,6 +301,38 @@ impl EditSelectionDialog<NamedValue> {
             .state
             .set_selection(access_index(register.access()));
         dialog.kind.state.set_selection(kind_index(register.kind()));
+
+        if boolean {
+            let mut value_vals = vec![unset_sentinel()];
+            value_vals.extend(boolean_kind_values());
+            *dialog.value.state.values_mut() = value_vals;
+            dialog.value.state.set_selection(0);
+
+            *dialog.default_value.state.values_mut() = boolean_kind_values();
+            let on_selected = default.map(|d| d.to_string()).as_deref() == Some("1");
+            dialog
+                .default_value
+                .state
+                .set_selection(if on_selected { 0 } else { 1 });
+            dialog.value_source = NamedValueSource::BooleanFixed;
+        } else {
+            // Populate default selection: sentinel at index 0, then all named values.
+            let mut default_vals = vec![NamedValue {
+                name: "(no default)".to_string(),
+                value: Scalar::Text("".into()),
+            }];
+            default_vals.extend_from_slice(&named_values);
+            *dialog.default_value.state.values_mut() = default_vals;
+            if let Some(def) = default {
+                let def_str = def.to_string();
+                if let Some(idx) = named_values
+                    .iter()
+                    .position(|nv| nv.value.to_string() == def_str)
+                {
+                    dialog.default_value.state.set_selection(idx + 1);
+                }
+            }
+        }
 
         match register.format() {
             RegisterFormat::Ascii(align, width) => {
@@ -259,13 +371,16 @@ impl EditSelectionDialog<NamedValue> {
 
         // Pre-select the matching named value. Integer values match the raw memory words (reliable
         // across formats/resolutions); any value type also matches the decoded display string.
-        let raw_int = parse_raw_value(raw_value);
-        let current = current_value.trim();
-        if let Some(idx) = named_values.iter().position(|nv| match &nv.value {
-            Scalar::Int(v) => raw_int == Some(*v) || current == v.to_string(),
-            other => current == other.to_string(),
-        }) {
-            dialog.value.state.set_selection(idx);
+        // Never done for a boolean kind: MB-R-229 always selects `UNSET`, never the stored value.
+        if !boolean {
+            let raw_int = parse_raw_value(raw_value);
+            let current = current_value.trim();
+            if let Some(idx) = named_values.iter().position(|nv| match &nv.value {
+                Scalar::Int(v) => raw_int == Some(*v) || current == v.to_string(),
+                other => current == other.to_string(),
+            }) {
+                dialog.value.state.set_selection(idx);
+            }
         }
 
         dialog
@@ -278,38 +393,47 @@ impl EditSelectionDialog<NamedValue> {
         let description = self.description.state.input().trim().to_string();
         let address = parse_address(self.address.state.input())?;
 
-        let format = match self.value_type.state.get_value() {
-            ValueType::Number => {
-                let selected = self.number_format.state.get_value();
-                let endian = self.number_endian.state.get_value().0;
-                let word_order = self.number_word_order.state.get_value().0;
-                let resolution = Resolution(
-                    self.number_resolution
+        let format = if self.is_boolean_kind() {
+            RegisterFormat::u16(
+                ferrowl_codec::format::Endian::Big,
+                ferrowl_codec::format::WordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            )
+        } else {
+            match self.value_type.state.get_value() {
+                ValueType::Number => {
+                    let selected = self.number_format.state.get_value();
+                    let endian = self.number_endian.state.get_value().0;
+                    let word_order = self.number_word_order.state.get_value().0;
+                    let resolution = Resolution(
+                        self.number_resolution
+                            .state
+                            .input()
+                            .trim()
+                            .parse::<f64>()
+                            .map_err(|_| "Resolution must be a number.".to_string())?,
+                    );
+                    // Bitmask applies to integer formats only; floats ignore it.
+                    let bitfield = if is_integer_format(&selected.0) {
+                        parse_bitmask(self.number_bitmask.state.input())
+                            .map_err(|e| format!("Bitmask {e}."))?
+                    } else {
+                        BitField::default()
+                    };
+                    with_numeric_parts(&selected.0, endian, word_order, resolution, bitfield)
+                }
+                ValueType::Text => {
+                    let alignment = self.text_alignment.state.get_value().0;
+                    let width = self
+                        .text_width
                         .state
                         .input()
                         .trim()
-                        .parse::<f64>()
-                        .map_err(|_| "Resolution must be a number.".to_string())?,
-                );
-                // Bitmask applies to integer formats only; floats ignore it.
-                let bitfield = if is_integer_format(&selected.0) {
-                    parse_bitmask(self.number_bitmask.state.input())
-                        .map_err(|e| format!("Bitmask {e}."))?
-                } else {
-                    BitField::default()
-                };
-                with_numeric_parts(&selected.0, endian, word_order, resolution, bitfield)
-            }
-            ValueType::Text => {
-                let alignment = self.text_alignment.state.get_value().0;
-                let width = self
-                    .text_width
-                    .state
-                    .input()
-                    .trim()
-                    .parse::<usize>()
-                    .map_err(|_| "Width must be a number.".to_string())?;
-                RegisterFormat::Ascii(alignment, Width(width))
+                        .parse::<usize>()
+                        .map_err(|_| "Width must be a number.".to_string())?;
+                    RegisterFormat::Ascii(alignment, Width(width))
+                }
             }
         };
 
@@ -330,13 +454,37 @@ impl EditSelectionDialog<NamedValue> {
             .build()
             .expect("all register fields are set");
 
-        let named_values = self.value.state.values().clone();
-        let value = if named_values.is_empty() {
-            None
+        let (named_values, value) = if self.is_boolean_kind() {
+            // Index 0 is the `UNSET` sentinel (MB-R-229): no evaluation, no value (MB-R-231). A
+            // pane hidden by MB-R-151 is never read (MB-R-227), regardless of its selection.
+            let value = if !self.value_pane_visible() {
+                None
+            } else {
+                let sel = self.value.state.selection();
+                if sel == 0 {
+                    None
+                } else {
+                    Some(self.value.state.get_value().value.to_string())
+                }
+            };
+            (boolean_kind_values(), value)
         } else {
-            Some(self.value.state.get_value().value.to_string())
+            let named_values = self.value.state.values().clone();
+            let value = if !self.value_pane_visible() || named_values.is_empty() {
+                None
+            } else {
+                Some(self.value.state.get_value().value.to_string())
+            };
+            (named_values, value)
         };
-        let default = {
+
+        let default = if self.is_boolean_kind() {
+            if self.default_pane_visible() {
+                Some(self.default_value.state.get_value().value.clone())
+            } else {
+                self.seeded_default.clone()
+            }
+        } else {
             let sel = self.default_value.state.selection();
             let vals = self.default_value.state.values();
             if sel == 0 || vals.len() <= 1 {
@@ -395,9 +543,16 @@ impl EditSelectionDialog<NamedValue> {
         d.number_bitmask.state = self.number_bitmask.state.clone();
         d.text_alignment.state = self.text_alignment.state.clone();
         d.text_width.state = self.text_width.state.clone();
-        // Index 0 is the "(no default)" sentinel; skip it.
+        d.seeded_default.clone_from(&self.seeded_default);
+        // A boolean Default pane (MB-R-234) has no "(no default)" sentinel — index 0 is `ON`
+        // itself — so its selection is always taken. A `Config`-sourced list still skips the
+        // sentinel at index 0.
         let sel = self.default_value.state.selection();
-        if sel > 0
+        if self.value_source == NamedValueSource::BooleanFixed
+            && let Some(nv) = self.default_value.state.values().get(sel)
+        {
+            set_input(&mut d.default_value, &nv.value.to_string());
+        } else if sel > 0
             && let Some(nv) = self.default_value.state.values().get(sel)
         {
             set_input(&mut d.default_value, &nv.value.to_string());
@@ -835,6 +990,7 @@ mod default_and_conversion_tests {
 
 impl super::RegisterDialog for EditSelectionDialog<NamedValue> {
     fn render(&mut self, area: Rect, buf: &mut Buffer) {
+        self.sync_boolean_kind_panes();
         self.render(area, buf)
     }
     fn focus_next(&mut self) {
@@ -845,6 +1001,7 @@ impl super::RegisterDialog for EditSelectionDialog<NamedValue> {
     }
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) {
         let _ = HandleEvents::handle_events(self, modifiers, code);
+        self.sync_boolean_kind_panes();
     }
     fn handle_space(&mut self) {
         self.handle_space()
@@ -877,5 +1034,426 @@ impl super::RegisterDialog for EditSelectionDialog<NamedValue> {
             self.close_confirm = None;
         }
         event
+    }
+}
+
+#[cfg(test)]
+mod boolean_kind_tests {
+    //! MB-R-229 through MB-R-236, MB-E-096: the boolean-kind (Coil/DiscreteInput) Value/Default
+    //! selection panes, the fixed ON/OFF alias pair, and the hidden-pane default carrier.
+    use super::{EditSelectionDialog, boolean_kind_values};
+    use crate::config::device::{NamedValue, Scalar};
+    use ferrowl_codec::format::{
+        BitField, Endian as RegisterEndian, Format as RegisterFormat, Resolution,
+        WordOrder as RegisterWordOrder,
+    };
+    use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder};
+    use ferrowl_modbus::UnitId;
+
+    fn coil(access: Access) -> Register {
+        RegisterBuilder::default()
+            .slave_id(UnitId(1))
+            .access(access)
+            .kind(Kind::Coil)
+            .address(Address::Fixed(0))
+            .format(RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ))
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    /// MB-R-229, MB-R-230, MB-R-231, MB-R-232 — the Value pane offers `UNSET`/`ON`/`OFF`, opens
+    /// on `UNSET` (no evaluation, no write), and carries the fixed alias pair on confirm.
+    fn ut_boolean_value_selection_carries_unset_on_off() {
+        let register = coil(Access::ReadWrite);
+        let dialog = EditSelectionDialog::from_register(
+            "c",
+            "",
+            &register,
+            vec![],
+            "0",
+            "[0000]",
+            None,
+            true,
+        );
+        assert_eq!(dialog.value.state.values().len(), 3);
+        assert_eq!(dialog.value.state.values()[0].name, "UNSET");
+        assert_eq!(dialog.value.state.values()[1].name, "ON");
+        assert_eq!(dialog.value.state.values()[2].name, "OFF");
+        assert_eq!(dialog.value.state.selection(), 0);
+
+        let edited = dialog.apply().expect("UNSET selection should apply");
+        assert_eq!(edited.value, None);
+        assert_eq!(
+            edited.named_values,
+            Some(vec![
+                NamedValue {
+                    name: "ON".to_string(),
+                    value: Scalar::Int(1)
+                },
+                NamedValue {
+                    name: "OFF".to_string(),
+                    value: Scalar::Int(0)
+                },
+            ])
+        );
+
+        let mut on_dialog = EditSelectionDialog::from_register(
+            "c",
+            "",
+            &register,
+            vec![],
+            "0",
+            "[0000]",
+            None,
+            true,
+        );
+        on_dialog.value.state.set_selection(1);
+        let edited = on_dialog.apply().expect("ON selection should apply");
+        assert_eq!(edited.value.as_deref(), Some("1".to_string()).as_deref());
+
+        let mut off_dialog = EditSelectionDialog::from_register(
+            "c",
+            "",
+            &register,
+            vec![],
+            "0",
+            "[0000]",
+            None,
+            true,
+        );
+        off_dialog.value.state.set_selection(2);
+        let edited = off_dialog.apply().expect("OFF selection should apply");
+        assert_eq!(edited.value.as_deref(), Some("0".to_string()).as_deref());
+    }
+
+    #[test]
+    /// MB-R-234, MB-R-235, MB-R-236 — the Default pane is two-state (`ON`/`OFF`), opens
+    /// preselected to the configured default (or `OFF` when unconfigured), and confirming
+    /// through a shown pane always writes 1 or 0.
+    fn ut_boolean_default_pane_is_two_state_and_prefilled() {
+        let register = coil(Access::ReadWrite);
+
+        let unseeded = EditSelectionDialog::from_register(
+            "c",
+            "",
+            &register,
+            vec![],
+            "0",
+            "[0000]",
+            None,
+            true,
+        );
+        assert_eq!(unseeded.default_value.state.values().len(), 2);
+        assert_eq!(unseeded.default_value.state.values()[0].name, "ON");
+        assert_eq!(unseeded.default_value.state.values()[1].name, "OFF");
+        assert_eq!(unseeded.default_value.state.selection(), 1);
+        let edited = unseeded.apply().expect("unseeded boolean dialog applies");
+        assert_eq!(edited.default, Some(Scalar::Int(0)));
+
+        let mut moved_on = EditSelectionDialog::from_register(
+            "c",
+            "",
+            &register,
+            vec![],
+            "0",
+            "[0000]",
+            None,
+            true,
+        );
+        moved_on.default_value.state.set_selection(0);
+        let edited = moved_on.apply().expect("moved-to-ON dialog applies");
+        assert_eq!(edited.default, Some(Scalar::Int(1)));
+
+        let seeded = EditSelectionDialog::from_register(
+            "c",
+            "",
+            &register,
+            vec![],
+            "0",
+            "[0000]",
+            Some(&Scalar::Int(1)),
+            true,
+        );
+        assert_eq!(seeded.default_value.state.selection(), 0);
+        assert_eq!(seeded.default_value.state.values()[0].name, "ON");
+        let edited = seeded
+            .apply()
+            .expect("seeded boolean dialog applies untouched");
+        assert_eq!(edited.default, Some(Scalar::Int(1)));
+
+        let mut seeded_moved_off = EditSelectionDialog::from_register(
+            "c",
+            "",
+            &register,
+            vec![],
+            "0",
+            "[0000]",
+            Some(&Scalar::Int(1)),
+            true,
+        );
+        seeded_moved_off.default_value.state.set_selection(1);
+        let edited = seeded_moved_off
+            .apply()
+            .expect("seeded-then-moved-to-OFF dialog applies");
+        assert_eq!(edited.default, Some(Scalar::Int(0)));
+    }
+
+    #[test]
+    /// MB-R-233 — a boolean kind offers no add and no remove control for its named values.
+    fn ut_boolean_kind_hides_alias_controls() {
+        use super::EditSelectionDialogFocus;
+        let coil_dialog = EditSelectionDialog::from_register(
+            "c",
+            "",
+            &coil(Access::ReadWrite),
+            vec![],
+            "0",
+            "[0000]",
+            None,
+            true,
+        );
+        let mut d = coil_dialog;
+        let start = d.focus;
+        let mut seen = vec![start];
+        for _ in 0..64 {
+            d.focus_next();
+            if d.focus == start {
+                break;
+            }
+            seen.push(d.focus);
+        }
+        assert!(!seen.contains(&EditSelectionDialogFocus::AddButton));
+        assert!(!seen.contains(&EditSelectionDialogFocus::DeleteButton));
+
+        let holding = RegisterBuilder::default()
+            .slave_id(UnitId(1))
+            .access(Access::ReadWrite)
+            .kind(Kind::HoldingRegister)
+            .address(Address::Fixed(0))
+            .format(RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ))
+            .build()
+            .unwrap();
+        let mut hd = EditSelectionDialog::from_register(
+            "h",
+            "",
+            &holding,
+            vec![NamedValue {
+                name: "on".into(),
+                value: Scalar::Int(1),
+            }],
+            "1",
+            "[0001]",
+            None,
+            true,
+        );
+        let start = hd.focus;
+        let mut seen = vec![start];
+        for _ in 0..64 {
+            hd.focus_next();
+            if hd.focus == start {
+                break;
+            }
+            seen.push(hd.focus);
+        }
+        assert!(seen.contains(&EditSelectionDialogFocus::AddButton));
+        assert!(seen.contains(&EditSelectionDialogFocus::DeleteButton));
+    }
+
+    #[test]
+    /// MB-R-230 — a boolean kind's register always encodes as big-endian U16, regardless of
+    /// whatever the format panes hold, and the format panes are absent from the focus cycle.
+    fn ut_boolean_kind_selection_forces_u16_format() {
+        use super::EditSelectionDialogFocus;
+        let mut dialog = EditSelectionDialog::from_register(
+            "c",
+            "",
+            &coil(Access::ReadWrite),
+            vec![],
+            "0",
+            "[0000]",
+            None,
+            true,
+        );
+        dialog.value_type.state.set_selection(1); // Text
+        crate::module::modbus::dialog::set_input(&mut dialog.text_width, "8");
+        let edited = dialog.apply().expect("boolean dialog applies");
+        assert_eq!(
+            *edited.register.format(),
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            )
+        );
+        assert_eq!(dialog.value_type.state.selection(), 1);
+
+        let start = dialog.focus;
+        let mut seen = vec![start];
+        for _ in 0..64 {
+            dialog.focus_next();
+            if dialog.focus == start {
+                break;
+            }
+            seen.push(dialog.focus);
+        }
+        for gated in [
+            EditSelectionDialogFocus::ValueType,
+            EditSelectionDialogFocus::TextAlignment,
+            EditSelectionDialogFocus::TextWidth,
+        ] {
+            assert!(
+                !seen.contains(&gated),
+                "boolean cycle should skip {gated:?}"
+            );
+        }
+    }
+
+    #[test]
+    /// MB-R-229, MB-R-230, MB-R-232 — editing an existing boolean register ignores whatever alias
+    /// list it declared: the dialog offers only `UNSET`/`ON`/`OFF`, and confirming replaces the
+    /// declared list with the fixed pair.
+    fn ut_edit_on_a_boolean_register_ignores_stored_aliases() {
+        let register = coil(Access::ReadWrite);
+        let declared = vec![
+            NamedValue {
+                name: "OPEN".into(),
+                value: Scalar::Int(1),
+            },
+            NamedValue {
+                name: "CLOSED".into(),
+                value: Scalar::Int(0),
+            },
+        ];
+        let dialog = EditSelectionDialog::from_register(
+            "c", "", &register, declared, "0", "[0000]", None, true,
+        );
+        let names: Vec<&str> = dialog
+            .value
+            .state
+            .values()
+            .iter()
+            .map(|nv| nv.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["UNSET", "ON", "OFF"]);
+
+        let edited = dialog.apply().expect("boolean dialog applies");
+        assert_eq!(edited.named_values, Some(boolean_kind_values()));
+    }
+
+    #[test]
+    /// MB-E-096 — a configured `default` neither 0 nor 1 has no matching pane state: the Default
+    /// pane opens at `OFF`, and confirming untouched rewrites `default` to 0.
+    fn ut_boolean_default_pane_maps_a_foreign_default_to_off() {
+        let register = coil(Access::ReadWrite);
+        let dialog = EditSelectionDialog::from_register(
+            "c",
+            "",
+            &register,
+            vec![],
+            "0",
+            "[0000]",
+            Some(&Scalar::Int(5)),
+            true,
+        );
+        assert_eq!(dialog.default_value.state.selection(), 1); // OFF
+        let edited = dialog.apply().expect("boolean dialog applies");
+        assert_eq!(edited.default, Some(Scalar::Int(0)));
+    }
+
+    #[test]
+    /// MB-R-228, MB-R-236 — a Default pane hidden by MB-R-151 (client `ReadOnly`) is never read:
+    /// confirming preserves whatever `default` the register was seeded with, absent or present,
+    /// rather than writing the hidden pane's `OFF` preselection.
+    fn ut_hidden_boolean_default_pane_preserves_the_configured_default() {
+        let register = coil(Access::ReadOnly);
+
+        let with_default = EditSelectionDialog::from_register(
+            "c",
+            "",
+            &register,
+            vec![],
+            "0",
+            "[0000]",
+            Some(&Scalar::Int(1)),
+            false,
+        );
+        let edited = with_default
+            .apply()
+            .expect("hidden panes never block confirm");
+        assert_eq!(edited.default, Some(Scalar::Int(1)));
+
+        let without_default = EditSelectionDialog::from_register(
+            "c",
+            "",
+            &register,
+            vec![],
+            "0",
+            "[0000]",
+            None,
+            false,
+        );
+        let edited = without_default
+            .apply()
+            .expect("hidden panes never block confirm");
+        assert_eq!(edited.default, None);
+    }
+
+    #[test]
+    /// MB-R-151, MB-R-227, MB-R-228, MB-R-231 — a boolean Value pane hidden by MB-R-151 (client
+    /// `ReadOnly`) is unfocusable and never read: confirming with `ON` selected on the underlying
+    /// widget state (as if it had been set before Access toggled the pane hidden) must not write
+    /// a value, exactly as the hidden case behaves for a shown pane left on `UNSET`.
+    fn ut_hidden_boolean_value_pane_writes_nothing() {
+        use super::EditSelectionDialogFocus;
+        let register = coil(Access::ReadOnly);
+        let mut dialog = EditSelectionDialog::from_register(
+            "c",
+            "",
+            &register,
+            vec![],
+            "0",
+            "[0000]",
+            None,
+            false,
+        );
+        assert!(
+            !dialog.value_pane_visible(),
+            "a client ReadOnly coil's Value pane must be hidden"
+        );
+        // Even with the underlying selection left on `ON` (index 1), a hidden pane must not
+        // reach `apply()`.
+        dialog.value.state.set_selection(1);
+        let edited = dialog.apply().expect("hidden panes never block confirm");
+        assert_eq!(edited.value, None);
+
+        // `from_register` always starts focus on `Value`, even when it is gated off (not
+        // focusable); one `focus_next()` lands on the first real pane, mirroring
+        // `ut_focus_cycle_skips_value_panes_when_no_named_values`.
+        dialog.focus_next();
+        let start = dialog.focus;
+        let mut seen = vec![start];
+        for _ in 0..64 {
+            dialog.focus_next();
+            if dialog.focus == start {
+                break;
+            }
+            seen.push(dialog.focus);
+        }
+        assert!(
+            !seen.contains(&EditSelectionDialogFocus::Value),
+            "a hidden Value pane must be unfocusable: {seen:?}"
+        );
     }
 }

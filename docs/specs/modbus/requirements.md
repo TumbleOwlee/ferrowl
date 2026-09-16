@@ -532,6 +532,10 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-239** — MB-R-237 and MB-R-238 hold identically for the dialog's text inputs and for its selection variant (MB-R-229, MB-R-234), the pane kind never affecting whether a register is appended or replaced.
 
+**MB-R-240** — Changing the add/edit register dialog's Kind to `Coil` or `DiscreteInput` replaces the dialog's working named-value list with exactly MB-R-232's fixed pair, `ON` = 1 and `OFF` = 0.
+
+**MB-R-241** — Changing the add/edit register dialog's Kind from `Coil` or `DiscreteInput` to any other kind leaves the dialog's working named-value list empty; neither the fixed pair (MB-R-240) nor any list the register declared before is carried over.
+
 **MB-R-152** — A monitor module's displayed status follows MB-R-137's three-state rule with "serial port open" for "transport connected": `CONNECTED` while the port is open and read; `RECONNECTING` while the task runs but the port is not open (MB-R-130–MB-R-134, MB-R-192); `DISCONNECTED` while the task is not running.
 
 **MB-R-154** — A format's display text is its name followed by a parenthesized qualifier: numeric → byte order (`Big Endian` or `Little Endian`); `Ascii` → alignment (`Left` or `Right`).

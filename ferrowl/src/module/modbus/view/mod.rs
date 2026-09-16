@@ -28,7 +28,7 @@ use super::ModbusModule;
 
 mod mutate;
 mod overlay;
-use overlay::{ModbusOverlay, PendingAction};
+use overlay::{ModbusOverlay, PendingAction, RegisterDialogKind};
 
 /// The single modal overlay over the module view (mutually exclusive by construction). The
 /// derive supplies `is_active`/`close`/`take`/`route_keys`; only the setup dialog carries a
@@ -126,31 +126,31 @@ impl ModbusModuleView {
             .get(&def.name)
             .and_then(|d| d.default.as_ref());
         let unscaled = def.value.clone().unscaled().to_string();
-        if def.named_values.is_empty() {
-            self.overlay = ModbusViewOverlay::Register(Box::new(ModbusOverlay::Edit(
-                EditInputDialog::from_register(
-                    &def.name,
-                    &def.description,
-                    &def.register,
-                    &unscaled,
-                    current_default,
-                    self.spec.role.client_or_server() == crate::config::ClientOrServer::Server,
-                ),
-            )));
+        let is_server = self.spec.role.client_or_server() == crate::config::ClientOrServer::Server;
+        let kind = if def.named_values.is_empty()
+            && !crate::module::modbus::dialog::is_boolean_kind(def.register.kind())
+        {
+            RegisterDialogKind::Input(EditInputDialog::from_register(
+                &def.name,
+                &def.description,
+                &def.register,
+                &unscaled,
+                current_default,
+                is_server,
+            ))
         } else {
-            self.overlay = ModbusViewOverlay::Register(Box::new(ModbusOverlay::EditSelection(
-                EditSelectionDialog::from_register(
-                    &def.name,
-                    &def.description,
-                    &def.register,
-                    def.named_values.clone(),
-                    &unscaled,
-                    &def.raw_value,
-                    current_default,
-                    self.spec.role.client_or_server() == crate::config::ClientOrServer::Server,
-                ),
-            )));
-        }
+            RegisterDialogKind::Selection(EditSelectionDialog::from_register(
+                &def.name,
+                &def.description,
+                &def.register,
+                def.named_values.clone(),
+                &unscaled,
+                &def.raw_value,
+                current_default,
+                is_server,
+            ))
+        };
+        self.overlay = ModbusViewOverlay::Register(Box::new(ModbusOverlay::Edit(kind)));
     }
 
     /// The register-edit/add overlay as a shared reference, if that's the currently active
@@ -323,6 +323,8 @@ impl ModbusModuleView {
         });
         if let Some(o) = new_overlay {
             self.overlay = ModbusViewOverlay::Register(Box::new(o));
+        } else if let Some(o) = self.register_overlay_mut() {
+            o.sync_boolean_kind_panes();
         }
     }
 
@@ -781,7 +783,9 @@ impl ModuleView for ModbusModuleView {
                 let mut dialog = EditInputDialog::new();
                 dialog.is_server =
                     self.spec.role.client_or_server() == crate::config::ClientOrServer::Server;
-                self.overlay = ModbusViewOverlay::Register(Box::new(ModbusOverlay::Add(dialog)));
+                let overlay = ModbusOverlay::Add(RegisterDialogKind::Input(dialog));
+                let overlay = overlay.maybe_switch_to_selection().unwrap_or(overlay);
+                self.overlay = ModbusViewOverlay::Register(Box::new(overlay));
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
             }
 
@@ -1151,7 +1155,7 @@ fn parse_set_args(rest: &str) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
-    use super::overlay::ModbusOverlay;
+    use super::overlay::{ModbusOverlay, RegisterDialogKind};
     use super::{
         ModbusModuleView, ModbusViewOverlay, PendingAction, decode_definition, parse_set_args,
         raw_hex,
@@ -1567,12 +1571,19 @@ mod tests {
         let ModbusViewOverlay::Register(overlay) = &mut view.overlay else {
             panic!("expected register overlay");
         };
-        match overlay.as_mut() {
-            ModbusOverlay::Add(d) | ModbusOverlay::Edit(d) => {
+        let (ModbusOverlay::Add(dialog_kind) | ModbusOverlay::Edit(dialog_kind)) = overlay.as_mut();
+        match dialog_kind {
+            RegisterDialogKind::Input(d) => {
                 d.kind.state.set_selection(kind_index(&kind));
                 d.access.state.set_selection(access_index(&access));
             }
-            ModbusOverlay::EditSelection(_) => panic!("expected input dialog"),
+            // `:add`'s default Kind is Coil (boolean), which already opens the selection
+            // variant; setting the fields here lets one Tab (sent by the caller) drive the
+            // switch back to the text dialog through the normal key path.
+            RegisterDialogKind::Selection(d) => {
+                d.kind.state.set_selection(kind_index(&kind));
+                d.access.state.set_selection(access_index(&access));
+            }
         }
     }
 
@@ -1583,9 +1594,10 @@ mod tests {
         let ModbusViewOverlay::Register(overlay) = &mut view.overlay else {
             panic!("expected register overlay");
         };
-        let d = match overlay.as_mut() {
-            ModbusOverlay::Add(d) | ModbusOverlay::Edit(d) => d,
-            ModbusOverlay::EditSelection(_) => panic!("expected input dialog"),
+        let (ModbusOverlay::Add(dialog_kind) | ModbusOverlay::Edit(dialog_kind)) = overlay.as_mut();
+        let d = match dialog_kind {
+            RegisterDialogKind::Input(d) => d,
+            RegisterDialogKind::Selection(_) => panic!("expected input dialog"),
         };
         let mut value_seen = d.value.state.is_focused();
         let mut default_value_seen = d.default_value.state.is_focused();
@@ -1632,6 +1644,413 @@ mod tests {
         let (value_seen, default_value_seen) = add_dialog_value_panes_reachable(&mut view);
         assert!(!value_seen);
         assert!(!default_value_seen);
+    }
+
+    #[test]
+    /// MB-R-229, MB-R-234 — `:add`'s default Kind (`Coil`) opens the register dialog directly on
+    /// the selection variant: Value offers `UNSET`/`ON`/`OFF` selected `UNSET`, Default offers
+    /// `ON`/`OFF` (no `UNSET`) selected `OFF` (the add case).
+    fn ut_add_on_a_boolean_kind_opens_the_selection_variant() {
+        let mut view = new_view();
+        drop(view.handle_command("add"));
+        let ModbusViewOverlay::Register(overlay) = &view.overlay else {
+            panic!("expected register overlay");
+        };
+        let ModbusOverlay::Add(RegisterDialogKind::Selection(d)) = overlay.as_ref() else {
+            panic!("expected Add(Selection(_))");
+        };
+        let value_names: Vec<&str> = d
+            .value
+            .state
+            .values()
+            .iter()
+            .map(|nv| nv.name.as_str())
+            .collect();
+        assert_eq!(value_names, vec!["UNSET", "ON", "OFF"]);
+        assert_eq!(d.value.state.selection(), 0);
+        let default_names: Vec<&str> = d
+            .default_value
+            .state
+            .values()
+            .iter()
+            .map(|nv| nv.name.as_str())
+            .collect();
+        assert_eq!(default_names, vec!["ON", "OFF"]);
+        assert_eq!(d.default_value.state.selection(), 1);
+    }
+
+    #[tokio::test]
+    /// MB-R-237, MB-R-238, MB-R-239 — confirming an add through the selection variant appends a
+    /// new register and leaves the selected row untouched; confirming an edit through the
+    /// selection variant replaces the selected row in place. Both hold identically for the text
+    /// inputs (asserted here on a `HoldingRegister` that never leaves them).
+    async fn ut_add_through_the_selection_variant_confirms_as_an_add() {
+        use crate::config::device::{NamedValue, Scalar};
+
+        // Selection variant: add.
+        let mut view = view_for(device_with_defs());
+        view.table.select_first();
+        assert_eq!(
+            view.table.selected().map(|d| d.name.clone()),
+            Some("hold".to_string())
+        );
+        drop(view.handle_command("add"));
+        set_add_dialog_kind_and_access(&mut view, Kind::HoldingRegister, Access::ReadWrite);
+        view.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        {
+            let ModbusViewOverlay::Register(overlay) = &mut view.overlay else {
+                panic!("expected register overlay");
+            };
+            let (ModbusOverlay::Add(RegisterDialogKind::Input(d))
+            | ModbusOverlay::Edit(RegisterDialogKind::Input(d))) = overlay.as_mut()
+            else {
+                panic!("expected the text-input dialog after switching away from Coil");
+            };
+            crate::module::modbus::dialog::set_input(&mut d.label, "brandnew");
+            crate::module::modbus::dialog::set_input(&mut d.slave_id, "1");
+            crate::module::modbus::dialog::set_input(&mut d.address, "77");
+            d.pending_named_values.push(NamedValue {
+                name: "a".into(),
+                value: Scalar::Int(1),
+            });
+        }
+        // The trailing switch-check in `handle_overlay_key` picks up the newly non-empty
+        // `pending_named_values` and moves the dialog to the selection variant, exactly as the
+        // ADD ALIAS button's own handler would.
+        view.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        {
+            let ModbusViewOverlay::Register(overlay) = &view.overlay else {
+                panic!("expected register overlay");
+            };
+            assert!(
+                matches!(
+                    overlay.as_ref(),
+                    ModbusOverlay::Add(RegisterDialogKind::Selection(_))
+                ),
+                "expected the add dialog to have switched to the selection variant"
+            );
+        }
+        view.confirm_overlay();
+        view.refresh().await;
+
+        assert!(view.device.definitions.contains_key("brandnew"));
+        assert!(view.device.definitions.contains_key("hold"));
+        assert_eq!(
+            view.table.selected().map(|d| d.name.clone()),
+            Some("hold".to_string()),
+            "the row selected before :add must be untouched"
+        );
+        assert_eq!(view.table.definitions().len(), 3);
+
+        // Selection variant: edit, replacing the selected row in place.
+        let mut view = view_for(device_with_defs());
+        view.table.select_first();
+        assert_eq!(
+            view.table.selected().map(|d| d.name.clone()),
+            Some("hold".to_string())
+        );
+        view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        {
+            let ModbusViewOverlay::Register(overlay) = &mut view.overlay else {
+                panic!("expected register overlay");
+            };
+            let (ModbusOverlay::Add(RegisterDialogKind::Input(d))
+            | ModbusOverlay::Edit(RegisterDialogKind::Input(d))) = overlay.as_mut()
+            else {
+                panic!("expected the text-input dialog ('hold' has no named values)");
+            };
+            d.pending_named_values.push(NamedValue {
+                name: "a".into(),
+                value: Scalar::Int(1),
+            });
+        }
+        view.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        view.confirm_overlay();
+        view.refresh().await;
+
+        assert_eq!(view.table.definitions().len(), 2, "edit must not append");
+        assert_eq!(
+            view.table.definitions()[0].name,
+            "hold",
+            "the edited register must keep its index"
+        );
+        assert_eq!(
+            view.table.definitions()[0].named_values,
+            vec![NamedValue {
+                name: "a".into(),
+                value: Scalar::Int(1),
+            }]
+        );
+
+        // Text inputs: add, never leaving the text dialog (MB-R-239's text half).
+        let mut view = view_for(device_with_defs());
+        view.table.select_first();
+        assert_eq!(
+            view.table.selected().map(|d| d.name.clone()),
+            Some("hold".to_string())
+        );
+        drop(view.handle_command("add"));
+        set_add_dialog_kind_and_access(&mut view, Kind::HoldingRegister, Access::ReadWrite);
+        view.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        {
+            let ModbusViewOverlay::Register(overlay) = &mut view.overlay else {
+                panic!("expected register overlay");
+            };
+            let ModbusOverlay::Add(RegisterDialogKind::Input(d)) = overlay.as_mut() else {
+                panic!("expected the text-input dialog to stay open (no alias added)");
+            };
+            crate::module::modbus::dialog::set_input(&mut d.label, "textadd");
+            crate::module::modbus::dialog::set_input(&mut d.slave_id, "1");
+            crate::module::modbus::dialog::set_input(&mut d.address, "88");
+        }
+        view.confirm_overlay();
+        view.refresh().await;
+
+        assert!(view.device.definitions.contains_key("textadd"));
+        assert!(view.device.definitions.contains_key("hold"));
+        assert_eq!(
+            view.table.selected().map(|d| d.name.clone()),
+            Some("hold".to_string()),
+            "the row selected before :add must be untouched"
+        );
+        assert_eq!(view.table.definitions().len(), 3);
+
+        // Text inputs: edit, replacing the selected row in place (MB-R-239's text half).
+        let mut view = view_for(device_with_defs());
+        view.table.select_first();
+        assert_eq!(
+            view.table.selected().map(|d| d.name.clone()),
+            Some("hold".to_string())
+        );
+        view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        {
+            let ModbusViewOverlay::Register(overlay) = &mut view.overlay else {
+                panic!("expected register overlay");
+            };
+            let ModbusOverlay::Edit(RegisterDialogKind::Input(d)) = overlay.as_mut() else {
+                panic!("expected the text-input dialog ('hold' has no named values)");
+            };
+            crate::module::modbus::dialog::set_input(&mut d.description, "edited via text");
+        }
+        view.confirm_overlay();
+        view.refresh().await;
+
+        assert_eq!(view.table.definitions().len(), 2, "edit must not append");
+        assert_eq!(
+            view.table.definitions()[0].name,
+            "hold",
+            "the edited register must keep its index"
+        );
+        assert_eq!(view.table.definitions()[0].description, "edited via text");
+    }
+
+    #[test]
+    /// MB-R-225, MB-R-229, MB-R-232 — leaving a boolean kind for a non-boolean one returns the
+    /// dialog to the text inputs, drops the injected `UNSET`/`ON`/`OFF` pair, and carries the
+    /// boolean Default pane's selection into the text Default pane rather than leaving it empty
+    /// (which MB-R-225 would read as unset). Editing a `HoldingRegister` whose stored aliases
+    /// really are `ON`/`OFF` (a `Config`-sourced list) is left alone: it stays the selection
+    /// variant with its declared aliases intact.
+    fn ut_leaving_a_boolean_kind_returns_to_the_text_dialog() {
+        let mut view = new_view();
+        drop(view.handle_command("add"));
+        {
+            let ModbusViewOverlay::Register(overlay) = &mut view.overlay else {
+                panic!("expected register overlay");
+            };
+            let ModbusOverlay::Add(RegisterDialogKind::Selection(d)) = overlay.as_mut() else {
+                panic!("expected Add(Selection(_))");
+            };
+            d.default_value.state.set_selection(0); // ON
+            d.kind
+                .state
+                .set_selection(kind_index(&Kind::HoldingRegister));
+        }
+        view.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        let ModbusViewOverlay::Register(overlay) = &view.overlay else {
+            panic!("expected register overlay");
+        };
+        let ModbusOverlay::Add(RegisterDialogKind::Input(d)) = overlay.as_ref() else {
+            panic!("expected the dialog to have switched back to the text inputs");
+        };
+        assert_eq!(d.default_value.state.input(), "1");
+        assert!(d.pending_named_values.is_empty());
+
+        // Editing a HoldingRegister whose stored aliases really are ON=1/OFF=0 (Config-sourced)
+        // must not be treated as the injected pair: it stays the selection variant.
+        let mut device = empty_device();
+        let register_def = {
+            use crate::config::device::{
+                AccessCfg, AlignmentCfg, EndianCfg, NamedValue, RegisterDef, Scalar,
+                ValueType as CfgValueType, WordOrderCfg,
+            };
+            RegisterDef {
+                slave_id: 1,
+                kind: Kind::HoldingRegister,
+                address: Some(0),
+                is_virtual: false,
+                access: AccessCfg::ReadWrite,
+                value_type: CfgValueType::U16,
+                endian: EndianCfg::Big,
+                word_order: WordOrderCfg::default(),
+                resolution: 1.0,
+                bitmask: None,
+                length: 1,
+                alignment: AlignmentCfg::Left,
+                values: vec![
+                    NamedValue {
+                        name: "ON".into(),
+                        value: Scalar::Int(1),
+                    },
+                    NamedValue {
+                        name: "OFF".into(),
+                        value: Scalar::Int(0),
+                    },
+                ],
+                update: None,
+                description: "".into(),
+                default: None,
+            }
+        };
+        device.definitions.insert("real".into(), register_def);
+        let mut view = view_for(device);
+        view.table.select_first();
+        view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        view.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        let ModbusViewOverlay::Register(overlay) = &view.overlay else {
+            panic!("expected register overlay");
+        };
+        assert!(matches!(
+            overlay.as_ref(),
+            ModbusOverlay::Edit(RegisterDialogKind::Selection(_))
+        ));
+        let ModbusOverlay::Edit(RegisterDialogKind::Selection(d)) = overlay.as_ref() else {
+            unreachable!();
+        };
+        let names: Vec<&str> = d
+            .value
+            .state
+            .values()
+            .iter()
+            .map(|nv| nv.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["ON", "OFF"]);
+    }
+
+    #[test]
+    /// MB-R-240, MB-R-241 — changing Kind to a boolean kind live-replaces the still-open
+    /// selection dialog's working Value/Default lists with the fixed `ON`/`OFF` pair, and
+    /// changing away from a boolean kind live-empties them: neither switch alone flips the
+    /// dialog between the `Input`/`Selection` shapes (a `HoldingRegister`-with-aliases and a
+    /// `Coil` both open the selection variant), so this is the only place that syncs the panes.
+    fn ut_kind_switch_live_syncs_the_selection_dialogs_named_value_list() {
+        use crate::config::device::{NamedValue, Scalar};
+        let mut device = empty_device();
+        let register_def = {
+            use crate::config::device::{
+                AccessCfg, AlignmentCfg, EndianCfg, RegisterDef, ValueType as CfgValueType,
+                WordOrderCfg,
+            };
+            RegisterDef {
+                slave_id: 1,
+                kind: Kind::HoldingRegister,
+                address: Some(0),
+                is_virtual: false,
+                access: AccessCfg::ReadWrite,
+                value_type: CfgValueType::U16,
+                endian: EndianCfg::Big,
+                word_order: WordOrderCfg::default(),
+                resolution: 1.0,
+                bitmask: None,
+                length: 1,
+                alignment: AlignmentCfg::Left,
+                values: vec![
+                    NamedValue {
+                        name: "OPEN".into(),
+                        value: Scalar::Int(1),
+                    },
+                    NamedValue {
+                        name: "CLOSED".into(),
+                        value: Scalar::Int(0),
+                    },
+                ],
+                update: None,
+                description: "".into(),
+                default: None,
+            }
+        };
+        device.definitions.insert("real".into(), register_def);
+        let mut view = view_for(device);
+        view.table.select_first();
+        view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        {
+            let ModbusViewOverlay::Register(overlay) = &view.overlay else {
+                panic!("expected register overlay");
+            };
+            assert!(matches!(
+                overlay.as_ref(),
+                ModbusOverlay::Edit(RegisterDialogKind::Selection(_))
+            ));
+        }
+        {
+            let ModbusViewOverlay::Register(overlay) = &mut view.overlay else {
+                panic!("expected register overlay");
+            };
+            let ModbusOverlay::Edit(RegisterDialogKind::Selection(d)) = overlay.as_mut() else {
+                panic!("expected the selection variant (declared aliases)");
+            };
+            d.kind.state.set_selection(kind_index(&Kind::Coil));
+        }
+        // MB-R-240: the Kind change alone (no Tab-driven Input/Selection switch, both kinds use
+        // the selection variant) must live-replace the working list with UNSET/ON/OFF.
+        view.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        {
+            let ModbusViewOverlay::Register(overlay) = &view.overlay else {
+                panic!("expected register overlay");
+            };
+            let ModbusOverlay::Edit(RegisterDialogKind::Selection(d)) = overlay.as_ref() else {
+                panic!("expected to remain the selection variant");
+            };
+            let names: Vec<&str> = d
+                .value
+                .state
+                .values()
+                .iter()
+                .map(|nv| nv.name.as_str())
+                .collect();
+            assert_eq!(names, vec!["UNSET", "ON", "OFF"]);
+            let default_names: Vec<&str> = d
+                .default_value
+                .state
+                .values()
+                .iter()
+                .map(|nv| nv.name.as_str())
+                .collect();
+            assert_eq!(default_names, vec!["ON", "OFF"]);
+        }
+        // MB-R-241: switching Kind back away from boolean must leave the working list empty —
+        // neither the fixed pair nor the originally declared OPEN/CLOSED aliases come back. The
+        // dialog lands on the text-input kind (the pre-existing `Input`/`Selection` switch fires
+        // on this exact condition), whose `pending_named_values` starts empty.
+        {
+            let ModbusViewOverlay::Register(overlay) = &mut view.overlay else {
+                panic!("expected register overlay");
+            };
+            let ModbusOverlay::Edit(RegisterDialogKind::Selection(d)) = overlay.as_mut() else {
+                panic!("expected the selection variant");
+            };
+            d.kind
+                .state
+                .set_selection(kind_index(&Kind::HoldingRegister));
+        }
+        view.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        let ModbusViewOverlay::Register(overlay) = &view.overlay else {
+            panic!("expected register overlay");
+        };
+        let ModbusOverlay::Edit(RegisterDialogKind::Input(d)) = overlay.as_ref() else {
+            panic!("expected the dialog to have switched to the text-input kind");
+        };
+        assert!(d.pending_named_values.is_empty());
     }
 
     #[test]
@@ -2123,6 +2542,10 @@ mod tests {
     fn ut_render_overlay_add_dialog_shows_box_title_and_fields() {
         let mut view = new_view();
         drop(view.handle_command("add"));
+        // `:add`'s default Kind is Coil, which opens the boolean selection variant (MB-R-229);
+        // switch to a non-boolean kind so this test still exercises the text-input dialog.
+        set_add_dialog_kind_and_access(&mut view, Kind::HoldingRegister, Access::ReadWrite);
+        view.handle_events(KeyModifiers::NONE, KeyCode::Tab);
         let area = Rect::new(0, 0, 80, 52);
         let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 52)).unwrap();
         term.draw(|f: &mut Frame| view.render_overlay(f, area))

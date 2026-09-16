@@ -21,29 +21,57 @@ pub(super) enum PendingAction {
     ApplySetup(Box<SetupValues>),
 }
 
-/// Internal register-edit/add overlay state.
+/// Which pane kind the open register dialog currently shows: free-text inputs, or the
+/// named-value selection variant (used for a register with declared aliases, or MB-R-229's
+/// boolean-kind fixed pair). Orthogonal to whether the dialog is adding or editing.
+// Already behind `Box<ModbusOverlay>` at every call site (`ModbusViewOverlay::Register`), so the
+// ~200-byte gap between variants costs nothing extra on the stack.
+#[allow(clippy::large_enum_variant)]
+pub(super) enum RegisterDialogKind {
+    Input(EditInputDialog),
+    Selection(EditSelectionDialog<crate::config::device::NamedValue>),
+}
+
+/// Internal register-edit/add overlay state. `Add`/`Edit` track why the dialog is open —
+/// confirming decides whether a register is appended (MB-R-237) or replaces the selected row in
+/// place (MB-R-238) — independently of which pane kind (`RegisterDialogKind`) is currently shown
+/// (MB-R-239).
 pub(super) enum ModbusOverlay {
-    Edit(EditInputDialog),
-    EditSelection(EditSelectionDialog<crate::config::device::NamedValue>),
-    Add(EditInputDialog),
+    Add(RegisterDialogKind),
+    Edit(RegisterDialogKind),
 }
 
 impl ModbusOverlay {
     /// The open dialog as a shared [`RegisterDialog`] trait object. Both the typed
-    /// (`Edit`/`Add` → `EditInputDialog`) and selection (`EditSelection`) variants implement the
-    /// trait, so the per-method forwarders below dispatch through one place instead of re-matching.
+    /// (`Input`) and selection (`Selection`) kinds implement the trait, so the per-method
+    /// forwarders below dispatch through one place instead of re-matching.
     pub(super) fn inner(&self) -> &dyn RegisterDialog {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d,
-            ModbusOverlay::EditSelection(d) => d,
+        let (ModbusOverlay::Add(kind) | ModbusOverlay::Edit(kind)) = self;
+        match kind {
+            RegisterDialogKind::Input(d) => d,
+            RegisterDialogKind::Selection(d) => d,
         }
     }
 
     /// The open dialog as a mutable [`RegisterDialog`] trait object.
     pub(super) fn inner_mut(&mut self) -> &mut dyn RegisterDialog {
+        let (ModbusOverlay::Add(kind) | ModbusOverlay::Edit(kind)) = self;
+        match kind {
+            RegisterDialogKind::Input(d) => d,
+            RegisterDialogKind::Selection(d) => d,
+        }
+    }
+
+    fn kind(&self) -> &RegisterDialogKind {
+        let (ModbusOverlay::Add(kind) | ModbusOverlay::Edit(kind)) = self;
+        kind
+    }
+
+    /// Rebuild the overlay around a new pane kind, preserving whether it is `Add` or `Edit`.
+    fn with_kind(&self, kind: RegisterDialogKind) -> ModbusOverlay {
         match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d) => d,
-            ModbusOverlay::EditSelection(d) => d,
+            ModbusOverlay::Add(_) => ModbusOverlay::Add(kind),
+            ModbusOverlay::Edit(_) => ModbusOverlay::Edit(kind),
         }
     }
 
@@ -155,21 +183,39 @@ impl ModbusOverlay {
         matches!(self, ModbusOverlay::Add(_))
     }
 
+    /// MB-R-240, MB-R-241 — keeps a still-open selection-variant dialog's Value/Default panes in
+    /// step with its own Kind field when the Kind change alone doesn't trigger an `Input`/
+    /// `Selection` switch (e.g. a `HoldingRegister`-with-aliases dialog whose Kind is changed to
+    /// `Coil`: both kinds open the selection variant, so `maybe_switch_to_selection`/
+    /// `maybe_switch_to_input` never fire). A no-op for the text-input kind.
+    pub(super) fn sync_boolean_kind_panes(&mut self) {
+        if let RegisterDialogKind::Selection(d) = match self {
+            ModbusOverlay::Add(kind) | ModbusOverlay::Edit(kind) => kind,
+        } {
+            d.sync_boolean_kind_panes();
+        }
+    }
+
     pub(super) fn maybe_switch_to_selection(&self) -> Option<ModbusOverlay> {
-        match self {
-            ModbusOverlay::Edit(d) | ModbusOverlay::Add(d)
-                if !d.pending_named_values.is_empty() =>
+        match self.kind() {
+            RegisterDialogKind::Input(d)
+                if !d.pending_named_values.is_empty() || d.is_boolean_kind() =>
             {
-                Some(ModbusOverlay::EditSelection(d.to_edit_selection_dialog()))
+                Some(self.with_kind(RegisterDialogKind::Selection(d.to_edit_selection_dialog())))
             }
             _ => None,
         }
     }
 
     pub(super) fn maybe_switch_to_input(&self) -> Option<ModbusOverlay> {
-        match self {
-            ModbusOverlay::EditSelection(d) if d.value.state.values().is_empty() => {
-                Some(ModbusOverlay::Edit(d.to_edit_input_dialog()))
+        match self.kind() {
+            RegisterDialogKind::Selection(d)
+                if d.value.state.values().is_empty()
+                    || (!d.is_boolean_kind()
+                        && d.value_source
+                            == crate::module::modbus::dialog::NamedValueSource::BooleanFixed) =>
+            {
+                Some(self.with_kind(RegisterDialogKind::Input(d.to_edit_input_dialog())))
             }
             _ => None,
         }

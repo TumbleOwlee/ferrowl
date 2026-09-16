@@ -126,78 +126,80 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
             &mut self.value_type.state,
         );
 
-        match self.value_type.state.values()[self.value_type.state.selection()] {
-            ValueType::Number => {
-                // Columns: Format, Endian, [Register order if multi-register],
-                // Resolution, [Bitmask if integer].
-                let integer = is_integer_format(&self.number_format.get_value().0);
-                let multi = is_multi_register_format(&self.number_format.get_value().0);
-                let columns = 3 + multi as usize + integer as usize;
-                let cells = Layout::horizontal(vec![Constraint::Min(1); columns])
-                    .split(vertical_layout[vertical_index]);
+        if !self.is_boolean_kind() {
+            match self.value_type.state.values()[self.value_type.state.selection()] {
+                ValueType::Number => {
+                    // Columns: Format, Endian, [Register order if multi-register],
+                    // Resolution, [Bitmask if integer].
+                    let integer = is_integer_format(&self.number_format.get_value().0);
+                    let multi = is_multi_register_format(&self.number_format.get_value().0);
+                    let columns = 3 + multi as usize + integer as usize;
+                    let cells = Layout::horizontal(vec![Constraint::Min(1); columns])
+                        .split(vertical_layout[vertical_index]);
 
-                let mut col = 0;
-                StatefulWidget::render(
-                    &self.number_format.widget,
-                    cells[col],
-                    buf,
-                    &mut self.number_format.state,
-                );
-                col += 1;
-
-                StatefulWidget::render(
-                    &self.number_endian.widget,
-                    cells[col],
-                    buf,
-                    &mut self.number_endian.state,
-                );
-                col += 1;
-
-                if multi {
+                    let mut col = 0;
                     StatefulWidget::render(
-                        &self.number_word_order.widget,
+                        &self.number_format.widget,
                         cells[col],
                         buf,
-                        &mut self.number_word_order.state,
+                        &mut self.number_format.state,
                     );
                     col += 1;
-                }
 
-                StatefulWidget::render(
-                    &self.number_resolution.widget,
-                    cells[col],
-                    buf,
-                    &mut self.number_resolution.state,
-                );
-                col += 1;
-
-                if integer {
                     StatefulWidget::render(
-                        &self.number_bitmask.widget,
+                        &self.number_endian.widget,
                         cells[col],
                         buf,
-                        &mut self.number_bitmask.state,
+                        &mut self.number_endian.state,
+                    );
+                    col += 1;
+
+                    if multi {
+                        StatefulWidget::render(
+                            &self.number_word_order.widget,
+                            cells[col],
+                            buf,
+                            &mut self.number_word_order.state,
+                        );
+                        col += 1;
+                    }
+
+                    StatefulWidget::render(
+                        &self.number_resolution.widget,
+                        cells[col],
+                        buf,
+                        &mut self.number_resolution.state,
+                    );
+                    col += 1;
+
+                    if integer {
+                        StatefulWidget::render(
+                            &self.number_bitmask.widget,
+                            cells[col],
+                            buf,
+                            &mut self.number_bitmask.state,
+                        );
+                    }
+                }
+                ValueType::Text => {
+                    let horizontal_layout: [Rect; 2] =
+                        Layout::horizontal([Constraint::Min(1), Constraint::Min(1)])
+                            .areas(vertical_layout[vertical_index]);
+
+                    StatefulWidget::render(
+                        &self.text_alignment.widget,
+                        horizontal_layout[0],
+                        buf,
+                        &mut self.text_alignment.state,
+                    );
+
+                    StatefulWidget::render(
+                        &self.text_width.widget,
+                        horizontal_layout[1],
+                        buf,
+                        &mut self.text_width.state,
                     );
                 }
-            }
-            ValueType::Text => {
-                let horizontal_layout: [Rect; 2] =
-                    Layout::horizontal([Constraint::Min(1), Constraint::Min(1)])
-                        .areas(vertical_layout[vertical_index]);
-
-                StatefulWidget::render(
-                    &self.text_alignment.widget,
-                    horizontal_layout[0],
-                    buf,
-                    &mut self.text_alignment.state,
-                );
-
-                StatefulWidget::render(
-                    &self.text_width.widget,
-                    horizontal_layout[1],
-                    buf,
-                    &mut self.text_width.state,
-                );
             }
         }
         vertical_index += 1;
@@ -228,33 +230,35 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 .expect("all required builder fields are set");
             let mut message: String = "No predefined values — reopen to use free-text input".into();
             StatefulWidget::render(&text, horizontal_layout[0], buf, &mut message);
-        } else {
+        } else if self.value_pane_visible() {
             StatefulWidget::render(
                 &self.value.widget,
                 horizontal_layout[0],
                 buf,
                 &mut self.value.state,
             );
+            if !self.is_boolean_kind() {
+                StatefulWidget::render(
+                    &self.delete_button.widget,
+                    horizontal_layout[2],
+                    buf,
+                    &mut self.delete_button.state,
+                );
+            }
+        }
+
+        if !self.is_boolean_kind() {
             StatefulWidget::render(
-                &self.delete_button.widget,
-                horizontal_layout[2],
+                &self.add_button.widget,
+                horizontal_layout[1],
                 buf,
-                &mut self.delete_button.state,
+                &mut self.add_button.state,
             );
         }
 
-        StatefulWidget::render(
-            &self.add_button.widget,
-            horizontal_layout[1],
-            buf,
-            &mut self.add_button.state,
-        );
-
         vertical_index += 1;
 
-        if !self.value.state.values().is_empty()
-            && (self.access.get_value().0 != ferrowl_codec::Access::ReadOnly || self.is_server)
-        {
+        if self.default_pane_visible() {
             StatefulWidget::render(
                 &self.default_value.widget,
                 vertical_layout[vertical_index],
@@ -417,5 +421,76 @@ mod render_tests {
         assert!(text.contains("Edit"), "missing box title:\n{text}");
         assert!(text.contains("DELETE"), "missing delete button:\n{text}");
         assert!(text.contains("state"), "missing label value:\n{text}");
+    }
+
+    #[test]
+    /// MB-R-233 — a boolean-kind dialog renders no ADD/DELETE alias controls; a non-boolean
+    /// dialog with named values still shows both.
+    fn ut_boolean_kind_hides_alias_controls_in_render() {
+        let register = RegisterBuilder::default()
+            .slave_id(UnitId(1))
+            .access(Access::ReadWrite)
+            .kind(Kind::Coil)
+            .address(Address::Fixed(0))
+            .format(Format::u16(
+                Endian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ))
+            .build()
+            .unwrap();
+        let mut dialog = EditSelectionDialog::from_register(
+            "c",
+            "",
+            &register,
+            vec![],
+            "0",
+            "[0000]",
+            None,
+            true,
+        );
+        // Disable the register-level DELETE button so it cannot be confused with the alias-list
+        // ADD/DEL controls under test.
+        dialog.deletable = false;
+        let text = render(&mut dialog);
+        assert!(
+            !text.contains("ADD"),
+            "boolean dialog should hide ADD:\n{text}"
+        );
+        assert!(
+            !text.contains("DEL"),
+            "boolean dialog should hide DEL:\n{text}"
+        );
+
+        let holding = RegisterBuilder::default()
+            .slave_id(UnitId(1))
+            .access(Access::ReadWrite)
+            .kind(Kind::HoldingRegister)
+            .address(Address::Fixed(0))
+            .format(Format::u16(
+                Endian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ))
+            .build()
+            .unwrap();
+        let mut dialog = EditSelectionDialog::from_register(
+            "h",
+            "",
+            &holding,
+            vec![NamedValue {
+                name: "on".into(),
+                value: Scalar::Int(1),
+            }],
+            "1",
+            "[0001]",
+            None,
+            true,
+        );
+        let text = render(&mut dialog);
+        assert!(text.contains("ADD"), "missing ADD button:\n{text}");
+        assert!(text.contains("DELETE"), "missing DELETE button:\n{text}");
     }
 }
