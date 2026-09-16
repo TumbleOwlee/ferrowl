@@ -49,7 +49,7 @@ unsafe_code = "forbid"
 anyhow = "1.0.104"
 async-trait = "0.1.92"
 base64 = "0.23.1"
-clap = { version = "4.6.6", features = ["derive"] }
+clap = { version = "4.6.7", features = ["derive"] }
 convert_case = "0.12.0"
 crossterm = "0.29.0"
 derive_builder = "0.20.2"
@@ -95,7 +95,7 @@ tokio-tungstenite = { version = "0.30", default-features = false, features = [
     "handshake",
     "rustls-tls-webpki-roots",
 ] }
-toml = "1.1.5"
+toml = "1.1.6"
 uuid = { version = "1", features = ["v4"] }
 validator = "0.21.0"
 webpki-roots = "1.0.9"
