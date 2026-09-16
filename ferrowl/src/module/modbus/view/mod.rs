@@ -782,7 +782,8 @@ impl ModuleView for ModbusModuleView {
                 dialog.is_server =
                     self.spec.role.client_or_server() == crate::config::ClientOrServer::Server;
                 let overlay = ModbusOverlay::Add(RegisterDialogKind::Input(dialog));
-                let overlay = overlay.maybe_switch_to_selection().unwrap_or(overlay);
+                let mut overlay = overlay.maybe_switch_to_selection().unwrap_or(overlay);
+                overlay.set_focus_to_label();
                 self.overlay = ModbusViewOverlay::Register(Box::new(overlay));
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
             }
@@ -1642,6 +1643,26 @@ mod tests {
         let (value_seen, default_value_seen) = add_dialog_value_panes_reachable(&mut view);
         assert!(!value_seen);
         assert!(!default_value_seen);
+    }
+
+    #[test]
+    /// MB-R-247 — `:add` opens with the Label input focused, even though the default Kind
+    /// (`Coil`) sends the dialog straight through the boolean-kind switch into the selection
+    /// variant: that switch is not the live, user-driven Kind change MB-R-242 pins focus for.
+    fn ut_add_opens_focused_on_label_through_the_boolean_default_switch() {
+        let mut view = new_view();
+        drop(view.handle_command("add"));
+        let ModbusViewOverlay::Register(overlay) = &view.overlay else {
+            panic!("expected register overlay");
+        };
+        let ModbusOverlay::Add(RegisterDialogKind::Selection(d)) = overlay.as_ref() else {
+            panic!("expected Add(Selection(_)), the default Coil kind");
+        };
+        assert!(d.label.state.focused(), "Label pane should be focused");
+        assert!(
+            !d.kind.state.focused(),
+            "Kind pane should not be focused for a fresh add"
+        );
     }
 
     #[test]

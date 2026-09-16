@@ -285,9 +285,6 @@ impl EditInputDialog {
         } else {
             set_input(&mut dialog.value, value);
         }
-        dialog.label.state.set_focused(false);
-        dialog.value.state.set_focused(true);
-        dialog.focus = EditInputDialogFocus::Value;
         match register.address() {
             Address::Fixed(addr) => set_input(&mut dialog.address, &addr.to_string()),
             Address::Virtual => set_input(&mut dialog.address, "virtual"),
@@ -333,6 +330,12 @@ impl EditInputDialog {
                 }
             }
         }
+        // MB-R-248, MB-R-249: Value if MB-R-151 shows it, else the first eligible field in Tab
+        // order (`SetFocus::set_focused` falls back to the first eligible candidate when the
+        // remembered variant is gated off) — applied last, after every field above that the
+        // eligibility checks (Access, is_server) read.
+        dialog.focus = EditInputDialogFocus::Value;
+        SetFocus::set_focused(&mut dialog, true);
         dialog
     }
 
@@ -427,6 +430,14 @@ impl EditInputDialog {
     /// re-derives every widget's `focused` flag from the enum so the rendered highlight matches.
     pub(crate) fn set_focus_to_kind(&mut self) {
         self.focus = EditInputDialogFocus::Kind;
+        SetFocus::set_focused(self, true);
+    }
+
+    /// MB-R-247 — a fresh `:add` opens with Label focused; `EditInputDialog::new` already does
+    /// this, but a switch straight into the selection variant (the boolean default Kind) can
+    /// move it, so the `:add` handler re-asserts it unconditionally after any switch.
+    pub(crate) fn set_focus_to_label(&mut self) {
+        self.focus = EditInputDialogFocus::Label;
         SetFocus::set_focused(self, true);
     }
 
@@ -751,9 +762,13 @@ mod apply_tests {
                 BitField::default(),
             ),
         );
-        let edited = EditInputDialog::from_register("c", "", &original, "1", None, true)
-            .apply()
-            .expect("valid register should apply");
+        let mut dialog = EditInputDialog::from_register("c", "", &original, "1", None, true);
+        // The Type input starts on Number/U16 (mirroring `original`'s own format); move it away
+        // so a non-boolean fallback in `resolved_format` would diverge from the forced format
+        // below instead of coincidentally matching it.
+        dialog.value_type.state.set_selection(1); // Text
+        crate::module::modbus::dialog::set_input(&mut dialog.text_width, "8");
+        let edited = dialog.apply().expect("valid register should apply");
         assert_eq!(*edited.register.kind(), Kind::Coil);
         // Boolean kinds (Coil/DiscreteInput) always serialize as a default big-endian U16.
         assert_eq!(
@@ -1080,6 +1095,56 @@ mod apply_tests {
         assert!(
             !selection.is_kind_focused(),
             "alias-ADD trigger should not move focus to Kind"
+        );
+    }
+
+    #[test]
+    /// MB-R-248 — an edit dialog opens with the Value pane focused when MB-R-151 shows it.
+    fn ut_edit_opens_focused_on_value_when_visible() {
+        let rw = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let dialog = EditInputDialog::from_register("n", "", &rw, "1", None, true);
+        assert!(dialog.value.state.focused(), "Value pane should be focused");
+        assert!(
+            !dialog.label.state.focused(),
+            "Label pane should not also be focused"
+        );
+    }
+
+    #[test]
+    /// MB-R-249 — where MB-R-151 hides the Value pane (a `ReadOnly` register on a client), an
+    /// edit dialog opens with the first focusable field of its Tab cycle focused instead.
+    fn ut_edit_opens_focused_on_label_when_value_hidden() {
+        let ro = reg(
+            Kind::HoldingRegister,
+            Access::ReadOnly,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let dialog = EditInputDialog::from_register("n", "", &ro, "1", None, false);
+        assert!(
+            dialog.label.state.focused(),
+            "Label pane should be focused (first eligible field, Value hidden)"
+        );
+        assert!(
+            !dialog.value.state.focused(),
+            "Value pane should not be focused while hidden"
         );
     }
 

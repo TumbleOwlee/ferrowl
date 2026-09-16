@@ -546,6 +546,12 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-246** — Confirming a register of kind `Coil` or `DiscreteInput` through the add/edit register dialog stores the format a coil write is already encoded through — `U16`, `Big` endian, `Normal` word order, resolution 1.0, no bit-field mask — whatever the Type input showed before the Kind switch.
 
+**MB-R-247** — The add/edit register dialog opened as *add* (`:add`) opens with its Label input focused.
+
+**MB-R-248** — The add/edit register dialog opened as *edit* opens with its Value pane focused, the text input or the selection (MB-R-229) according to the register's kind.
+
+**MB-R-249** — Where MB-R-151 hides the Value pane, an edit dialog (MB-R-248) opens with the first focusable field of its `Tab` cycle focused instead, UI-R-078's skipping applied.
+
 **MB-R-152** — A monitor module's displayed status follows MB-R-137's three-state rule with "serial port open" for "transport connected": `CONNECTED` while the port is open and read; `RECONNECTING` while the task runs but the port is not open (MB-R-130–MB-R-134, MB-R-192); `DISCONNECTED` while the task is not running.
 
 **MB-R-154** — A format's display text is its name followed by a parenthesized qualifier: numeric → byte order (`Big Endian` or `Little Endian`); `Ascii` → alignment (`Left` or `Right`).

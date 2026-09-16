@@ -300,9 +300,6 @@ impl EditSelectionDialog<NamedValue> {
         dialog.seeded_default = default.cloned();
         set_input(&mut dialog.label, name);
         set_input(&mut dialog.description, description);
-        dialog.label.state.set_focused(false);
-        dialog.value.state.set_focused(true);
-        dialog.focus = EditSelectionDialogFocus::Value;
         match register.address() {
             Address::Fixed(addr) => set_input(&mut dialog.address, &addr.to_string()),
             Address::Virtual => set_input(&mut dialog.address, "virtual"),
@@ -395,6 +392,12 @@ impl EditSelectionDialog<NamedValue> {
             }
         }
 
+        // MB-R-248, MB-R-249: Value if MB-R-151 shows it, else the first eligible field in Tab
+        // order (`SetFocus::set_focused` falls back to the first eligible candidate when the
+        // remembered variant is gated off) — applied last, after every field above that the
+        // eligibility checks (Access, is_server) read.
+        dialog.focus = EditSelectionDialogFocus::Value;
+        SetFocus::set_focused(&mut dialog, true);
         dialog
     }
 
@@ -549,6 +552,14 @@ impl EditSelectionDialog<NamedValue> {
         SetFocus::set_focused(self, true);
     }
 
+    /// MB-R-247 — a fresh `:add` opens with Label focused, including when the dialog's default
+    /// Kind (`Coil`) sends it straight through the boolean-kind switch into this variant: that
+    /// switch is construction, not the live Kind change MB-R-242 pins focus for.
+    pub(crate) fn set_focus_to_label(&mut self) {
+        self.focus = EditSelectionDialogFocus::Label;
+        SetFocus::set_focused(self, true);
+    }
+
     /// Convert this dialog into an EditInputDialog, preserving all shared field state.
     /// Called when all named values are removed and the dialog should switch to free-text mode.
     pub fn to_edit_input_dialog(&self) -> super::input::EditInputDialog {
@@ -573,8 +584,9 @@ impl EditSelectionDialog<NamedValue> {
         // A boolean Default pane (MB-R-234) has no "(no default)" sentinel — index 0 is `ON`
         // itself — so its selection is always taken. A `Config`-sourced list still skips the
         // sentinel at index 0.
+        let boolean_fixed = self.value_source == NamedValueSource::BooleanFixed;
         let sel = self.default_value.state.selection();
-        if (self.value_source == NamedValueSource::BooleanFixed || sel > 0)
+        if (boolean_fixed || sel > 0)
             && let Some(nv) = self.default_value.state.values().get(sel)
         {
             set_input(&mut d.default_value, &nv.value.to_string());
@@ -583,7 +595,7 @@ impl EditSelectionDialog<NamedValue> {
         // other caller of this conversion — deleting a non-boolean register's last alias — is no
         // Kind change and keeps whatever this conversion carried over above. Applied last so no
         // later state copy clobbers the focused flag it sets.
-        if self.value_source == NamedValueSource::BooleanFixed {
+        if boolean_fixed {
             d.set_focus_to_kind();
         }
         d
@@ -1562,6 +1574,54 @@ mod boolean_kind_tests {
     }
 
     #[test]
+    /// MB-R-248 — an edit dialog opens with the Value pane focused when MB-R-151 shows it (the
+    /// selection variant, a writable boolean register).
+    fn ut_edit_opens_focused_on_value_selection_when_visible() {
+        let register = coil(Access::ReadWrite);
+        let dialog = EditSelectionDialog::from_register(
+            "c",
+            "",
+            &register,
+            vec![],
+            "0",
+            "[0000]",
+            None,
+            true,
+        );
+        assert!(dialog.value.state.focused(), "Value pane should be focused");
+        assert!(
+            !dialog.label.state.focused(),
+            "Label pane should not also be focused"
+        );
+    }
+
+    #[test]
+    /// MB-R-249 — where MB-R-151 hides the Value pane (a `ReadOnly` boolean register on a
+    /// client), an edit dialog opens with the first focusable field of its Tab cycle focused
+    /// instead.
+    fn ut_edit_opens_focused_on_label_when_value_hidden_selection() {
+        let register = coil(Access::ReadOnly);
+        let dialog = EditSelectionDialog::from_register(
+            "c",
+            "",
+            &register,
+            vec![],
+            "0",
+            "[0000]",
+            None,
+            false,
+        );
+        assert!(
+            dialog.label.state.focused(),
+            "Label pane should be focused (first eligible field, Value hidden)"
+        );
+        assert!(
+            !dialog.value.state.focused(),
+            "Value pane should not be focused while hidden"
+        );
+    }
+
+    #[test]
     /// MB-R-151, MB-R-227, MB-R-228, MB-R-231 — a boolean Value pane hidden by MB-R-151 (client
     /// `ReadOnly`) is unfocusable and never read: confirming with `ON` selected on the underlying
     /// widget state (as if it had been set before Access toggled the pane hidden) must not write
@@ -1589,10 +1649,6 @@ mod boolean_kind_tests {
         let edited = dialog.apply().expect("hidden panes never block confirm");
         assert_eq!(edited.value, None);
 
-        // `from_register` always starts focus on `Value`, even when it is gated off (not
-        // focusable); one `focus_next()` lands on the first real pane, mirroring
-        // `ut_focus_cycle_skips_value_panes_when_no_named_values`.
-        dialog.focus_next();
         let start = dialog.focus;
         let mut seen = vec![start];
         for _ in 0..64 {

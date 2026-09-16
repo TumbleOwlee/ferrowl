@@ -207,4 +207,13 @@ impl ModbusOverlay {
             _ => None,
         }
     }
+
+    /// MB-R-247 — a fresh `:add` opens with Label focused, in either pane kind.
+    pub(super) fn set_focus_to_label(&mut self) {
+        let (ModbusOverlay::Add(kind) | ModbusOverlay::Edit(kind)) = self;
+        match kind {
+            RegisterDialogKind::Input(d) => d.set_focus_to_label(),
+            RegisterDialogKind::Selection(d) => d.set_focus_to_label(),
+        }
+    }
 }
