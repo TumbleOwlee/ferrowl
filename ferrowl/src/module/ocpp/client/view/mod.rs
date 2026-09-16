@@ -479,11 +479,25 @@ pub struct ClientView<V: ClientVersion> {
     _version: PhantomData<V>,
 }
 
-/// UI-R-314/UI-R-315 — the follow-up state a deferred stop-bearing lifecycle command needs once
-/// its `poll_stop()` completes.
+/// UI-R-314/UI-R-315/UI-R-350 — the follow-up state a deferred stop-bearing lifecycle command or
+/// applied configuration edit needs once its `poll_stop()` completes.
 enum PendingLifecycle {
     Stop,
     Restart,
+    ApplySetup(Box<SetupFollowUp>),
+}
+
+/// What an applied `:edit` still has to do once its deferred stop settles: swap the whole view
+/// (role or version changed), or adopt the new spec in place and reconnect if the station was
+/// connected when the edit was confirmed (OC-R-085).
+enum SetupFollowUp {
+    Replace(Box<dyn ModuleView>),
+    InPlace {
+        spec: Box<OcppSpec>,
+        path: String,
+        device: Box<OcppDeviceConfig>,
+        was_online: bool,
+    },
 }
 
 impl<V: ClientVersion> HasState for ClientView<V> {

@@ -17,7 +17,7 @@ use crate::module::view::{CommandFuture, CommandResult, RefreshFuture, parse_com
 
 use super::{
     ClientState, ClientVersion, ClientView, OCPP_CLIENT_COMMAND_SPECS, OcppClientCmd,
-    PendingLifecycle, config_rows, conn_rows, msg_row, nv_rows,
+    PendingLifecycle, SetupFollowUp, config_rows, conn_rows, msg_row, nv_rows,
 };
 
 /// Read a CS-level string field (boot identity) by its `ClientFields` name, for persisting on
@@ -89,6 +89,61 @@ impl<V: ClientVersion> ClientView<V> {
             self.state.clone(),
             self.backend.sender(),
         )
+    }
+
+    /// UI-R-350 — signal the stop an applied configuration edit needs and defer `follow_up` to the
+    /// settle block, following the same overwrite/nothing-was-running rules as `:stop`/`:restart`
+    /// (`OcppClientCmd::Stop`). Returns `true` if the follow-up was deferred (caller must not fall
+    /// through to code that assumes it already ran), `false` if it ran inline because nothing was
+    /// running.
+    async fn apply_setup_follow_up(&mut self, follow_up: SetupFollowUp) -> bool {
+        if self.pending_lifecycle.is_some() {
+            self.pending_lifecycle = Some(PendingLifecycle::ApplySetup(Box::new(follow_up)));
+            return true;
+        }
+        match self.backend.request_stop().await {
+            Ok(()) => {
+                self.pending_lifecycle = Some(PendingLifecycle::ApplySetup(Box::new(follow_up)));
+                true
+            }
+            // Nothing was running: no in-flight task for `poll_stop()` to ever resolve, so the
+            // follow-up runs inline right here.
+            Err(_) => {
+                match follow_up {
+                    SetupFollowUp::Replace(view) => {
+                        self.deferred.replacement = Some(view);
+                    }
+                    SetupFollowUp::InPlace {
+                        spec,
+                        path,
+                        device,
+                        was_online,
+                    } => {
+                        self.spec = *spec;
+                        self.device = *device;
+                        self.device_path = path;
+                        self.log
+                            .write()
+                            .await
+                            .write(Level::Info, "Settings updated");
+                        if was_online {
+                            let handler = self.make_handler();
+                            if let Err(e) = self
+                                .backend
+                                .start(&self.spec, &self.device, &self.log, handler)
+                                .await
+                            {
+                                self.log.write().await.write(
+                                    Level::Error,
+                                    &format!("Restart after settings update failed: {e}"),
+                                );
+                            }
+                        }
+                    }
+                }
+                false
+            }
+        }
     }
 
     /// Write the device config (reconciled with the live spec, scripts + connectors preserved).
@@ -221,9 +276,9 @@ impl<V: ClientVersion> ClientView<V> {
 
     pub(super) fn refresh_impl<'a>(&'a mut self) -> RefreshFuture<'a> {
         Box::pin(async move {
-            // UI-R-314/UI-R-315 — a deferred stop-bearing lifecycle command only signalled
-            // `request_stop()`; drain its outcome (and run any follow-up) once the task actually
-            // ends.
+            // UI-R-314/UI-R-315/UI-R-350 — a deferred stop-bearing lifecycle command or applied
+            // configuration edit only signalled `request_stop()`; drain its outcome (and run any
+            // follow-up) once the task actually ends.
             if self.pending_lifecycle.is_some()
                 && let Some(stop_result) = self.backend.poll_stop().await
             {
@@ -258,6 +313,49 @@ impl<V: ClientVersion> ClientView<V> {
                         };
                         self.log.write().await.write(level, &msg);
                     }
+                    Some(PendingLifecycle::ApplySetup(follow_up)) => {
+                        // OC-R-102 — a stop failure logs at Error, same as the sibling `Stop` and
+                        // `Restart` arms above; `Client<V>::join` has no path back to `Err` in the
+                        // current fixtures, so this arm is untested there too.
+                        if let Err(e) = stop_result {
+                            self.log
+                                .write()
+                                .await
+                                .write(Level::Error, &format!("Settings update: stop failed: {e}"));
+                        }
+                        match *follow_up {
+                            SetupFollowUp::Replace(view) => {
+                                self.deferred.replacement = Some(view);
+                            }
+                            SetupFollowUp::InPlace {
+                                spec,
+                                path,
+                                device,
+                                was_online,
+                            } => {
+                                self.spec = *spec;
+                                self.device = *device;
+                                self.device_path = path;
+                                self.log
+                                    .write()
+                                    .await
+                                    .write(Level::Info, "Settings updated");
+                                if was_online {
+                                    let handler = self.make_handler();
+                                    if let Err(e) = self
+                                        .backend
+                                        .start(&self.spec, &self.device, &self.log, handler)
+                                        .await
+                                    {
+                                        self.log.write().await.write(
+                                            Level::Error,
+                                            &format!("Restart after settings update failed: {e}"),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
                     None => unreachable!("outer condition checked pending_lifecycle.is_some()"),
                 }
             }
@@ -280,57 +378,32 @@ impl<V: ClientVersion> ClientView<V> {
                 // metadata the dialog never exposes.
                 device.extra_headers = extra_headers;
                 if spec.role == OcppRole::Server {
-                    if let Err(e) = self.backend.stop().await {
-                        self.log.write().await.write(
-                            Level::Error,
-                            &format!("Stop before role switch failed: {e}"),
-                        );
-                    }
-                    self.deferred.replacement = Some(build_server_view(spec, path, device));
+                    let replacement = build_server_view(spec, path, device);
+                    self.apply_setup_follow_up(SetupFollowUp::Replace(replacement))
+                        .await;
                     return;
                 }
                 if spec.version != self.spec.version {
-                    if let Err(e) = self.backend.stop().await {
-                        self.log.write().await.write(
-                            Level::Error,
-                            &format!("Stop before version switch failed: {e}"),
-                        );
-                    }
                     if !device.scripts.is_empty() {
                         self.log.write().await.write(
                             Level::Warning,
                             "Version switched: scripts kept but may call actions the new version lacks",
                         );
                     }
-                    self.deferred.replacement = Some(build_client_view(spec, path, device));
+                    let replacement = build_client_view(spec, path, device);
+                    self.apply_setup_follow_up(SetupFollowUp::Replace(replacement))
+                        .await;
                     return;
                 } else {
                     let was_online = self.backend.is_online();
-                    if let Err(e) = self.backend.stop().await {
-                        self.log.write().await.write(
-                            Level::Error,
-                            &format!("Stop for settings update failed: {e}"),
-                        );
-                    }
-                    self.spec = spec;
-                    self.device = device;
-                    self.device_path = path;
-                    self.log
-                        .write()
-                        .await
-                        .write(Level::Info, "Settings updated");
-                    if was_online {
-                        let handler = self.make_handler();
-                        if let Err(e) = self
-                            .backend
-                            .start(&self.spec, &self.device, &self.log, handler)
-                            .await
-                        {
-                            self.log.write().await.write(
-                                Level::Error,
-                                &format!("Restart after settings update failed: {e}"),
-                            );
-                        }
+                    let follow_up = SetupFollowUp::InPlace {
+                        spec: Box::new(spec),
+                        path,
+                        device: Box::new(device),
+                        was_online,
+                    };
+                    if self.apply_setup_follow_up(follow_up).await {
+                        return;
                     }
                 }
             }
