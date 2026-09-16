@@ -20,7 +20,7 @@ IDs stable, append-only (`NF-R-nnn`). See [`README.md`](./README.md).
 
 **NF-R-046** — A Lua sim has no execution ceiling; this is a known limitation ([`scripting/edge-cases.md`](./scripting/edge-cases.md)).
 
-**NF-R-067** — No module lifecycle `:` command blocks the TUI's input and redraw loop; it completes asynchronously, and a stop-bearing command's outcome reports into the module's message log rather than its immediate result, the one bounded exception being the tab-close settle of UI-R-316 ([`tui/`](./tui/), UI-R-314, UI-R-315).
+**NF-R-067** — No operator action that stops a module — a lifecycle `:` command or a module configuration apply — blocks the TUI's input and redraw loop; it completes asynchronously, and a stop-bearing action's outcome reports into the module's message log rather than its immediate result, the one bounded exception being the tab-close settle of UI-R-316 ([`tui/`](./tui/), UI-R-314, UI-R-315, UI-R-350).
 
 ## Reliability
 

@@ -119,6 +119,7 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 | **MB-E-018** | Retransmitted `WriteSingleRegister`/`WriteSingleCoil` request arrives while awaiting that request's response | decodes as the response to itself (byte-identical on the wire): false `Ok` record and phantom observed-table write. `WriteMultiple*` and reads unaffected |
 | **MB-E-019** | Two configured instances share the same Rtu/Ascii path | MB-R-150 catches it before the OS-level open, reports a distinct conflict status, recovers once one instance stops or moves |
 | **MB-E-020** | Serial path held by something outside the session (external process, bridge-mode leg) | MB-R-150 sees only same-session instances; external holder surfaces as an ordinary OS-level open failure/retry |
+| **MB-E-096** | Another module is configured onto a monitor's serial path while that monitor's configuration edit is still settling (MB-R-150, MB-R-233) | rejected as a same-path conflict, the claim being released when the deferred stop settles rather than at apply time; retrying after the settle succeeds. Releasing the claim earlier would let the other module open the port while the receive task still holds it, which is the failure the claim exists to prevent |
 
 ---
 

@@ -488,6 +488,14 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-217** — Neither editing (MB-R-148) nor removing (MB-R-216) an interpretation writes to the bus or touches the observed-value table (MB-R-144).
 
+**MB-R-230** — Stopping a monitor module signals its receive task a graceful terminate and aborts that task only if it has not finished within a 100 ms grace period.
+
+**MB-R-233** — Applying an edited monitor configuration rebuilds the module only once the stop it signalled per MB-R-230 has settled, never aborting the receive task outright at apply time.
+
+**MB-R-231** — The monitor module rebuilt by an applied configuration edit (MB-R-233) carries the pre-edit frame table, captured records, message log and register interpretations forward unchanged.
+
+**MB-R-232** — The monitor module rebuilt by an applied configuration edit (MB-R-233) is not started by the apply; it stays stopped until an explicit start (UI-R-314).
+
 **MB-R-150** — Before opening its RTU or Ascii serial port, on initial start or reconnect (MB-R-050–MB-R-055 client, MB-R-130–MB-R-134 server, MB-R-192 monitor), a module instance checks every other configured instance in the session for an Rtu/Ascii endpoint on the same path (after `~` expansion).
 
 **MB-R-200** — On an MB-R-150 path match the module instance skips the OS-level open for that attempt, reports a distinct path-conflict status/log entry, then retries on the ordinary open-failure backoff cadence, recovering once the conflicting instance stops or moves off that path.
