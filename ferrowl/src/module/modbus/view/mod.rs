@@ -778,9 +778,10 @@ impl ModuleView for ModbusModuleView {
             }
 
             ModbusCmd::Add => {
-                self.overlay = ModbusViewOverlay::Register(Box::new(ModbusOverlay::Add(
-                    EditInputDialog::new(),
-                )));
+                let mut dialog = EditInputDialog::new();
+                dialog.is_server =
+                    self.spec.role.client_or_server() == crate::config::ClientOrServer::Server;
+                self.overlay = ModbusViewOverlay::Register(Box::new(ModbusOverlay::Add(dialog)));
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
             }
 
@@ -1150,6 +1151,7 @@ fn parse_set_args(rest: &str) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
+    use super::overlay::ModbusOverlay;
     use super::{
         ModbusModuleView, ModbusViewOverlay, PendingAction, decode_definition, parse_set_args,
         raw_hex,
@@ -1157,6 +1159,7 @@ mod tests {
     use crate::app::Level;
     use crate::config::script::ScriptDef;
     use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
+    use crate::module::modbus::dialog::{access_index, kind_index};
     use crate::module::modbus::setup_dialog::SetupValues;
     use crate::module::modbus::table::Definition;
     use crate::module::view::{CommandResult, ModuleView, StopOutcome};
@@ -1558,6 +1561,77 @@ mod tests {
         // Enter confirms the close-confirm popup, closing the overlay.
         view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
         assert!(!view.is_overlay_active());
+    }
+
+    fn set_add_dialog_kind_and_access(view: &mut ModbusModuleView, kind: Kind, access: Access) {
+        let ModbusViewOverlay::Register(overlay) = &mut view.overlay else {
+            panic!("expected register overlay");
+        };
+        match overlay.as_mut() {
+            ModbusOverlay::Add(d) | ModbusOverlay::Edit(d) => {
+                d.kind.state.set_selection(kind_index(&kind));
+                d.access.state.set_selection(access_index(&access));
+            }
+            ModbusOverlay::EditSelection(_) => panic!("expected input dialog"),
+        }
+    }
+
+    /// Walks a full forward focus cycle of the open add/edit input dialog, returning whether the
+    /// Value and Default Value panes were ever focused (`(value_seen, default_value_seen)`).
+    fn add_dialog_value_panes_reachable(view: &mut ModbusModuleView) -> (bool, bool) {
+        use ferrowl_ui::traits::IsFocus;
+        let ModbusViewOverlay::Register(overlay) = &mut view.overlay else {
+            panic!("expected register overlay");
+        };
+        let d = match overlay.as_mut() {
+            ModbusOverlay::Add(d) | ModbusOverlay::Edit(d) => d,
+            ModbusOverlay::EditSelection(_) => panic!("expected input dialog"),
+        };
+        let mut value_seen = d.value.state.is_focused();
+        let mut default_value_seen = d.default_value.state.is_focused();
+        for _ in 0..64 {
+            d.focus_next();
+            value_seen |= d.value.state.is_focused();
+            default_value_seen |= d.default_value.state.is_focused();
+        }
+        (value_seen, default_value_seen)
+    }
+
+    #[test]
+    /// MB-R-151 — `:add` on a server module shows the Value and Default Value panes for a
+    /// Read Only register, matching `:edit`'s behavior.
+    fn ut_add_dialog_on_a_server_shows_value_panes_for_read_only() {
+        let mut view = new_view();
+        drop(view.handle_command("add"));
+        set_add_dialog_kind_and_access(&mut view, Kind::HoldingRegister, Access::ReadOnly);
+        view.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        let (value_seen, default_value_seen) = add_dialog_value_panes_reachable(&mut view);
+        assert!(value_seen);
+        assert!(default_value_seen);
+    }
+
+    #[test]
+    /// MB-R-151 — `:add` on a client module still hides the Value and Default Value panes
+    /// for a Read Only register.
+    fn ut_add_dialog_on_a_client_hides_value_panes_for_read_only() {
+        let spec = ModuleSpec {
+            name: "test module".into(),
+            device: String::new(),
+            role: Role::Client,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 5020,
+            },
+        };
+        let device = empty_device();
+        let module = super::super::ModbusModule::new(&spec, &device);
+        let mut view = ModbusModuleView::new(module, spec, device);
+        drop(view.handle_command("add"));
+        set_add_dialog_kind_and_access(&mut view, Kind::HoldingRegister, Access::ReadOnly);
+        view.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        let (value_seen, default_value_seen) = add_dialog_value_panes_reachable(&mut view);
+        assert!(!value_seen);
+        assert!(!default_value_seen);
     }
 
     #[test]
