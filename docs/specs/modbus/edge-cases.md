@@ -126,8 +126,9 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 
 | ID | Condition | Behavior |
 |---|---|---|
-| **MB-E-094** | Shown Value or Default Value input holding only whitespace | non-empty for MB-R-222/MB-R-225 (emptiness is zero length, never trimmed) and evaluated per MB-R-223/MB-R-226: an `Ascii` register takes the all-space value, a numeric register reports a parse error rather than silently falling back to its default |
+| **MB-E-094** | Shown Value or Default Value *text* input holding only whitespace (a Coil/DiscreteInput pane in the register dialog's selection variant, MB-R-229, has no such state) | non-empty for MB-R-222/MB-R-225 (emptiness is zero length, never trimmed) and evaluated per MB-R-223/MB-R-226: an `Ascii` register takes the all-space value, a numeric register reports a parse error rather than silently falling back to its default |
 | **MB-E-095** | Non-empty Value or Default Value input on a register whose address is virtual (MB-R-003, MB-R-080) | accepted without the MB-R-223/MB-R-226 format-encoding check: a virtual register's value is stored by string parsing into the per-module virtual store, never by encoding into words, so the dialog applies the same acceptance as the `:set` path rather than rejecting an input no encode would ever see |
+| **MB-E-096** | `Coil`/`DiscreteInput` register whose configured `default` is neither 0 nor 1, its Default Value pane shown | the pane has no matching state, so MB-R-235 opens it at `OFF` and confirming rewrites `default` to 0 (MB-R-236). A hand-edited config's out-of-range boolean default therefore survives only until that register is confirmed through the dialog |
 
 ---
 
