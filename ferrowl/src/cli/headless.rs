@@ -68,37 +68,49 @@ async fn build_modules_into(args: &RunArgs, modules: &mut Vec<RunModule>) -> Res
     // TUI's own first `rebuild_registry`).
     let serial_paths = crate::module::modbus::SerialPathRegistry::new();
 
-    for spec in args.module_specs()? {
+    let module_specs = args.module_specs()?;
+    // Parsed here for the combined name list, but the `?` on a parse failure is deferred past
+    // the modbus loop below, so a malformed `--ocpp` spec doesn't discard modbus modules already
+    // started (CL-R-050).
+    let ocpp_specs_result = args.ocpp_specs();
+    let ocpp_names: &[OcppModuleSpec] = ocpp_specs_result.as_deref().unwrap_or_default();
+    let names = dedupe_names(
+        &module_specs
+            .iter()
+            .map(|s| s.name.clone())
+            .chain(ocpp_names.iter().map(|s| s.name.clone()))
+            .collect::<Vec<_>>(),
+    );
+    let mut names = names.into_iter();
+
+    for (spec, name) in module_specs.into_iter().zip(names.by_ref()) {
         let view: Box<dyn ModuleView> = match spec.role {
             Role::Monitor => {
-                let device = config::load_monitor_device(&spec.device).map_err(|e| {
-                    format!("'{}': failed to load '{}': {e}", spec.name, spec.device)
-                })?;
+                let device = config::load_monitor_device(&spec.device)
+                    .map_err(|e| format!("'{name}': failed to load '{}': {e}", spec.device))?;
                 let mut module = MonitorModule::new(&spec, &device);
                 module.set_serial_paths(serial_paths.clone());
                 Box::new(ModbusMonitorModuleView::new(module, spec.clone(), device))
             }
             Role::Client | Role::Server => {
-                let device = config::load_device(&spec.device).map_err(|e| {
-                    format!("'{}': failed to load '{}': {e}", spec.name, spec.device)
-                })?;
+                let device = config::load_device(&spec.device)
+                    .map_err(|e| format!("'{name}': failed to load '{}': {e}", spec.device))?;
                 let mut module = Module::new(&spec, &device);
                 module.set_serial_paths(serial_paths.clone());
                 Box::new(ModbusModuleView::new(module, spec.clone(), device))
             }
         };
-        modules.push(start_module(spec.name.clone(), view).await?);
+        modules.push(start_module(name, view).await?);
     }
 
-    for spec in args.ocpp_specs()? {
-        modules.push(build_ocpp_module(spec).await?);
+    for (spec, name) in ocpp_specs_result?.into_iter().zip(names.by_ref()) {
+        modules.push(build_ocpp_module(spec, name).await?);
     }
 
     Ok(())
 }
 
-async fn build_ocpp_module(module: OcppModuleSpec) -> Result<RunModule, String> {
-    let name = module.name.clone();
+async fn build_ocpp_module(module: OcppModuleSpec, name: String) -> Result<RunModule, String> {
     let device = config::load_ocpp_device(&module.device)
         .map_err(|e| format!("'{name}': failed to load '{}': {e}", module.device))?;
     let spec = OcppSpec::from_parts(&module, &device);
@@ -184,18 +196,15 @@ async fn drain_log(
 }
 
 /// Build the session-level `C_Module` registry from every running module's
-/// [`ModuleView::module_host`], keyed by name deduped the same way [`crate::registry::dedupe_names`]
-/// dedupes tab names in the TUI (headless has no tab set of its own, but reuses the same helper so
-/// a repeated `--module`/`--ocpp` name, or a session file listing the same name twice, doesn't
-/// silently drop one module's host from `C_Module`).
+/// [`ModuleView::module_host`], keyed by the module's name — already deduped at construction
+/// (see [`build_modules_into`]) the same way [`crate::registry::dedupe_names`] dedupes tab names
+/// in the TUI, so a repeated `--module`/`--ocpp` name, or a session file listing the same name
+/// twice, doesn't silently drop one module's host from `C_Module`.
 fn build_registry(modules: &[RunModule]) -> ModuleRegistry {
-    let names: Vec<String> = modules.iter().map(|m| m.name.clone()).collect();
-    let deduped = dedupe_names(&names);
-
     let mut hosts: HashMap<String, Arc<dyn ModuleHost>> = HashMap::new();
-    for (module, name) in modules.iter().zip(deduped.iter()) {
+    for module in modules {
         if let Some(host) = module.view.module_host() {
-            hosts.insert(name.clone(), host);
+            hosts.insert(module.name.clone(), host);
         }
     }
 
@@ -261,14 +270,13 @@ fn teardown_line(name: &str, outcome: Option<(Level, String)>) -> String {
 
 /// Stop every module (best-effort: a stop failure is logged but does not change the exit code —
 /// we're already tearing down). Returns the teardown line reported for each module, in order
-/// (CL-R-056, CL-R-057, CL-R-059). Reported names are deduped the same way [`build_registry`]
-/// dedupes `C_Module` keys, so a repeated `--module`/`--ocpp` name is distinguishable in the
-/// teardown report just as it is in the registry.
+/// (CL-R-056, CL-R-057, CL-R-059). The reported name is the module's own name, already deduped
+/// at construction (see [`build_modules_into`]), so a repeated `--module`/`--ocpp` name is
+/// distinguishable in the teardown report just as it is in the registry.
 async fn stop_all(modules: &mut [RunModule]) -> Vec<String> {
-    let names: Vec<String> = modules.iter().map(|m| m.name.clone()).collect();
-    let deduped = dedupe_names(&names);
     let mut lines = Vec::new();
-    for (module, name) in modules.iter_mut().zip(deduped.iter()) {
+    for module in modules.iter_mut() {
+        let name = module.name.clone();
         let result = module.view.handle_command("stop").await;
         let mut outcome = if let CommandResult::Handled(Some((level, msg))) = &result {
             module.log.write().await.write(*level, msg);
@@ -303,7 +311,7 @@ async fn stop_all(modules: &mut [RunModule]) -> Vec<String> {
         let line = if timed_out {
             format!("Error: timed out stopping '{name}'")
         } else {
-            teardown_line(name, outcome)
+            teardown_line(&name, outcome)
         };
         eprintln!("{line}");
         lines.push(line);
@@ -827,6 +835,114 @@ mod tests {
     }
 
     #[tokio::test]
+    /// CL-R-050 — a malformed `--ocpp` spec is a setup failure, but the modbus modules already
+    /// started before that failure is returned are still handed back for teardown: the
+    /// deduped-name lookup parses `ocpp_specs()` up front but must not propagate its `Err` before
+    /// the modbus loop runs.
+    async fn ut_build_modules_keeps_started_modbus_modules_when_ocpp_spec_is_bad() {
+        let dir = reserve_temp_dir("ferrowl_cl");
+        let port = reserve_tcp_port().release();
+        let mut args = modbus_run_args(&dir, port, 1);
+        args.ocpp = vec!["device=d,port=1".to_string()]; // missing 'name'
+        let mut modules = Vec::new();
+        assert!(build_modules_into(&args, &mut modules).await.is_err());
+        assert_eq!(
+            modules.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(),
+            vec!["m"],
+            "the modbus module started before the bad --ocpp spec's Err propagated must still \
+             be returned for teardown"
+        );
+    }
+
+    /// A minimal OCPP server device config on disk, under `dir`.
+    fn write_ocpp_device(dir: &TempDirGuard) -> String {
+        use ferrowl_util::convert::{Converter, FileType};
+        let cfg = config::OcppDeviceConfig {
+            role: OcppRole::Server,
+            ..Default::default()
+        };
+        let p = dir.join("ocpp-device.toml");
+        Converter::save(&cfg, p.to_str().unwrap(), FileType::Toml).unwrap();
+        p.to_str().unwrap().to_string()
+    }
+
+    #[tokio::test]
+    /// CL-R-056 — module names are deduped once, at construction, across both the modbus and
+    /// OCPP spec lists (in that build order), and the deduped name is what teardown reports; the
+    /// drained-log-source use of the same name is pinned separately by
+    /// `ut_run_log_file_sources_are_deduped` (CL-R-040).
+    async fn ut_build_modules_assigns_deduped_names() {
+        let dir = reserve_temp_dir("ferrowl_cl");
+        let device = write_device(&dir);
+        let ocpp_device = write_ocpp_device(&dir);
+        let port_a = reserve_tcp_port().release();
+        let port_b = reserve_tcp_port().release();
+        let port_c = reserve_tcp_port().release();
+        let mut args = modbus_run_args(&dir, port_a, 1);
+        args.modules = vec![
+            format!("name=m,device={device},transport=tcp,ip=127.0.0.1,port={port_a},role=server"),
+            format!("name=m,device={device},transport=tcp,ip=127.0.0.1,port={port_b},role=server"),
+        ];
+        args.ocpp = vec![format!("name=m,device={ocpp_device},port={port_c}")];
+
+        let mut modules = Vec::new();
+        build_modules_into(&args, &mut modules).await.unwrap();
+        assert_eq!(
+            modules.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(),
+            vec!["m", "m (2)", "m (3)"],
+            "modbus specs dedupe first, then ocpp specs continue the same sequence"
+        );
+
+        let lines = stop_all(&mut modules).await;
+        assert_eq!(
+            lines,
+            vec![
+                "Stopped 'm'".to_string(),
+                "Stopped 'm (2)'".to_string(),
+                "Stopped 'm (3)'".to_string(),
+            ],
+            "CL-R-056 — teardown reports each module's deduped name verbatim"
+        );
+    }
+
+    #[tokio::test]
+    /// CL-R-040, CL-R-041 — two same-named modules' drained log lines carry distinct source
+    /// names in the `--log-file` output, matching the deduped names `C_Module` and teardown use.
+    async fn ut_run_log_file_sources_are_deduped() {
+        let dir = reserve_temp_dir("ferrowl_cl");
+        let device = write_device(&dir);
+        let port_a = reserve_tcp_port().release();
+        let port_b = reserve_tcp_port().release();
+        let log_file = dir.join("dedup.log").to_str().unwrap().to_string();
+        let args = RunArgs {
+            sessions: vec![],
+            modules: vec![
+                format!(
+                    "name=m,device={device},transport=tcp,ip=127.0.0.1,port={port_a},role=server"
+                ),
+                format!(
+                    "name=m,device={device},transport=tcp,ip=127.0.0.1,port={port_b},role=server"
+                ),
+            ],
+            ocpp: vec![],
+            duration: Some(1),
+            log_file: Some(log_file.clone()),
+            exit_on_error: false,
+        };
+
+        assert_eq!(run(&args).await, 0);
+        let contents = std::fs::read_to_string(&log_file).unwrap();
+        assert!(
+            contents.contains(" m (2) | "),
+            "expected a line from the second, deduped source, got:\n{contents}"
+        );
+        assert!(
+            contents.contains(" m | "),
+            "expected a line from the first source, got:\n{contents}"
+        );
+    }
+
+    #[tokio::test]
     /// MB-R-150 — headless module construction attaches one shared session-wide serial-path
     /// registry to each Rtu/Ascii module before starting it, so two server instances configured
     /// on the same nonexistent path see each other as a conflict instead of silently racing the
@@ -914,8 +1030,8 @@ mod tests {
 
     #[tokio::test]
     /// CL-R-056 — each module the headless runner stops is reported, in list order, as
-    /// `Stopped '<name>'`, `<name>` deduped the same way `build_registry` dedupes module names
-    /// (two modules sharing a raw name get distinct reported names).
+    /// `Stopped '<name>'`, `<name>` the module's already-deduped name (assigned once at
+    /// construction, per `ut_build_modules_assigns_deduped_names`) reported verbatim.
     async fn ut_stop_all_reports_each_module_in_order() {
         let (view_a, _handle_a) = crate::app::testkit::MockView::pair("a");
         let (view_b, _handle_b) = crate::app::testkit::MockView::pair("b");
@@ -927,7 +1043,7 @@ mod tests {
                 last_written: 0,
             },
             RunModule {
-                name: "a".to_string(),
+                name: "a (2)".to_string(),
                 view: view_b.boxed(),
                 log: new_log(),
                 last_written: 0,
@@ -937,7 +1053,7 @@ mod tests {
         assert_eq!(
             lines,
             vec!["Stopped 'a'".to_string(), "Stopped 'a (2)'".to_string()],
-            "CL-R-056 reports the deduped name, matching build_registry's dedupe_names key"
+            "CL-R-056 reports the deduped name verbatim"
         );
     }
 
