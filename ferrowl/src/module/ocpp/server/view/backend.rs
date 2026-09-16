@@ -1142,6 +1142,227 @@ mod tests {
             "the stop's follow-up must win: no rebind behind a later stop"
         );
     }
+    /// UI-R-350 — applying a module configuration edit against a running CSMS signals the stop
+    /// and returns without waiting for the listener to unbind.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_edit_apply_returns_without_blocking() {
+        let port = ferrowl_test_support::reserve_tcp_port().release();
+
+        let mut v = server_view(port);
+        v.handle_command("start").await;
+        wait_bound(&v).await;
+
+        let mut edited = v.spec.clone();
+        edited.port = ferrowl_test_support::reserve_tcp_port().release();
+        v.deferred.setup = Some((edited.clone(), String::new(), Vec::new()));
+
+        let before = std::time::Instant::now();
+        v.refresh().await;
+        assert!(
+            before.elapsed() < std::time::Duration::from_millis(50),
+            "refresh() took {:?}, expected to return immediately",
+            before.elapsed()
+        );
+        assert!(v.lifecycle_pending());
+
+        for _ in 0..200 {
+            if !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(!v.lifecycle_pending());
+    }
+
+    /// UI-R-350, UI-E-161 — the new endpoint is not bound while the deferred stop is still
+    /// pending (`self.spec` still holds the pre-edit port), and only once the settle loop plus
+    /// the following auto-bind tick have run does the CSMS come back online on the new port,
+    /// with no `listen failed` line in the log.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_edit_apply_rebinds_only_after_stop_settles() {
+        let port = ferrowl_test_support::reserve_tcp_port().release();
+
+        let mut v = server_view(port);
+        v.handle_command("start").await;
+        wait_bound(&v).await;
+
+        let pre_edit_port = v.spec.port;
+        let mut edited = v.spec.clone();
+        edited.port = ferrowl_test_support::reserve_tcp_port().release();
+        v.deferred.setup = Some((edited.clone(), String::new(), Vec::new()));
+
+        v.refresh().await;
+        assert!(v.lifecycle_pending());
+        assert_eq!(
+            v.spec.port, pre_edit_port,
+            "the pre-edit spec must still render until the deferred stop settles"
+        );
+
+        for _ in 0..200 {
+            if !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(!v.lifecycle_pending());
+        assert_eq!(
+            v.spec.port, edited.port,
+            "the edited spec must be adopted at settle"
+        );
+
+        wait_bound(&v).await;
+
+        let lines = v
+            .log
+            .read()
+            .await
+            .peek_n(crate::app::LOG_SIZE)
+            .into_iter()
+            .map(|(_, level, l)| (level, l))
+            .collect::<Vec<_>>();
+        assert!(
+            !lines.iter().any(|(_, l)| l.starts_with("listen failed")),
+            "no bind race expected: {lines:?}"
+        );
+    }
+
+    /// UI-R-350 — a role switch (server → client) confirmed against a running CSMS signals the
+    /// stop and defers `take_replacement()` until that deferred stop settles.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_edit_apply_role_switch_defers_replacement_until_stop_settles() {
+        let port = ferrowl_test_support::reserve_tcp_port().release();
+
+        let mut v = server_view(port);
+        v.handle_command("start").await;
+        wait_bound(&v).await;
+
+        let mut edited = v.spec.clone();
+        edited.role = OcppRole::Client;
+        v.deferred.setup = Some((edited, String::new(), Vec::new()));
+        v.refresh().await;
+        assert!(v.lifecycle_pending());
+        assert!(
+            v.take_replacement().is_none(),
+            "the replacement must not be installed while the stop is still pending"
+        );
+
+        for _ in 0..200 {
+            if !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(!v.lifecycle_pending());
+        assert!(
+            v.take_replacement().is_some(),
+            "the replacement must be installed once the deferred stop settles"
+        );
+    }
+
+    /// UI-R-350 — applying an edit against a stopped CSMS lands within the same `refresh()`
+    /// call, since `request_stop()` errors `NotRunning` and there is no in-flight task for
+    /// `poll_stop()` to ever resolve.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_edit_apply_on_stopped_csms_applies_immediately() {
+        let port = ferrowl_test_support::reserve_tcp_port().release();
+
+        let mut v = server_view(port);
+        v.want_running = false;
+
+        let mut edited = v.spec.clone();
+        edited.port = ferrowl_test_support::reserve_tcp_port().release();
+        v.deferred.setup = Some((edited.clone(), String::new(), Vec::new()));
+        v.refresh().await;
+
+        assert!(
+            !v.lifecycle_pending(),
+            "nothing was running, so the apply must land inline, not defer"
+        );
+        assert_eq!(v.spec.port, edited.port);
+    }
+
+    /// UI-R-350 — an edit confirmed while a `:stop` is already pending overwrites the follow-up
+    /// in place rather than re-requesting `request_stop()` against a backend already `Stopping`,
+    /// same as `ut_restart_while_stop_pending_overwrites_the_follow_up`: only the apply's own
+    /// outcome (`Settings updated`) lands at settle, not `CSMS server stopped`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_edit_apply_while_stop_pending_overwrites_the_follow_up() {
+        let port = ferrowl_test_support::reserve_tcp_port().release();
+
+        let mut v = server_view(port);
+        v.handle_command("start").await;
+        wait_bound(&v).await;
+
+        assert!(matches!(
+            v.handle_command("stop").await,
+            CommandResult::Handled(None)
+        ));
+        assert!(v.lifecycle_pending());
+
+        // `apply_setup_follow_up` is called directly, bypassing `deferred.setup` + `refresh()`:
+        // the CSMS backend's `Terminate` is handled promptly (UI-R-314 never waits on a
+        // connection's own close), so routing this through a real `refresh()` tick races the
+        // settle block against this very overwrite check — the stop can (and, under slower
+        // instrumentation, reliably does) settle inside the same tick before the overwrite
+        // check runs. `pending_lifecycle` itself is pure view state, touched only here and by
+        // that settle block, so calling this method with no intervening `.await` on `refresh()`
+        // pins the overwrite decision deterministically without racing the backend at all.
+        let mut edited = v.spec.clone();
+        edited.port = ferrowl_test_support::reserve_tcp_port().release();
+        let follow_up = SetupFollowUp::InPlace {
+            spec: Box::new(edited.clone()),
+            path: String::new(),
+            device: Box::new(OcppDeviceConfig::default()),
+        };
+        assert!(
+            v.apply_setup_follow_up(follow_up).await,
+            "the follow-up must be deferred, not applied inline"
+        );
+        assert!(
+            matches!(v.pending_lifecycle, Some(PendingLifecycle::ApplySetup(_))),
+            "the follow-up must overwrite the pending stop in place"
+        );
+
+        for _ in 0..200 {
+            if !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(
+            !v.lifecycle_pending(),
+            "a stop overwritten with an apply must still settle, not latch forever"
+        );
+        assert_eq!(
+            v.spec.port, edited.port,
+            "the overwritten follow-up must be the apply, not the original stop"
+        );
+
+        let lines = v
+            .log
+            .read()
+            .await
+            .peek_n(crate::app::LOG_SIZE)
+            .into_iter()
+            .map(|(_, level, l)| (level, l))
+            .collect::<Vec<_>>();
+        assert!(
+            lines
+                .iter()
+                .any(|(level, l)| *level == Level::Info && l == "Settings updated"),
+            "missing 'Settings updated' Info line: {lines:?}"
+        );
+        assert!(
+            !lines
+                .iter()
+                .any(|(level, l)| *level == Level::Info && l == "CSMS server stopped"),
+            "the overwritten stop's own outcome must not be logged: {lines:?}"
+        );
+    }
 
     #[test]
     fn ut_default_action_payload_unknown_name_falls_back_to_empty_object() {
