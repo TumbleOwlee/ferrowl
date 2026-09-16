@@ -24,7 +24,7 @@ use crate::module::view::{CommandFuture, CommandResult, RefreshFuture, parse_com
 
 use super::{
     Entry, EntryState, EntryStateT, OCPP_SERVER_COMMAND_SPECS, OcppServerCmd, PendingLifecycle,
-    ServerOverlay, ServerVersion, ServerView, fill_device_rfids,
+    ServerOverlay, ServerVersion, ServerView, SetupFollowUp, fill_device_rfids,
 };
 
 /// The start/restart log line, built from the TLS mode the backend reports it actually bound
@@ -97,6 +97,47 @@ where
     /// Forget every station's registered state (after the entry set is cleared).
     fn clear_lua_states(&mut self) {
         with_state_mut(&self.lua_states, |s| s.stations.clear());
+    }
+
+    /// UI-R-350 — signal the stop an applied configuration edit needs and defer `follow_up` to
+    /// the settle block, following the same overwrite/nothing-was-running rules as
+    /// `:stop`/`:restart` (`OcppServerCmd::Stop`). Returns `true` if the follow-up was deferred
+    /// (caller must not fall through to code that assumes it already ran), `false` if it ran
+    /// inline because nothing was running.
+    async fn apply_setup_follow_up(&mut self, follow_up: SetupFollowUp) -> bool {
+        if self.pending_lifecycle.is_some() {
+            self.pending_lifecycle = Some(PendingLifecycle::ApplySetup(Box::new(follow_up)));
+            return true;
+        }
+        match self.backend.request_stop().await {
+            Ok(()) => {
+                self.pending_lifecycle = Some(PendingLifecycle::ApplySetup(Box::new(follow_up)));
+                true
+            }
+            // Nothing was running: no in-flight task for `poll_stop()` to ever resolve, so the
+            // follow-up runs inline right here.
+            Err(_) => {
+                self.entries.clear();
+                self.conn_identity.clear();
+                self.cs_configs.clear();
+                self.clear_lua_states();
+                match follow_up {
+                    SetupFollowUp::Replace(view) => {
+                        self.deferred.replacement = Some(view);
+                    }
+                    SetupFollowUp::InPlace { spec, path, device } => {
+                        self.spec = *spec;
+                        self.device = *device;
+                        self.device_path = path;
+                        self.log
+                            .write()
+                            .await
+                            .write(Level::Info, "Settings updated");
+                    }
+                }
+                false
+            }
+        }
     }
 
     fn set_compact(&mut self, compact: bool) {
@@ -531,10 +572,11 @@ where
 
     pub(super) fn refresh_impl<'a>(&'a mut self) -> RefreshFuture<'a> {
         Box::pin(async move {
-            // UI-R-314/UI-R-315 — a deferred stop-bearing lifecycle command only signalled
-            // `request_stop()`; drain its outcome (and run any follow-up) once the task actually
-            // ends. Row/state housekeeping stays here, not the command handler, so a CSMS that is
-            // still unbinding does not lose its rows before the stop lands.
+            // UI-R-314/UI-R-315/UI-R-350 — a deferred stop-bearing lifecycle command or applied
+            // configuration edit only signalled `request_stop()`; drain its outcome (and run any
+            // follow-up) once the task actually ends. Row/state housekeeping stays here, not the
+            // command handler, so a CSMS that is still unbinding does not lose its rows before the
+            // stop lands.
             if self.pending_lifecycle.is_some()
                 && let Some(stop_result) = self.backend.poll_stop().await
             {
@@ -570,6 +612,30 @@ where
                         };
                         self.log.write().await.write(level, &msg);
                     }
+                    Some(PendingLifecycle::ApplySetup(follow_up)) => {
+                        // OC-R-102 — a stop failure logs at Error, same as the sibling `Stop` and
+                        // `Restart` arms above.
+                        if let Err(e) = stop_result {
+                            self.log
+                                .write()
+                                .await
+                                .write(Level::Error, &format!("Settings update: stop failed: {e}"));
+                        }
+                        match *follow_up {
+                            SetupFollowUp::Replace(view) => {
+                                self.deferred.replacement = Some(view);
+                            }
+                            SetupFollowUp::InPlace { spec, path, device } => {
+                                self.spec = *spec;
+                                self.device = *device;
+                                self.device_path = path;
+                                self.log
+                                    .write()
+                                    .await
+                                    .write(Level::Info, "Settings updated");
+                            }
+                        }
+                    }
                     None => unreachable!("outer condition checked pending_lifecycle.is_some()"),
                 }
             }
@@ -585,53 +651,40 @@ where
                 device.extra_headers = extra_headers;
                 if spec.role == OcppRole::Client {
                     // Stop the listener first: dropping `Server<V>` only detaches its accept task,
-                    // leaving the port bound, so the swapped-in view could never rebind.
-                    if let Err(e) = self.backend.stop().await {
-                        self.log.write().await.write(
-                            Level::Error,
-                            &format!("Stop before role switch failed: {e}"),
-                        );
-                    }
-                    self.deferred.replacement = Some(build_client_view(spec, path, device));
+                    // leaving the port bound, so the swapped-in view could never rebind — the
+                    // replacement now waits for the settle rather than for a blocking stop.
+                    let replacement = build_client_view(spec, path, device);
+                    self.apply_setup_follow_up(SetupFollowUp::Replace(replacement))
+                        .await;
                     return;
                 }
                 if spec.version != self.spec.version {
                     // A version change must swap the whole view: `ServerView<V>`/`OcppServer<V>` are
                     // generic over the *old* version and would rebind with the old subprotocol,
                     // rejecting the (now-different-version) client handshake with a 400.
-                    if let Err(e) = self.backend.stop().await {
-                        self.log.write().await.write(
-                            Level::Error,
-                            &format!("Stop before version switch failed: {e}"),
-                        );
-                    }
-                    self.deferred.replacement = Some(build_server_view(spec, path, device));
+                    let replacement = build_server_view(spec, path, device);
+                    self.apply_setup_follow_up(SetupFollowUp::Replace(replacement))
+                        .await;
                     return;
                 }
                 // Rebind on the (possibly changed) endpoint: the backend builds its listener
                 // config from the spec passed into `start`, so updating `self.spec` is all an
                 // edit needs.
-                if let Err(e) = self.backend.stop().await {
-                    self.log.write().await.write(
-                        Level::Error,
-                        &format!("Stop for settings update failed: {e}"),
-                    );
+                let follow_up = SetupFollowUp::InPlace {
+                    spec: Box::new(spec),
+                    path,
+                    device: Box::new(device),
+                };
+                if self.apply_setup_follow_up(follow_up).await {
+                    return;
                 }
-                self.spec = spec;
-                self.device = device;
-                self.device_path = path;
-                self.entries.clear();
-                self.conn_identity.clear();
-                self.cs_configs.clear();
-                self.clear_lua_states();
-                self.log
-                    .write()
-                    .await
-                    .write(Level::Info, "Settings updated");
             }
 
-            // Auto-bind / honour `:start`.
-            if self.want_running && !self.backend.is_online() {
+            // Auto-bind / honour `:start`. Gated on no pending stop: an in-place apply on a
+            // running CSMS would otherwise try to bind the new listener in the same tick the old
+            // one is still unbinding and fail with address-in-use; `:restart`'s rebind is then
+            // deterministically the settle arm's own `start`, not a race with this block.
+            if self.want_running && !self.backend.is_online() && self.pending_lifecycle.is_none() {
                 let handler = V::handler(self.events_tx.clone(), self.rfids.clone());
                 if let Err(e) = self.backend.start(&self.spec, handler).await {
                     self.log

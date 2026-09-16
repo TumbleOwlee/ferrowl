@@ -300,6 +300,14 @@ where
     }
 
     /// Terminate the server task and every connection, if running.
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "blocking teardown kept for tests only now that refresh_impl \
+            routes every apply/stop through request_stop()/poll_stop()"
+        )
+    )]
     pub async fn stop(&mut self) -> Result<(), Error> {
         if matches!(self.server, CsmsState::Idle) {
             return Ok(());
