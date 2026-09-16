@@ -323,8 +323,6 @@ impl ModbusModuleView {
         });
         if let Some(o) = new_overlay {
             self.overlay = ModbusViewOverlay::Register(Box::new(o));
-        } else if let Some(o) = self.register_overlay_mut() {
-            o.sync_boolean_kind_panes();
         }
     }
 
@@ -1942,9 +1940,18 @@ mod tests {
     /// selection dialog's working Value/Default lists with the fixed `ON`/`OFF` pair, and
     /// changing away from a boolean kind live-empties them: neither switch alone flips the
     /// dialog between the `Input`/`Selection` shapes (a `HoldingRegister`-with-aliases and a
-    /// `Coil` both open the selection variant), so this is the only place that syncs the panes.
+    /// `Coil` both open the selection variant). `EditSelectionDialog`'s own `RegisterDialog::
+    /// render`/`handle_events` forwarders carry the sync (a render always follows a keystroke in
+    /// the running app); this test drives it via a render pass, the same trigger.
     fn ut_kind_switch_live_syncs_the_selection_dialogs_named_value_list() {
         use crate::config::device::{NamedValue, Scalar};
+        fn render_once(view: &mut ModbusModuleView) {
+            let area = Rect::new(0, 0, 80, 52);
+            let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 52))
+                .expect("test backend");
+            term.draw(|f: &mut Frame| view.render_overlay(f, area))
+                .expect("draw");
+        }
         let mut device = empty_device();
         let register_def = {
             use crate::config::device::{
@@ -2001,9 +2008,9 @@ mod tests {
             };
             d.kind.state.set_selection(kind_index(&Kind::Coil));
         }
-        // MB-R-240: the Kind change alone (no Tab-driven Input/Selection switch, both kinds use
-        // the selection variant) must live-replace the working list with UNSET/ON/OFF.
-        view.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        // MB-R-240: the Kind change alone (no Input/Selection switch, both kinds use the
+        // selection variant) must live-replace the working list with UNSET/ON/OFF.
+        render_once(&mut view);
         {
             let ModbusViewOverlay::Register(overlay) = &view.overlay else {
                 panic!("expected register overlay");

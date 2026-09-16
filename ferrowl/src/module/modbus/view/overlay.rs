@@ -183,19 +183,6 @@ impl ModbusOverlay {
         matches!(self, ModbusOverlay::Add(_))
     }
 
-    /// MB-R-240, MB-R-241 — keeps a still-open selection-variant dialog's Value/Default panes in
-    /// step with its own Kind field when the Kind change alone doesn't trigger an `Input`/
-    /// `Selection` switch (e.g. a `HoldingRegister`-with-aliases dialog whose Kind is changed to
-    /// `Coil`: both kinds open the selection variant, so `maybe_switch_to_selection`/
-    /// `maybe_switch_to_input` never fire). A no-op for the text-input kind.
-    pub(super) fn sync_boolean_kind_panes(&mut self) {
-        if let RegisterDialogKind::Selection(d) = match self {
-            ModbusOverlay::Add(kind) | ModbusOverlay::Edit(kind) => kind,
-        } {
-            d.sync_boolean_kind_panes();
-        }
-    }
-
     pub(super) fn maybe_switch_to_selection(&self) -> Option<ModbusOverlay> {
         match self.kind() {
             RegisterDialogKind::Input(d)

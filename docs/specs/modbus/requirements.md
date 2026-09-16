@@ -536,6 +536,16 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-241** — Changing the add/edit register dialog's Kind from `Coil` or `DiscreteInput` to any other kind leaves the dialog's working named-value list empty; neither the fixed pair (MB-R-240) nor any list the register declared before is carried over.
 
+**MB-R-242** — Changing the add/edit register dialog's Kind leaves focus on the Kind input, including when the change swaps the Value and Default Value panes between the text and selection variants (MB-R-229, MB-R-234).
+
+**MB-R-243** — Where MB-R-233 hides the add and remove named-value controls, the register dialog's selection pane spans the full row, taking the width those controls would have occupied rather than leaving it blank.
+
+**MB-R-244** — While the add/edit register dialog's Kind is `Coil` or `DiscreteInput`, its Type input displays `Boolean` and cannot be changed.
+
+**MB-R-245** — MB-R-244's `Boolean` is a label of the dialog only, never a stored format: no such format exists (`data-contract.md` `## Data formats` lists thirteen), the definition stores MB-R-246's format instead, and a boolean register's value never depends on that format, its two states being MB-R-230's fixed `ON` = 1 and `OFF` = 0.
+
+**MB-R-246** — Confirming a register of kind `Coil` or `DiscreteInput` through the add/edit register dialog stores the format a coil write is already encoded through — `U16`, `Big` endian, `Normal` word order, resolution 1.0, no bit-field mask — whatever the Type input showed before the Kind switch.
+
 **MB-R-152** — A monitor module's displayed status follows MB-R-137's three-state rule with "serial port open" for "transport connected": `CONNECTED` while the port is open and read; `RECONNECTING` while the task runs but the port is not open (MB-R-130–MB-R-134, MB-R-192); `DISCONNECTED` while the task is not running.
 
 **MB-R-154** — A format's display text is its name followed by a parenthesized qualifier: numeric → byte order (`Big Endian` or `Little Endian`); `Ascii` → alignment (`Left` or `Right`).

@@ -119,12 +119,21 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
             &mut self.access.state,
         );
 
-        StatefulWidget::render(
-            &self.value_type.widget,
-            horizontal_layout[2],
-            buf,
-            &mut self.value_type.state,
-        );
+        if self.is_boolean_kind() {
+            StatefulWidget::render(
+                &self.boolean_type.widget,
+                horizontal_layout[2],
+                buf,
+                &mut self.boolean_type.state,
+            );
+        } else {
+            StatefulWidget::render(
+                &self.value_type.widget,
+                horizontal_layout[2],
+                buf,
+                &mut self.value_type.state,
+            );
+        }
 
         if !self.is_boolean_kind() {
             match self.value_type.state.values()[self.value_type.state.selection()] {
@@ -204,14 +213,25 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
         }
         vertical_index += 1;
 
-        // Value selection + ADD + DEL buttons side by side
-        let horizontal_layout: [Rect; 4] = Layout::horizontal([
-            Constraint::Min(1),
-            Constraint::Length(7),
-            Constraint::Length(7),
-            Constraint::Length(1),
-        ])
-        .areas(vertical_layout[vertical_index]);
+        // Value selection + ADD + DEL buttons side by side; a boolean kind hides both controls
+        // (MB-R-233) so the Value pane takes the row alone (MB-R-243).
+        let horizontal_layout: [Rect; 4] = if self.is_boolean_kind() {
+            Layout::horizontal([
+                Constraint::Min(1),
+                Constraint::Length(0),
+                Constraint::Length(0),
+                Constraint::Length(0),
+            ])
+            .areas(vertical_layout[vertical_index])
+        } else {
+            Layout::horizontal([
+                Constraint::Min(1),
+                Constraint::Length(7),
+                Constraint::Length(7),
+                Constraint::Length(1),
+            ])
+            .areas(vertical_layout[vertical_index])
+        };
 
         if self.value.state.values().is_empty() {
             let text = TextBuilder::default()
@@ -425,7 +445,8 @@ mod render_tests {
 
     #[test]
     /// MB-R-233 — a boolean-kind dialog renders no ADD/DELETE alias controls; a non-boolean
-    /// dialog with named values still shows both.
+    /// dialog with named values still shows both. MB-R-243 — the Value pane fills the row the
+    /// hidden controls would have occupied.
     fn ut_boolean_kind_hides_alias_controls_in_render() {
         let register = RegisterBuilder::default()
             .slave_id(UnitId(1))
@@ -462,6 +483,22 @@ mod render_tests {
             !text.contains("DEL"),
             "boolean dialog should hide DEL:\n{text}"
         );
+        // MB-R-243 — with ADD/DEL hidden, the Value pane takes the width they would have
+        // occupied: its border spans the same columns as the Default pane immediately below it,
+        // rather than stopping short and leaving a blank gap.
+        let value_row = text
+            .lines()
+            .find(|l| l.contains("┌Value"))
+            .expect("Value pane border row");
+        let default_row = text
+            .lines()
+            .find(|l| l.contains("┌Default"))
+            .expect("Default pane border row");
+        assert_eq!(
+            value_row.trim_end().chars().count(),
+            default_row.trim_end().chars().count(),
+            "Value pane should span the full row like Default:\nvalue:  {value_row:?}\ndefault:{default_row:?}"
+        );
 
         let holding = RegisterBuilder::default()
             .slave_id(UnitId(1))
@@ -492,5 +529,41 @@ mod render_tests {
         let text = render(&mut dialog);
         assert!(text.contains("ADD"), "missing ADD button:\n{text}");
         assert!(text.contains("DELETE"), "missing DELETE button:\n{text}");
+    }
+
+    #[test]
+    /// MB-R-244 — while Kind is Coil/DiscreteInput, the Type input shows `Boolean` and is not
+    /// editable (mirrors `EditInputDialog`'s `boolean_type` pane). MB-R-245 — `Boolean` is a
+    /// display value only, not one of the Number/Text choices offered for any other kind.
+    fn ut_boolean_kind_shows_a_static_boolean_type_label() {
+        let register = RegisterBuilder::default()
+            .slave_id(UnitId(1))
+            .access(Access::ReadWrite)
+            .kind(Kind::Coil)
+            .address(Address::Fixed(0))
+            .format(Format::u16(
+                Endian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ))
+            .build()
+            .unwrap();
+        let mut dialog = EditSelectionDialog::from_register(
+            "c",
+            "",
+            &register,
+            vec![],
+            "0",
+            "[0000]",
+            None,
+            true,
+        );
+        let text = render(&mut dialog);
+        assert!(text.contains("Boolean"), "missing Boolean label:\n{text}");
+        assert!(
+            !text.contains("Number") && !text.contains("Text"),
+            "boolean kind should not show the Number/Text type selector:\n{text}"
+        );
     }
 }

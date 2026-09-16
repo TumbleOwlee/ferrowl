@@ -417,6 +417,19 @@ impl EditInputDialog {
         matches!(self.focus, EditInputDialogFocus::ConfirmButton)
     }
 
+    #[cfg(test)]
+    pub(crate) fn is_kind_focused(&self) -> bool {
+        matches!(self.focus, EditInputDialogFocus::Kind)
+    }
+
+    /// MB-R-242 — leaving a boolean kind (`to_edit_input_dialog`'s only caller) leaves focus on
+    /// Kind rather than `EditInputDialog::new`'s Label default; `SetFocus::set_focused`
+    /// re-derives every widget's `focused` flag from the enum so the rendered highlight matches.
+    pub(crate) fn set_focus_to_kind(&mut self) {
+        self.focus = EditInputDialogFocus::Kind;
+        SetFocus::set_focused(self, true);
+    }
+
     /// Convert this dialog into an EditSelectionDialog, preserving shared field state.
     /// Called when the first named value is added and the dialog should switch to selection mode.
     pub fn to_edit_selection_dialog(
@@ -475,6 +488,9 @@ impl EditInputDialog {
                 .state
                 .set_selection(if on_selected { 0 } else { 1 });
             d.value_source = NamedValueSource::BooleanFixed;
+            // MB-R-242: applied last, after every state copy above, so no later assignment
+            // (e.g. `d.kind.state = self.kind.state.clone()`) clobbers the focused flag it sets.
+            d.set_focus_to_kind();
             return d;
         }
 
@@ -586,7 +602,7 @@ use ferrowl_ui::traits::HandleEvents;
 mod apply_tests {
     //! Characterization tests for the `from_register` → `apply` round-trip: editing an existing
     //! register and confirming must reproduce its metadata.
-    use super::EditInputDialog;
+    use super::{EditInputDialog, EditInputDialogFocus};
     use ferrowl_codec::format::{
         Alignment as TextAlignment, BitField, Endian as RegisterEndian, Format as RegisterFormat,
         Resolution, Width, WordOrder as RegisterWordOrder,
@@ -720,6 +736,8 @@ mod apply_tests {
     }
 
     #[test]
+    /// MB-R-246 — a boolean kind always confirms as the default big-endian U16 format,
+    /// regardless of whatever the Type input showed before the Kind switch.
     fn ut_boolean_kind_forces_default_u16_format() {
         let original = reg(
             Kind::Coil,
@@ -995,6 +1013,74 @@ mod apply_tests {
         assert_eq!(selection2.default_value.state.selection(), 1); // OFF
         let edited2 = selection2.apply().expect("boolean dialog should apply");
         assert_eq!(edited2.default, Some(crate::config::device::Scalar::Int(0)));
+    }
+
+    #[test]
+    /// MB-R-242 — switching Kind to a boolean kind, which swaps the dialog into its selection
+    /// variant, must leave focus on the Kind input, not move it to Value.
+    fn ut_switching_to_a_boolean_kind_leaves_focus_on_kind() {
+        let holding = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let mut dialog = EditInputDialog::from_register("n", "", &holding, "1", None, true);
+        dialog.focus = EditInputDialogFocus::Kind;
+        dialog
+            .kind
+            .state
+            .set_selection(crate::module::modbus::dialog::kind_index(&Kind::Coil));
+        let selection = dialog.to_edit_selection_dialog();
+        assert!(selection.is_kind_focused());
+        assert!(
+            selection.kind.state.focused(),
+            "Kind pane should render as focused"
+        );
+        assert!(
+            !selection.value.state.focused(),
+            "Value pane should not also render as focused"
+        );
+    }
+
+    #[test]
+    /// MB-R-242 pins the Kind-change trigger for this conversion only: adding the first alias
+    /// through the ADD ALIAS sub-dialog also switches into the selection variant (a non-boolean
+    /// register, `pending_named_values` newly non-empty), but no requirement asks focus to jump
+    /// to Kind for that trigger — it stays wherever it was (the Value pane, mirroring the ADD
+    /// ALIAS button's own position).
+    fn ut_alias_add_triggered_switch_does_not_move_focus_to_kind() {
+        let holding = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let mut dialog = EditInputDialog::from_register("n", "", &holding, "1", None, true);
+        dialog.focus = EditInputDialogFocus::Value;
+        dialog
+            .pending_named_values
+            .push(crate::config::device::NamedValue {
+                name: "a".into(),
+                value: crate::config::device::Scalar::Int(1),
+            });
+        let selection = dialog.to_edit_selection_dialog();
+        assert!(
+            !selection.is_kind_focused(),
+            "alias-ADD trigger should not move focus to Kind"
+        );
     }
 
     #[test]
