@@ -221,7 +221,7 @@ Each value: comma-separated **inclusive** address ranges, e.g. `"0-100,140-160"`
 | `bitmask` | optional string | unset ⇒ full mask | `0x`-prefixed hex or decimal; integer types only | MB-R-014, MB-R-015, MB-R-016 |
 | `length` | usize | `1` | ASCII width in registers (ignored for numeric) | MB-R-011 |
 | `alignment` | enum | `Left` | `Left`, `Right` (ASCII only) | MB-R-019 |
-| `values` | list of `{name, value}` | empty | named/enum-style values for selection registers | — |
+| `values` | list of `{name, value}` | empty | named/enum-style values for selection registers | MB-R-232 |
 | `description` | string | empty | | — |
 | `default` | optional scalar | unset | int, float, or string; written to memory on load | MB-R-079 |
 | `update` | optional string | unset | **legacy**: per-register Lua snippet; migrated into `scripts` on load, never written back | SC-R-025, CS-R-054 |

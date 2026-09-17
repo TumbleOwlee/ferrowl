@@ -92,6 +92,11 @@ pub struct EditInputDialog {
     // Confirm-close popup, opened with Esc.
     #[builder(default)]
     pub close_confirm: Option<CloseConfirmDialog>,
+    // The register's configured default at dialog open (MB-R-228): carried through unchanged
+    // when the Default Value pane is hidden, regardless of any text the pane holds or a later
+    // Access toggle — never re-derived from `default_value`'s (possibly unvalidated) raw input.
+    #[builder(default)]
+    pub seeded_default: Option<Scalar>,
 }
 
 /// The result of confirming the edit dialog: updated register metadata + an optional value to
@@ -109,11 +114,77 @@ pub struct EditedRegister {
 }
 
 impl EditInputDialog {
-    fn is_boolean_kind(&self) -> bool {
+    pub(crate) fn is_boolean_kind(&self) -> bool {
         matches!(
             self.kind.state.get_value().0,
             Kind::Coil | Kind::DiscreteInput
         )
+    }
+
+    fn value_inputs_visible(&self) -> bool {
+        self.is_server || self.access.get_value().0 != ferrowl_codec::Access::ReadOnly
+    }
+
+    fn value_input(&self) -> &str {
+        if self.value_inputs_visible() {
+            self.value.state.input()
+        } else {
+            ""
+        }
+    }
+
+    fn default_value_input(&self) -> &str {
+        if self.value_inputs_visible() {
+            self.default_value.state.input()
+        } else {
+            ""
+        }
+    }
+
+    fn resolved_format(&self) -> Result<RegisterFormat, String> {
+        Ok(if self.is_boolean_kind() {
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            )
+        } else {
+            match self.value_type.state.get_value() {
+                ValueType::Number => {
+                    let selected = self.number_format.state.get_value();
+                    let endian = self.number_endian.state.get_value().0;
+                    let word_order = self.number_word_order.state.get_value().0;
+                    let resolution = Resolution(
+                        self.number_resolution
+                            .state
+                            .input()
+                            .trim()
+                            .parse::<f64>()
+                            .map_err(|_| "Resolution must be a number.".to_string())?,
+                    );
+                    // Bitmask applies to integer formats only; floats ignore it.
+                    let bitfield = if is_integer_format(&selected.0) {
+                        parse_bitmask(self.number_bitmask.state.input())
+                            .map_err(|e| format!("Bitmask {e}."))?
+                    } else {
+                        BitField::default()
+                    };
+                    with_numeric_parts(&selected.0, endian, word_order, resolution, bitfield)
+                }
+                ValueType::Text => {
+                    let alignment = self.text_alignment.state.get_value().0;
+                    let width = self
+                        .text_width
+                        .state
+                        .input()
+                        .trim()
+                        .parse::<usize>()
+                        .map_err(|_| "Width must be a number.".to_string())?;
+                    RegisterFormat::Ascii(alignment, Width(width))
+                }
+            }
+        })
     }
 
     fn validate(&self) -> Result<(), String> {
@@ -140,18 +211,6 @@ impl EditInputDialog {
                     {
                         return Err(format!("Bitmask: {e}"));
                     }
-                    let v = self.value.state.input();
-                    let s = v.trim();
-                    if let Err(e) = encode(format, s) {
-                        return Err(format!("Value: cannot convert '{s}' to number [{e}]"));
-                    }
-                    let v = self.default_value.state.input();
-                    let s = v.trim();
-                    if !s.is_empty()
-                        && let Err(e) = encode(format, s)
-                    {
-                        return Err(format!("Value: cannot convert '{s}' to number [{e}]"));
-                    }
                 }
                 ValueType::Text => {
                     if let ValidateResult::Error(e) = usize::validate(self.text_width.state.input())
@@ -159,6 +218,25 @@ impl EditInputDialog {
                         return Err(format!("Width: {e}"));
                     }
                 }
+            }
+        }
+        // A virtual register's value goes through `str_to_value` (`Scalar::from_input`) on write,
+        // never `encode` (see `set_register_value`), so confirm must not format-check it either.
+        if parse_address(self.address.state.input()) != Ok(Address::Virtual) {
+            let format = self.resolved_format()?;
+            let s = self.value_input();
+            if !s.is_empty()
+                && let Err(e) = encode(&format, s)
+            {
+                return Err(format!("Value: cannot convert '{s}' to number [{e}]"));
+            }
+            let s = self.default_value_input();
+            if !s.is_empty()
+                && let Err(e) = encode(&format, s)
+            {
+                return Err(format!(
+                    "Default Value: cannot convert '{s}' to number [{e}]"
+                ));
             }
         }
         Ok(())
@@ -178,6 +256,7 @@ impl EditInputDialog {
         dialog.is_server = is_server;
         set_input(&mut dialog.label, name);
         set_input(&mut dialog.description, description);
+        dialog.seeded_default = default.cloned();
         if let Some(def) = default {
             set_input(&mut dialog.default_value, &def.to_string());
         }
@@ -206,9 +285,6 @@ impl EditInputDialog {
         } else {
             set_input(&mut dialog.value, value);
         }
-        dialog.label.state.set_focused(false);
-        dialog.value.state.set_focused(true);
-        dialog.focus = EditInputDialogFocus::Value;
         match register.address() {
             Address::Fixed(addr) => set_input(&mut dialog.address, &addr.to_string()),
             Address::Virtual => set_input(&mut dialog.address, "virtual"),
@@ -254,6 +330,12 @@ impl EditInputDialog {
                 }
             }
         }
+        // MB-R-248, MB-R-249: Value if MB-R-151 shows it, else the first eligible field in Tab
+        // order (`SetFocus::set_focused` falls back to the first eligible candidate when the
+        // remembered variant is gated off) — applied last, after every field above that the
+        // eligibility checks (Access, is_server) read.
+        dialog.focus = EditInputDialogFocus::Value;
+        SetFocus::set_focused(&mut dialog, true);
         dialog
     }
 
@@ -264,50 +346,7 @@ impl EditInputDialog {
         let description = self.description.state.input().trim().to_string();
         let address = parse_address(self.address.state.input())?;
 
-        let format = if self.is_boolean_kind() {
-            RegisterFormat::u16(
-                RegisterEndian::Big,
-                RegisterWordOrder::Normal,
-                Resolution(1.0),
-                BitField::default(),
-            )
-        } else {
-            match self.value_type.state.get_value() {
-                ValueType::Number => {
-                    let selected = self.number_format.state.get_value();
-                    let endian = self.number_endian.state.get_value().0;
-                    let word_order = self.number_word_order.state.get_value().0;
-                    let resolution = Resolution(
-                        self.number_resolution
-                            .state
-                            .input()
-                            .trim()
-                            .parse::<f64>()
-                            .map_err(|_| "Resolution must be a number.".to_string())?,
-                    );
-                    // Bitmask applies to integer formats only; floats ignore it.
-                    let bitfield = if is_integer_format(&selected.0) {
-                        parse_bitmask(self.number_bitmask.state.input())
-                            .map_err(|e| format!("Bitmask {e}."))?
-                    } else {
-                        BitField::default()
-                    };
-                    with_numeric_parts(&selected.0, endian, word_order, resolution, bitfield)
-                }
-                ValueType::Text => {
-                    let alignment = self.text_alignment.state.get_value().0;
-                    let width = self
-                        .text_width
-                        .state
-                        .input()
-                        .trim()
-                        .parse::<usize>()
-                        .map_err(|_| "Width must be a number.".to_string())?;
-                    RegisterFormat::Ascii(alignment, Width(width))
-                }
-            }
-        };
-        let is_ascii = matches!(format, RegisterFormat::Ascii(_, _));
+        let format = self.resolved_format()?;
 
         let slave_id = self
             .slave_id
@@ -326,11 +365,11 @@ impl EditInputDialog {
             .build()
             .expect("all register fields are set");
 
-        let input = self.value.state.input().to_string();
-        let value = if is_ascii || !input.trim().is_empty() {
-            Some(input)
-        } else {
+        let s = self.value_input();
+        let value = if s.is_empty() {
             None
+        } else {
+            Some(s.to_string())
         };
         let named_values = if self.pending_named_values.is_empty() {
             None
@@ -338,13 +377,19 @@ impl EditInputDialog {
             Some(self.pending_named_values.clone())
         };
 
-        let default = {
-            let s = self.default_value.state.input().trim();
+        // MB-R-228: a pane hidden by MB-R-151 carries the configured default through unchanged
+        // rather than unsetting it, so this carries `seeded_default` verbatim — the pane's raw
+        // text is never trustworthy here, since Access can toggle it hidden after unchecked text
+        // was typed while it was still visible.
+        let default = if self.value_inputs_visible() {
+            let s = self.default_value_input();
             if s.is_empty() {
                 None
             } else {
                 Some(Scalar::from_input(s))
             }
+        } else {
+            self.seeded_default.clone()
         };
 
         Ok(EditedRegister {
@@ -375,16 +420,44 @@ impl EditInputDialog {
         matches!(self.focus, EditInputDialogFocus::ConfirmButton)
     }
 
+    #[cfg(test)]
+    pub(crate) fn is_kind_focused(&self) -> bool {
+        matches!(self.focus, EditInputDialogFocus::Kind)
+    }
+
+    /// MB-R-242 — leaving a boolean kind (`to_edit_input_dialog`'s only caller) leaves focus on
+    /// Kind rather than `EditInputDialog::new`'s Label default; `SetFocus::set_focused`
+    /// re-derives every widget's `focused` flag from the enum so the rendered highlight matches.
+    pub(crate) fn set_focus_to_kind(&mut self) {
+        self.focus = EditInputDialogFocus::Kind;
+        SetFocus::set_focused(self, true);
+    }
+
+    /// MB-R-247 — a fresh `:add` opens with Label focused; `EditInputDialog::new` already does
+    /// this, but a switch straight into the selection variant (the boolean default Kind) can
+    /// move it, so the `:add` handler re-asserts it unconditionally after any switch.
+    pub(crate) fn set_focus_to_label(&mut self) {
+        self.focus = EditInputDialogFocus::Label;
+        SetFocus::set_focused(self, true);
+    }
+
     /// Convert this dialog into an EditSelectionDialog, preserving shared field state.
     /// Called when the first named value is added and the dialog should switch to selection mode.
     pub fn to_edit_selection_dialog(
         &self,
     ) -> super::selection::EditSelectionDialog<crate::config::device::NamedValue> {
+        use super::selection::{NamedValueSource, boolean_kind_values, unset_sentinel};
         use crate::config::device::{NamedValue, Scalar};
         let values = self.pending_named_values.clone();
-        let mut d = super::selection::EditSelectionDialog::new(values.clone());
+        let boolean = self.is_boolean_kind();
+        let mut d = super::selection::EditSelectionDialog::new(if boolean {
+            vec![]
+        } else {
+            values.clone()
+        });
         d.deletable = self.deletable;
         d.is_server = self.is_server;
+        d.seeded_default.clone_from(&self.seeded_default);
         d.label.state = self.label.state.clone();
         d.description.state = self.description.state.clone();
         d.slave_id.state = self.slave_id.state.clone();
@@ -399,6 +472,38 @@ impl EditInputDialog {
         d.number_bitmask.state = self.number_bitmask.state.clone();
         d.text_alignment.state = self.text_alignment.state.clone();
         d.text_width.state = self.text_width.state.clone();
+
+        if boolean {
+            let mut value_vals = vec![unset_sentinel()];
+            value_vals.extend(boolean_kind_values());
+            *d.value.state.values_mut() = value_vals;
+            d.value.state.set_selection(0);
+
+            *d.default_value.state.values_mut() = boolean_kind_values();
+            let typed = self.default_value.state.input().trim().to_string();
+            // A default the user just typed into the text pane takes precedence (MB-R-235,
+            // the mirror of the reverse conversion's typed-text preference); otherwise fall
+            // back to the carried `seeded_default` under the same canonical-string rule.
+            let on_selected = match typed.as_str() {
+                "1" => true,
+                "0" => false,
+                _ => {
+                    self.seeded_default
+                        .as_ref()
+                        .map(|d| d.to_string())
+                        .as_deref()
+                        == Some("1")
+                }
+            };
+            d.default_value
+                .state
+                .set_selection(if on_selected { 0 } else { 1 });
+            d.value_source = NamedValueSource::BooleanFixed;
+            // MB-R-242: applied last, after every state copy above, so no later assignment
+            // (e.g. `d.kind.state = self.kind.state.clone()`) clobbers the focused flag it sets.
+            d.set_focus_to_kind();
+            return d;
+        }
 
         // Index 0 is the "(no default)" sentinel.
         let mut default_vals = vec![NamedValue {
@@ -508,7 +613,7 @@ use ferrowl_ui::traits::HandleEvents;
 mod apply_tests {
     //! Characterization tests for the `from_register` → `apply` round-trip: editing an existing
     //! register and confirming must reproduce its metadata.
-    use super::EditInputDialog;
+    use super::{EditInputDialog, EditInputDialogFocus};
     use ferrowl_codec::format::{
         Alignment as TextAlignment, BitField, Endian as RegisterEndian, Format as RegisterFormat,
         Resolution, Width, WordOrder as RegisterWordOrder,
@@ -642,6 +747,8 @@ mod apply_tests {
     }
 
     #[test]
+    /// MB-R-246 — a boolean kind always confirms as the default big-endian U16 format,
+    /// regardless of whatever the Type input showed before the Kind switch.
     fn ut_boolean_kind_forces_default_u16_format() {
         let original = reg(
             Kind::Coil,
@@ -655,9 +762,13 @@ mod apply_tests {
                 BitField::default(),
             ),
         );
-        let edited = EditInputDialog::from_register("c", "", &original, "1", None, true)
-            .apply()
-            .expect("valid register should apply");
+        let mut dialog = EditInputDialog::from_register("c", "", &original, "1", None, true);
+        // The Type input starts on Number/U16 (mirroring `original`'s own format); move it away
+        // so a non-boolean fallback in `resolved_format` would diverge from the forced format
+        // below instead of coincidentally matching it.
+        dialog.value_type.state.set_selection(1); // Text
+        crate::module::modbus::dialog::set_input(&mut dialog.text_width, "8");
+        let edited = dialog.apply().expect("valid register should apply");
         assert_eq!(*edited.register.kind(), Kind::Coil);
         // Boolean kinds (Coil/DiscreteInput) always serialize as a default big-endian U16.
         assert_eq!(
@@ -673,9 +784,487 @@ mod apply_tests {
 
     #[test]
     fn ut_empty_add_dialog_does_not_apply() {
-        // A freshly opened "Add" dialog has empty fields (no slave id / value), so confirming it
-        // must fail validation rather than produce a bogus register.
+        // A freshly opened "Add" dialog has an empty Label, so confirming it must fail validation
+        // rather than produce a bogus register.
         assert!(EditInputDialog::new().apply().is_err());
+    }
+
+    #[test]
+    /// MB-R-222 — an empty Value input applies with no value to write, both for a numeric
+    /// register and (since MB-R-227 governs hidden inputs only) for an Ascii register too.
+    fn ut_empty_value_input_applies_with_no_write() {
+        let numeric = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let edited = EditInputDialog::from_register("n", "", &numeric, "", None, true)
+            .apply()
+            .expect("empty value input should apply");
+        assert_eq!(edited.value, None);
+
+        let ascii = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::Ascii(TextAlignment::Left, Width(4)),
+        );
+        let edited = EditInputDialog::from_register("n", "", &ascii, "", None, true)
+            .apply()
+            .expect("empty value input should apply");
+        assert_eq!(edited.value, None);
+    }
+
+    #[test]
+    /// MB-R-223 — a non-empty Value input is evaluated and carried through on confirm.
+    fn ut_non_empty_value_input_is_evaluated_and_carried() {
+        let numeric = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let edited = EditInputDialog::from_register("n", "", &numeric, "42", None, true)
+            .apply()
+            .expect("valid value input should apply");
+        assert_eq!(edited.value, Some("42".to_string()));
+    }
+
+    #[test]
+    /// MB-R-224 — an invalid Value input refuses confirm with an inline error, repeatably.
+    fn ut_invalid_value_input_refuses_confirm() {
+        let numeric = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let dialog = EditInputDialog::from_register("n", "", &numeric, "abc", None, true);
+        let err = dialog
+            .apply()
+            .expect_err("invalid value should refuse confirm");
+        assert!(err.starts_with("Value: "));
+        let err2 = dialog
+            .apply()
+            .expect_err("second apply should refuse the same way");
+        assert!(err2.starts_with("Value: "));
+    }
+
+    #[test]
+    /// MB-R-225 — an empty Default Value input is never a validation error.
+    fn ut_empty_default_value_is_not_an_error() {
+        let numeric = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let edited = EditInputDialog::from_register("n", "", &numeric, "1", None, true)
+            .apply()
+            .expect("empty default value should apply");
+        assert_eq!(edited.default, None);
+    }
+
+    #[test]
+    /// MB-R-226 — an invalid Default Value input refuses confirm with the error on its own input.
+    fn ut_invalid_default_value_refuses_confirm_on_its_own_input() {
+        let numeric = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let mut dialog = EditInputDialog::from_register("n", "", &numeric, "1", None, true);
+        crate::module::modbus::dialog::set_input(&mut dialog.default_value, "abc");
+        let err = dialog
+            .apply()
+            .expect_err("invalid default value should refuse confirm");
+        assert!(err.starts_with("Default Value: "));
+    }
+
+    #[test]
+    /// MB-R-227 — a Value or Default Value pane hidden by MB-R-151 (client, ReadOnly) is never
+    /// evaluated and never blocks confirm, regardless of the text it holds.
+    fn ut_hidden_value_inputs_count_as_empty() {
+        let ro = reg(
+            Kind::HoldingRegister,
+            Access::ReadOnly,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let mut dialog = EditInputDialog::from_register("n", "", &ro, "", None, false);
+        crate::module::modbus::dialog::set_input(&mut dialog.value, "abc");
+        crate::module::modbus::dialog::set_input(&mut dialog.default_value, "abc");
+        let edited = dialog
+            .apply()
+            .expect("hidden panes are never evaluated and never block confirm");
+        assert_eq!(edited.value, None);
+    }
+
+    #[test]
+    /// MB-R-228 — confirming with a pane hidden by MB-R-151 writes no value and carries the
+    /// register's existing stored value and configured default through unchanged: editing a
+    /// client `ReadOnly` register must not unset a previously configured default.
+    fn ut_hidden_panes_preserve_existing_value_and_default() {
+        let ro = reg(
+            Kind::HoldingRegister,
+            Access::ReadOnly,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let default = crate::config::device::Scalar::from_input("3");
+        let dialog = EditInputDialog::from_register("n", "", &ro, "5", Some(&default), false);
+        let edited = dialog.apply().expect("hidden panes never block confirm");
+        assert_eq!(edited.value, None);
+        assert_eq!(edited.default, Some(default));
+    }
+
+    #[test]
+    /// MB-R-228 — a configured default carried by `seeded_default` survives a round trip through
+    /// `EditSelectionDialog` and back: converting a hidden-panes dialog to the selection variant
+    /// and immediately back must not lose the default the middle hop never got to show.
+    fn ut_seeded_default_survives_a_dialog_round_trip() {
+        let ro = reg(
+            Kind::HoldingRegister,
+            Access::ReadOnly,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let default = crate::config::device::Scalar::from_input("1");
+        let dialog = EditInputDialog::from_register("n", "", &ro, "5", Some(&default), false);
+        let selection = dialog.to_edit_selection_dialog();
+        let round_tripped = selection.to_edit_input_dialog();
+        let edited = round_tripped
+            .apply()
+            .expect("hidden panes never block confirm");
+        assert_eq!(edited.default, Some(default));
+    }
+
+    #[test]
+    /// MB-R-235 — switching Kind from a non-boolean to a boolean kind must not drop a default
+    /// just typed into the text Default pane: the resulting selection dialog's Default pane opens
+    /// preselected on `ON`/`OFF` from that typed text, not solely from `seeded_default`.
+    fn ut_typed_default_survives_a_switch_into_a_boolean_kind() {
+        let holding = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let mut dialog = EditInputDialog::from_register("n", "", &holding, "1", None, true);
+        crate::module::modbus::dialog::set_input(&mut dialog.default_value, "1");
+        dialog
+            .kind
+            .state
+            .set_selection(crate::module::modbus::dialog::kind_index(&Kind::Coil));
+        let selection = dialog.to_edit_selection_dialog();
+        assert_eq!(selection.default_value.state.selection(), 0); // ON
+        let edited = selection.apply().expect("boolean dialog should apply");
+        assert_eq!(edited.default, Some(crate::config::device::Scalar::Int(1)));
+
+        let mut dialog2 = EditInputDialog::from_register("n", "", &holding, "0", None, true);
+        crate::module::modbus::dialog::set_input(&mut dialog2.default_value, "0");
+        dialog2
+            .kind
+            .state
+            .set_selection(crate::module::modbus::dialog::kind_index(&Kind::Coil));
+        let selection2 = dialog2.to_edit_selection_dialog();
+        assert_eq!(selection2.default_value.state.selection(), 1); // OFF
+        let edited2 = selection2.apply().expect("boolean dialog should apply");
+        assert_eq!(edited2.default, Some(crate::config::device::Scalar::Int(0)));
+    }
+
+    #[test]
+    /// MB-R-242 — switching Kind to a boolean kind, which swaps the dialog into its selection
+    /// variant, must leave focus on the Kind input, not move it to Value.
+    fn ut_switching_to_a_boolean_kind_leaves_focus_on_kind() {
+        let holding = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let mut dialog = EditInputDialog::from_register("n", "", &holding, "1", None, true);
+        dialog.focus = EditInputDialogFocus::Kind;
+        dialog
+            .kind
+            .state
+            .set_selection(crate::module::modbus::dialog::kind_index(&Kind::Coil));
+        let selection = dialog.to_edit_selection_dialog();
+        assert!(selection.is_kind_focused());
+        assert!(
+            selection.kind.state.focused(),
+            "Kind pane should render as focused"
+        );
+        assert!(
+            !selection.value.state.focused(),
+            "Value pane should not also render as focused"
+        );
+    }
+
+    #[test]
+    /// MB-R-242 pins the Kind-change trigger for this conversion only: adding the first alias
+    /// through the ADD ALIAS sub-dialog also switches into the selection variant (a non-boolean
+    /// register, `pending_named_values` newly non-empty), but no requirement asks focus to jump
+    /// to Kind for that trigger — it stays wherever it was (the Value pane, mirroring the ADD
+    /// ALIAS button's own position).
+    fn ut_alias_add_triggered_switch_does_not_move_focus_to_kind() {
+        let holding = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let mut dialog = EditInputDialog::from_register("n", "", &holding, "1", None, true);
+        dialog.focus = EditInputDialogFocus::Value;
+        dialog
+            .pending_named_values
+            .push(crate::config::device::NamedValue {
+                name: "a".into(),
+                value: crate::config::device::Scalar::Int(1),
+            });
+        let selection = dialog.to_edit_selection_dialog();
+        assert!(
+            !selection.is_kind_focused(),
+            "alias-ADD trigger should not move focus to Kind"
+        );
+    }
+
+    #[test]
+    /// MB-R-248 — an edit dialog opens with the Value pane focused when MB-R-151 shows it.
+    fn ut_edit_opens_focused_on_value_when_visible() {
+        let rw = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let dialog = EditInputDialog::from_register("n", "", &rw, "1", None, true);
+        assert!(dialog.value.state.focused(), "Value pane should be focused");
+        assert!(
+            !dialog.label.state.focused(),
+            "Label pane should not also be focused"
+        );
+    }
+
+    #[test]
+    /// MB-R-249 — where MB-R-151 hides the Value pane (a `ReadOnly` register on a client), an
+    /// edit dialog opens with the first focusable field of its Tab cycle focused instead.
+    fn ut_edit_opens_focused_on_label_when_value_hidden() {
+        let ro = reg(
+            Kind::HoldingRegister,
+            Access::ReadOnly,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let dialog = EditInputDialog::from_register("n", "", &ro, "1", None, false);
+        assert!(
+            dialog.label.state.focused(),
+            "Label pane should be focused (first eligible field, Value hidden)"
+        );
+        assert!(
+            !dialog.value.state.focused(),
+            "Value pane should not be focused while hidden"
+        );
+    }
+
+    #[test]
+    /// MB-R-228 — hiding the Default Value pane by toggling Access to `ReadOnly` after typing an
+    /// unchecked value into it must not carry that raw, never-validated text through as the
+    /// applied default: a hidden pane carries the register's existing configured default,
+    /// unchanged, not whatever text happens to still sit in the widget.
+    fn ut_access_toggle_hiding_default_pane_does_not_leak_raw_text() {
+        let rw = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let seeded_default = crate::config::device::Scalar::from_input("3");
+        // Client dialog (`is_server: false`): the Default Value pane starts visible under
+        // `ReadWrite` and typing into it works normally.
+        let mut dialog =
+            EditInputDialog::from_register("n", "", &rw, "5", Some(&seeded_default), false);
+        crate::module::modbus::dialog::set_input(&mut dialog.default_value, "not-a-number");
+        // Switch Access to ReadOnly, hiding the pane (MB-R-151) without clearing its raw text.
+        dialog
+            .access
+            .state
+            .set_selection(crate::module::modbus::dialog::access_index(
+                &Access::ReadOnly,
+            ));
+        let edited = dialog.apply().expect("hidden panes never block confirm");
+        assert_eq!(edited.default, Some(seeded_default));
+    }
+
+    #[test]
+    /// MB-R-223, MB-R-226, MB-E-094 — a whitespace-only input is non-empty (emptiness is zero
+    /// length, never trimmed): an Ascii register takes the all-space value, a numeric register
+    /// reports a parse error, on both the Value and Default Value inputs.
+    fn ut_whitespace_value_input_is_not_empty() {
+        let ascii = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::Ascii(TextAlignment::Left, Width(4)),
+        );
+        let mut ascii_dialog = EditInputDialog::from_register("n", "", &ascii, "", None, true);
+        crate::module::modbus::dialog::set_input(&mut ascii_dialog.value, "  ");
+        let edited = ascii_dialog
+            .apply()
+            .expect("all-space Ascii value should apply");
+        assert_eq!(edited.value, Some("  ".to_string()));
+
+        let numeric = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Fixed(0),
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let mut numeric_dialog = EditInputDialog::from_register("n", "", &numeric, "1", None, true);
+        crate::module::modbus::dialog::set_input(&mut numeric_dialog.value, " ");
+        let err = numeric_dialog
+            .apply()
+            .expect_err("all-space numeric value should refuse confirm");
+        assert!(err.starts_with("Value: "));
+        assert!(err.contains("' '"));
+
+        let mut numeric_default_dialog =
+            EditInputDialog::from_register("n", "", &numeric, "1", None, true);
+        crate::module::modbus::dialog::set_input(&mut numeric_default_dialog.default_value, " ");
+        let err = numeric_default_dialog
+            .apply()
+            .expect_err("all-space numeric default value should refuse confirm");
+        assert!(err.starts_with("Default Value: "));
+
+        let mut ascii_default_dialog =
+            EditInputDialog::from_register("n", "", &ascii, "1", None, true);
+        crate::module::modbus::dialog::set_input(&mut ascii_default_dialog.default_value, " ");
+        let edited = ascii_default_dialog
+            .apply()
+            .expect("all-space Ascii default value should apply");
+        assert_eq!(
+            edited.default,
+            Some(crate::config::device::Scalar::from_input(" "))
+        );
+    }
+
+    #[test]
+    /// MB-R-223, MB-E-095 — a virtual register's Value/Default Value inputs are evaluated exactly
+    /// as a `:set` write is: `:set` on a virtual register goes through `str_to_value`
+    /// (`Scalar::from_input`), never `encode`, so confirm must not reject text `encode` would.
+    /// A `HoldingRegister`, not `Coil`: a boolean kind no longer stays in this dialog (MB-R-229).
+    fn ut_virtual_register_value_input_is_not_format_encoded() {
+        let virtual_holding = reg(
+            Kind::HoldingRegister,
+            Access::ReadWrite,
+            Address::Virtual,
+            1,
+            RegisterFormat::u16(
+                RegisterEndian::Big,
+                RegisterWordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ),
+        );
+        let dialog = EditInputDialog::from_register("n", "", &virtual_holding, "abc", None, true);
+        let edited = dialog
+            .apply()
+            .expect("virtual register's value is not encode-checked");
+        assert_eq!(edited.value, Some("abc".to_string()));
     }
 }
 

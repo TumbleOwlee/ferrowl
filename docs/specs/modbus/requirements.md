@@ -496,6 +496,62 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-151** — The add/edit register dialog's Value and Default Value inputs are hidden and unfocusable for a `ReadOnly` register on a **client** module (MB-R-159 excludes it from client writes). On a **server**, where MB-R-090 bypasses access checks, they stay shown and editable regardless of access.
 
+**MB-R-222** — An empty Value input in the add/edit register dialog is valid: confirming evaluates nothing for that input and issues no value write, so a newly added register keeps its `default` seeding (MB-R-079, MB-R-080) and an edited register keeps its currently stored value.
+
+**MB-R-223** — A non-empty Value *text* input in the add/edit register dialog is evaluated against the register's format on confirm exactly as a `:set` write is (MB-R-007, MB-R-008), and the resulting value is written on confirm.
+
+**MB-R-224** — An MB-R-223 evaluation failure refuses the confirm: the dialog stays open with an inline error on the Value input and neither the register definition nor any store cell is changed.
+
+**MB-R-225** — An empty *shown* Default Value *text* input in the add/edit register dialog leaves the register definition's `default` unset (MB-R-079, MB-R-080 seeding applies) and is never a validation error.
+
+**MB-R-226** — A non-empty Default Value *text* input in the add/edit register dialog is evaluated against the register's format on confirm and, on failure, refuses the confirm under MB-R-224's rule with the inline error on the Default Value input.
+
+**MB-R-227** — A Value or Default Value pane hidden by MB-R-151 is never evaluated and never blocks confirm, regardless of any text it held before being hidden, so a `ReadOnly` register on a client module is always confirmable.
+
+**MB-R-228** — Confirming with a pane hidden by MB-R-151 writes no value through that pane and carries the register's existing stored value and configured `default` through unchanged, on add as on edit; a hidden pane never unsets `default` (MB-R-225 applies to shown inputs only).
+
+**MB-R-229** — In the add/edit **register** dialog, and nowhere else, a register of kind `Coil` or `DiscreteInput` presents its Value pane in that dialog's selection variant by default, offering exactly `ON`, `OFF` (MB-R-232's fixed pair, never any alias list the register declares) plus a not-set state `UNSET`, selected `UNSET`, never a free-text input.
+
+**MB-R-230** — `ON` in an MB-R-229 selection is the value 1 and `OFF` is 0, the same set/clear encoding a coil write uses (MB-R-061).
+
+**MB-R-231** — `UNSET` in an MB-R-229 Value pane behaves exactly as an empty Value input: nothing is evaluated, no value is written, and the register's existing stored value is preserved (MB-R-222, MB-R-228).
+
+**MB-R-232** — Confirming a register of kind `Coil` or `DiscreteInput` through the add/edit register dialog gives it exactly two named values, `ON` = 1 and `OFF` = 0 (MB-R-230): any other list the register carried is replaced by that pair, and a boolean register with no list gains it. Loading a config leaves its declared list as written.
+
+**MB-R-233** — The add/edit register dialog offers no add and no remove control for the named values of a `Coil` or `DiscreteInput` register (MB-R-232), the pair being fixed.
+
+**MB-R-234** — Where the add/edit register dialog shows a Default Value pane at all (MB-R-151), a register of kind `Coil` or `DiscreteInput` presents that pane as a two-state selection over `ON` and `OFF` (MB-R-230), never offering `UNSET` and never a free-text input.
+
+**MB-R-235** — A shown MB-R-234 Default Value pane opens preselected to the register's configured `default`, and at `OFF` when adding a register or when the register has no configured `default`.
+
+**MB-R-236** — Confirming through a *shown* MB-R-234 Default Value pane sets the register definition's `default` to 1 for `ON` and 0 for `OFF` (MB-R-230), so a boolean register confirmed with that pane shown always carries a default and MB-R-225's unset case cannot arise for it; a pane hidden by MB-R-151 writes nothing and preserves the configured default under MB-R-228.
+
+**MB-R-237** — Confirming the add/edit register dialog opened as *add* (`:add`, client or server) appends a new register to the module's register list and never replaces the selected row, whichever row is selected.
+
+**MB-R-238** — Confirming the add/edit register dialog opened as *edit* replaces the selected register in place, keeping its position in the module's register list.
+
+**MB-R-239** — MB-R-237 and MB-R-238 hold identically for the dialog's text inputs and for its selection variant (MB-R-229, MB-R-234), the pane kind never affecting whether a register is appended or replaced.
+
+**MB-R-240** — Changing the add/edit register dialog's Kind to `Coil` or `DiscreteInput` replaces the dialog's working named-value list with exactly MB-R-232's fixed pair, `ON` = 1 and `OFF` = 0.
+
+**MB-R-241** — Changing the add/edit register dialog's Kind from `Coil` or `DiscreteInput` to any other kind leaves the dialog's working named-value list empty; neither the fixed pair (MB-R-240) nor any list the register declared before is carried over.
+
+**MB-R-242** — Changing the add/edit register dialog's Kind leaves focus on the Kind input, including when the change swaps the Value and Default Value panes between the text and selection variants (MB-R-229, MB-R-234).
+
+**MB-R-243** — Where MB-R-233 hides the add and remove named-value controls, the register dialog's selection pane spans the full row, taking the width those controls would have occupied rather than leaving it blank.
+
+**MB-R-244** — While the add/edit register dialog's Kind is `Coil` or `DiscreteInput`, its Type input displays `Boolean` and cannot be changed.
+
+**MB-R-245** — MB-R-244's `Boolean` is a label of the dialog only, never a stored format: no such format exists (`data-contract.md` `## Data formats` lists thirteen), the definition stores MB-R-246's format instead, and a boolean register's value never depends on that format, its two states being MB-R-230's fixed `ON` = 1 and `OFF` = 0.
+
+**MB-R-246** — Confirming a register of kind `Coil` or `DiscreteInput` through the add/edit register dialog stores the format a coil write is already encoded through — `U16`, `Big` endian, `Normal` word order, resolution 1.0, no bit-field mask — whatever the Type input showed before the Kind switch.
+
+**MB-R-247** — The add/edit register dialog opened as *add* (`:add`) opens with its Label input focused.
+
+**MB-R-248** — The add/edit register dialog opened as *edit* opens with its Value pane focused, the text input or the selection (MB-R-229) according to the register's kind.
+
+**MB-R-249** — Where MB-R-151 hides the Value pane, an edit dialog (MB-R-248) opens with the first focusable field of its `Tab` cycle focused instead, UI-R-078's skipping applied.
+
 **MB-R-152** — A monitor module's displayed status follows MB-R-137's three-state rule with "serial port open" for "transport connected": `CONNECTED` while the port is open and read; `RECONNECTING` while the task runs but the port is not open (MB-R-130–MB-R-134, MB-R-192); `DISCONNECTED` while the task is not running.
 
 **MB-R-154** — A format's display text is its name followed by a parenthesized qualifier: numeric → byte order (`Big Endian` or `Little Endian`); `Ascii` → alignment (`Left` or `Right`).

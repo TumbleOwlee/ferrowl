@@ -509,7 +509,7 @@ enabled = true
 | `bitmask` | *(none)* | Bit-field mask for integer types, as a hex (`"0xFF00"`) or decimal string; the shift is derived from the mask's trailing zeros. Ignored for float and ASCII types. |
 | `length` | `1` | ASCII width in registers (ignored for numeric types). |
 | `alignment` | `Left` | ASCII alignment: `Left` or `Right`. |
-| `values` | `[]` | Named values for selection-style registers. |
+| `values` | `[]` | Named values for selection-style registers. A `Coil`/`DiscreteInput` register confirmed through the add/edit register dialog always ends up with the fixed pair `ON` = 1, `OFF` = 0 — the dialog offers no alias editing for it. |
 | `default` | *(none)* | Default value written to memory on startup / configuration load. |
 | `update` | *(none)* | *Deprecated.* Legacy per-register Lua snippet; migrated on load into the global `[[scripts]]` list (named after the register) and never written back. |
 | `description` | `""` | Free-text description. |
