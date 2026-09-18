@@ -1,4 +1,4 @@
-//! Load, save, and convert serde-serializable data as TOML or JSON files.
+//! Load and save serde-serializable data as TOML or JSON files.
 
 use clap::ValueEnum;
 use serde::{Serialize, de::DeserializeOwned};
@@ -153,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    /// CS-R-004 — a value saves and loads through TOML to an equal value.
+    /// A value saves and loads through TOML to an equal value.
     fn ut_toml_save_load_round_trip() {
         let dir = reserve_temp_dir("ferrowl_convert");
         let path = dir.join("sample.toml");
@@ -192,7 +192,7 @@ mod tests {
     }
 
     #[test]
-    /// CS-R-004 — a value saves and loads through JSON to an equal value.
+    /// A value saves and loads through JSON to an equal value.
     fn ut_json_save_load_round_trip() {
         let dir = reserve_temp_dir("ferrowl_convert");
         let path = dir.join("sample.json");
