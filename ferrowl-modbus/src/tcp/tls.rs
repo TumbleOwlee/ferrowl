@@ -17,7 +17,7 @@ use rust_modbus::{
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
-use crate::TcpError;
+use crate::{SelfSignedStep, TcpError, TlsError};
 
 /// TLS material for a Modbus/TCP endpoint (MB-R-104): a role-pure `server` policy (consulted
 /// only when this endpoint runs as a server) and a role-pure `client` policy (consulted only
@@ -57,14 +57,25 @@ pub fn new_self_signed_cache() -> SelfSignedCache {
 /// configuration-error tier (MB-R-107/108, edge-cases.md "malformed PEM").
 pub(crate) fn read_pem(path: &str) -> Result<Vec<u8>, TcpError> {
     let resolved = ferrowl_util::path::expand(path);
-    std::fs::read(&resolved)
-        .map_err(|e| TcpError::Configuration(format!("failed to read {path}: {e}")))
+    std::fs::read(&resolved).map_err(|e| {
+        TlsError::Io {
+            path: path.to_string(),
+            source: e,
+        }
+        .into()
+    })
 }
 
-/// Map any `rust_modbus` failure encountered while assembling TLS material (a bad
-/// PEM, an untrusted root, ...) onto the same configuration-error tier.
-pub(crate) fn map_tls_err(e: rust_modbus::Error) -> TcpError {
-    TcpError::Configuration(e.to_string())
+/// Map any `rust_modbus` failure encountered while assembling TLS material for the named
+/// path onto the typed PEM-parse case (MB-R-251).
+fn pem_err(path: &str) -> impl Fn(rust_modbus::Error) -> TcpError + '_ {
+    move |e| {
+        TlsError::Pem {
+            path: path.to_string(),
+            source: e,
+        }
+        .into()
+    }
 }
 
 /// A client-side socket that is either plain TCP or TLS-terminated TCP (MB-R-104),
@@ -141,7 +152,7 @@ pub(crate) fn build_client_tls_config(
 ) -> Result<Option<TlsClientConfig>, TcpError> {
     policy
         .validate()
-        .map_err(|e| TcpError::Configuration(e.to_string()))?;
+        .map_err(|e| TcpError::Tls(TlsError::from(e)))?;
     let (verification, identity_source) = match policy {
         ClientTlsPolicy::None {} => return Ok(None),
         ClientTlsPolicy::Tls { verification } => (verification, None),
@@ -155,14 +166,14 @@ pub(crate) fn build_client_tls_config(
         CertVerification::RootStore { extra_ca_files } => {
             let mut roots = RootStore::native();
             for path in extra_ca_files {
-                roots.add_pem(&read_pem(path)?).map_err(map_tls_err)?;
+                roots.add_pem(&read_pem(path)?).map_err(pem_err(path))?;
             }
             ServerCertVerification::Verify(roots)
         }
         CertVerification::CaFiles { ca_files } => {
             let mut roots = RootStore::empty();
             for path in ca_files {
-                roots.add_pem(&read_pem(path)?).map_err(map_tls_err)?;
+                roots.add_pem(&read_pem(path)?).map_err(pem_err(path))?;
             }
             ServerCertVerification::Verify(roots)
         }
@@ -172,17 +183,15 @@ pub(crate) fn build_client_tls_config(
             cert_file,
             key_file,
         }) => Some(ClientIdentity {
-            cert_chain: load_pem_cert_chain(&read_pem(cert_file)?).map_err(map_tls_err)?,
-            key: load_pem_private_key(&read_pem(key_file)?).map_err(map_tls_err)?,
+            cert_chain: load_pem_cert_chain(&read_pem(cert_file)?).map_err(pem_err(cert_file))?,
+            key: load_pem_private_key(&read_pem(key_file)?).map_err(pem_err(key_file))?,
         }),
         Some(CertSource::SelfSigned {}) => {
             let (cert_chain, key) = resolve_self_signed("ferrowl-modbus-client", cache)?;
             Some(ClientIdentity { cert_chain, key })
         }
         Some(CertSource::Ephemeral {}) => {
-            return Err(TcpError::Configuration(
-                ferrowl_util::tls::PolicyError::EphemeralClientIdentity.to_string(),
-            ));
+            return Err(TlsError::EphemeralClientIdentity.into());
         }
         None => None,
     };
@@ -212,19 +221,21 @@ pub(crate) fn resolve_server_identity(
             // Any explicit configuration clears the cache: a later reversion to self-signed
             // must regenerate rather than reuse material from before the explicit interlude.
             *cache.lock() = None;
-            let chain =
-                rust_modbus::load_pem_cert_chain(&read_pem(cert_file)?).map_err(map_tls_err)?;
+            let chain = rust_modbus::load_pem_cert_chain(&read_pem(cert_file)?)
+                .map_err(pem_err(cert_file))?;
             // A PEM document with no certificate blocks at all (garbage input) parses
             // successfully to an empty chain rather than erroring; catch that here so it
             // fails at the same TLS-configuration-error tier as every other malformed-PEM
             // case (edge-cases.md "TLS boundaries"), rather than surfacing later, at TLS
             // listener bind time, as a bare `Error::Server(Error::TlsHandshake)`.
             if chain.is_empty() {
-                return Err(TcpError::Configuration(format!(
-                    "{cert_file} contains no certificate"
-                )));
+                return Err(TlsError::NoCertificates {
+                    path: cert_file.clone(),
+                }
+                .into());
             }
-            let k = rust_modbus::load_pem_private_key(&read_pem(key_file)?).map_err(map_tls_err)?;
+            let k = rust_modbus::load_pem_private_key(&read_pem(key_file)?)
+                .map_err(pem_err(key_file))?;
             Ok((chain, k, false))
         }
         CertSource::Ephemeral {} => {
@@ -245,19 +256,29 @@ fn generate_self_signed(
     if host != "localhost" {
         names.push("localhost".to_string());
     }
-    let mut params = rcgen::CertificateParams::new(names)
-        .map_err(|e| TcpError::Configuration(format!("self-signed cert generation failed: {e}")))?;
+    let mut params = rcgen::CertificateParams::new(names).map_err(|e| TlsError::SelfSigned {
+        step: SelfSignedStep::CertGeneration,
+        detail: e.to_string(),
+    })?;
     params
         .distinguished_name
         .push(rcgen::DnType::CommonName, "ferrowl Modbus");
-    let key_pair = rcgen::KeyPair::generate()
-        .map_err(|e| TcpError::Configuration(format!("self-signed key generation failed: {e}")))?;
+    let key_pair = rcgen::KeyPair::generate().map_err(|e| TlsError::SelfSigned {
+        step: SelfSignedStep::KeyGeneration,
+        detail: e.to_string(),
+    })?;
     let cert = params
         .self_signed(&key_pair)
-        .map_err(|e| TcpError::Configuration(format!("self-signed cert generation failed: {e}")))?;
+        .map_err(|e| TlsError::SelfSigned {
+            step: SelfSignedStep::CertGeneration,
+            detail: e.to_string(),
+        })?;
     let cert_der = cert.der().clone();
-    let key_der = PrivateKeyDer::try_from(key_pair.serialize_der())
-        .map_err(|e| TcpError::Configuration(format!("self-signed key encoding failed: {e}")))?;
+    let key_der =
+        PrivateKeyDer::try_from(key_pair.serialize_der()).map_err(|e| TlsError::SelfSigned {
+            step: SelfSignedStep::KeyEncoding,
+            detail: e.to_string(),
+        })?;
     Ok((vec![cert_der], key_der))
 }
 
@@ -283,7 +304,7 @@ pub(crate) fn build_server_tls_config(
 ) -> Result<Option<(TlsServerConfig, bool)>, TcpError> {
     policy
         .validate()
-        .map_err(|e| TcpError::Configuration(e.to_string()))?;
+        .map_err(|e| TcpError::Tls(TlsError::from(e)))?;
     let (identity, verification) = match policy {
         ServerTlsPolicy::None {} => return Ok(None),
         ServerTlsPolicy::Tls { identity } => (identity, None),
@@ -298,15 +319,13 @@ pub(crate) fn build_server_tls_config(
         Some(CertVerification::CaFiles { ca_files }) => {
             let mut roots = RootStore::empty();
             for ca in ca_files {
-                roots.add_pem(&read_pem(ca)?).map_err(map_tls_err)?;
+                roots.add_pem(&read_pem(ca)?).map_err(pem_err(ca))?;
             }
             ClientCertPolicy::Require(roots)
         }
         Some(CertVerification::Skip {}) => ClientCertPolicy::AllowAny,
         Some(CertVerification::RootStore { .. }) => {
-            return Err(TcpError::Configuration(
-                ferrowl_util::tls::PolicyError::RootStoreOnServer.to_string(),
-            ));
+            return Err(TlsError::RootStoreOnServer.into());
         }
     };
     Ok(Some((
@@ -671,10 +690,12 @@ mod tests {
         assert!(matches!(built.client_certs, ClientCertPolicy::AllowAny));
     }
 
-    /// MB-R-172 — `RootStore` verification is rejected on a server before either builder runs.
+    /// MB-R-167, MB-R-172, MB-R-251 — `RootStore` verification is rejected on a server before either
+    /// builder runs, as the typed `TlsError::RootStoreOnServer` case.
     #[test]
     fn ut_server_policy_rejects_root_store_verification() {
         use super::build_server_tls_config;
+        use crate::{TcpError, TlsError};
         use ferrowl_util::tls::{CertSource, CertVerification, ServerTlsPolicy};
 
         let cache = new_self_signed_cache();
@@ -684,6 +705,133 @@ mod tests {
                 extra_ca_files: vec![],
             },
         };
-        assert!(build_server_tls_config(&policy, "localhost", &cache).is_err());
+        let result = build_server_tls_config(&policy, "localhost", &cache);
+        assert!(matches!(
+            result,
+            Err(TcpError::Tls(TlsError::RootStoreOnServer))
+        ));
+    }
+
+    /// MB-R-251, MB-R-167 — a client `Mutual` with an empty `ca_files` list is rejected as the
+    /// typed `TlsError::EmptyCaFiles` case.
+    #[test]
+    fn ut_client_policy_rejects_empty_ca_files() {
+        use super::build_client_tls_config;
+        use crate::{TcpError, TlsError};
+        use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy};
+
+        let cache = new_self_signed_cache();
+        let (cert_pem, key_pem) = cert_and_key_pem();
+        let dir = reserve_temp_dir("ferrowl_modbus_tcp_tls");
+        let cert_file = write_pem(&dir, "cert", &cert_pem);
+        let key_file = write_pem(&dir, "key", &key_pem);
+        let policy = ClientTlsPolicy::Mutual {
+            verification: CertVerification::CaFiles { ca_files: vec![] },
+            identity: CertSource::Files {
+                cert_file,
+                key_file,
+            },
+        };
+        let result = build_client_tls_config(&policy, &cache);
+        assert!(matches!(result, Err(TcpError::Tls(TlsError::EmptyCaFiles))));
+    }
+
+    /// MB-R-251, MB-R-167 — a client `Mutual` with `identity: CertSource::Ephemeral` is rejected
+    /// as the typed `TlsError::EphemeralClientIdentity` case.
+    #[test]
+    fn ut_client_policy_rejects_ephemeral_identity() {
+        use super::build_client_tls_config;
+        use crate::{TcpError, TlsError};
+        use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy};
+
+        let cache = new_self_signed_cache();
+        let policy = ClientTlsPolicy::Mutual {
+            verification: CertVerification::RootStore {
+                extra_ca_files: vec![],
+            },
+            identity: CertSource::Ephemeral {},
+        };
+        let result = build_client_tls_config(&policy, &cache);
+        assert!(matches!(
+            result,
+            Err(TcpError::Tls(TlsError::EphemeralClientIdentity))
+        ));
+    }
+
+    /// MB-R-251, MB-E-063 — an unreadable path through `read_pem` yields the typed `Io` case,
+    /// with `path` the configured (pre-expansion) string.
+    #[test]
+    fn ut_read_pem_unreadable_yields_tls_io() {
+        use super::read_pem;
+        use crate::{TcpError, TlsError};
+
+        let path = "/nonexistent/ferrowl-modbus-tls-test.pem";
+        let result = read_pem(path);
+        match result {
+            Err(TcpError::Tls(TlsError::Io { path: p, .. })) => assert_eq!(p, path),
+            other => panic!("expected TcpError::Tls(TlsError::Io), got {other:?}"),
+        }
+    }
+
+    /// MB-R-251, MB-E-063 — a readable file holding a corrupt PEM block yields the typed `Pem`
+    /// case.
+    #[test]
+    fn ut_build_server_tls_config_corrupt_pem_yields_tls_pem() {
+        use super::build_server_tls_config;
+        use crate::{TcpError, TlsError};
+        use ferrowl_util::tls::{CertSource, ServerTlsPolicy};
+
+        let dir = reserve_temp_dir("ferrowl_modbus_tcp_tls");
+        let cert_file = dir.join("corrupt-cert.pem");
+        std::fs::write(
+            &cert_file,
+            "-----BEGIN CERTIFICATE-----\nnot base64 at all !!!\n-----END CERTIFICATE-----\n",
+        )
+        .expect("write corrupt pem");
+        let (_cert_pem, key_pem) = cert_and_key_pem();
+        let key_file = write_pem(&dir, "key", &key_pem);
+
+        let cache = new_self_signed_cache();
+        let policy = ServerTlsPolicy::Tls {
+            identity: CertSource::Files {
+                cert_file: cert_file.to_string_lossy().into_owned(),
+                key_file,
+            },
+        };
+        let expected_path = cert_file.to_string_lossy().into_owned();
+        let result = build_server_tls_config(&policy, "localhost", &cache);
+        match result {
+            Err(TcpError::Tls(TlsError::Pem { path, .. })) => assert_eq!(path, expected_path),
+            other => panic!("expected TcpError::Tls(TlsError::Pem), got {other:?}"),
+        }
+    }
+
+    /// MB-R-251, MB-E-063 — a well-formed but certificate-free cert file yields the typed
+    /// `NoCertificates` case.
+    #[test]
+    fn ut_build_server_tls_config_no_certificates_yields_tls_no_certificates() {
+        use super::build_server_tls_config;
+        use crate::{TcpError, TlsError};
+        use ferrowl_util::tls::{CertSource, ServerTlsPolicy};
+
+        let dir = reserve_temp_dir("ferrowl_modbus_tcp_tls");
+        let cert_file = write_pem(&dir, "empty-cert", "not a pem file at all");
+        let (_cert_pem, key_pem) = cert_and_key_pem();
+        let key_file = write_pem(&dir, "key", &key_pem);
+
+        let cache = new_self_signed_cache();
+        let policy = ServerTlsPolicy::Tls {
+            identity: CertSource::Files {
+                cert_file: cert_file.clone(),
+                key_file,
+            },
+        };
+        let result = build_server_tls_config(&policy, "localhost", &cache);
+        match result {
+            Err(TcpError::Tls(TlsError::NoCertificates { path })) => {
+                assert_eq!(path, cert_file)
+            }
+            other => panic!("expected TlsError::NoCertificates, got {other:?}"),
+        }
     }
 }

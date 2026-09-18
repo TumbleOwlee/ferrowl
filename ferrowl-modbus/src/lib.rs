@@ -31,7 +31,7 @@ pub mod udp;
 
 pub use command::{Command, ServerCommand};
 pub use conn_state::ConnectedCell;
-pub use error::{Error, ModbusError, SerialError, TcpError};
+pub use error::{Error, ModbusError, SelfSignedStep, SerialError, TcpError, TlsError};
 pub use key::{Key, KeyParams, SlaveKey};
 pub use log::LogFn;
 pub use operation::Operation;
