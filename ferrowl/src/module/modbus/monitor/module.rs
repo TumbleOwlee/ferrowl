@@ -121,20 +121,12 @@ impl ModbusMonitorModule {
     /// again. `name`/`endpoint`/`reconnect`/`file_sink` rebuild from `spec`/`device`, exactly as
     /// `new()` would.
     ///
-    /// Any previously running connection (`command_tx`/`task`) is dropped rather than carried
-    /// over: the sender is simply dropped (closing the channel), and any still-running task is
-    /// `abort()`ed outright (the same fallback `stop()` itself uses when a graceful
-    /// `Terminate`-then-wait doesn't finish in time) since there is no `async` context here to
-    /// await a graceful stop. The caller is expected to `:start` again afterwards, exactly as it
-    /// already had to after a fresh `new()`'d module.
+    /// The caller must have already settled its own deferred stop (`request_stop`/`poll_stop`,
+    /// MB-R-233) before calling this: `command_tx`/`task` are therefore already `None` and the
+    /// serial-path claim already released by that settle, not by this call. The rebuilt instance
+    /// is not started (MB-R-232); the caller is expected to `:start` it explicitly afterwards,
+    /// exactly as it already had to after a fresh `new()`'d module.
     pub fn reconfigure(self, spec: &ModuleSpec, device: &MonitorDeviceConfig) -> Self {
-        // MB-R-150 — release any claim this instance held before rebuilding: "recovers…once the
-        // conflicting instance stops" applies just as much to a reconfigure as to a stop.
-        self.serial_paths.release(&self.name);
-        if let Some(task) = self.task {
-            task.abort();
-        }
-
         let file_sink: FileSink = Arc::new(std::sync::Mutex::new(None));
         let _ = open_sink(&file_sink, device.log_file.as_deref(), &spec.name);
 
@@ -740,6 +732,34 @@ mod tests {
         }
     }
 
+    /// MB-R-230 — a receive task that never reacts to the `Terminate` sent by `request_stop`
+    /// (here, a task with no `command_tx` counterpart at all, so nothing is ever listening) is
+    /// still ended by `poll_stop` once the 100 ms grace period has passed: the join is aborted,
+    /// mapping to `Ok(())`, and `task` is left `None`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_monitor_stop_aborts_a_task_that_outlives_the_grace_period() {
+        let mut module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device_with_defs());
+        module.task = Some(tokio::spawn(async {
+            std::future::pending::<Result<(), ferrowl_modbus::Error>>().await
+        }));
+
+        module.request_stop().await.expect("request_stop");
+        let before = tokio::time::Instant::now();
+        let result = loop {
+            if let Some(result) = module.poll_stop().await {
+                break result;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
+        };
+        assert!(
+            before.elapsed() >= tokio::time::Duration::from_millis(90),
+            "must wait out the grace period before aborting, took {:?}",
+            before.elapsed()
+        );
+        assert!(result.is_ok(), "a cancelled join must map to Ok");
+        assert!(module.task.is_none());
+    }
+
     /// MB-R-191 — a monitor's start() rejects a non-serial endpoint with the role/transport
     /// compatibility error, the enforcement point nothing can bypass (a hand-edited session
     /// file skips the setup dialog's own check).
@@ -859,9 +879,11 @@ mod tests {
         assert!(!reconfigured.reconnect);
     }
 
-    /// `reconfigure` never leaves a previously running task's `command_tx`/
-    /// `task` handle behind (would leak a detached background task); the reconfigured instance
-    /// always starts in the same not-yet-started state a fresh `new()` would.
+    /// `reconfigure` requires the caller to have already settled its own deferred stop
+    /// (`request_stop`/`poll_stop`, MB-R-233): a previously running task's `command_tx`/`task`
+    /// handle is therefore already `None` by the time `reconfigure` runs, and the reconfigured
+    /// instance carries that forward, starting in the same not-yet-started state a fresh
+    /// `new()` would.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn ut_reconfigure_drops_any_previously_running_connection() {
         let mut device = device_with_defs();
@@ -872,6 +894,14 @@ mod tests {
             .await
             .expect("start always succeeds for a valid transport");
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        module
+            .stop()
+            .await
+            .expect("stop settles before reconfigure, per MB-R-233");
+        assert!(
+            module.command_tx.is_none() && module.task.is_none(),
+            "the settle itself (not reconfigure) must have already dropped the connection"
+        );
 
         let reconfigured = module.reconfigure(&spec(bad_rtu_endpoint()), &device);
         assert!(reconfigured.command_tx.is_none());
@@ -901,9 +931,10 @@ mod tests {
         assert_eq!(registry.conflict("B", &path), None);
     }
 
-    /// MB-R-150 — `reconfigure()` releases the previous claim and carries the same shared
-    /// registry forward, so a subsequent `start()` on the reconfigured instance still
-    /// participates in the same session-wide conflict check.
+    /// MB-R-150 — the settle that must precede `reconfigure()` (MB-R-233) releases the previous
+    /// claim, and `reconfigure()` carries the same shared registry forward, so a subsequent
+    /// `start()` on the reconfigured instance still participates in the same session-wide
+    /// conflict check.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn ut_monitor_reconfigure_releases_old_claim_and_carries_registry() {
         use crate::module::modbus::SerialPathRegistry;
@@ -921,10 +952,14 @@ mod tests {
             .await;
         assert_eq!(registry.conflict("B", &path), Some("mon1".to_string()));
 
-        let mut reconfigured = module.reconfigure(&spec(bad_rtu_endpoint()), &device);
-        // The old claim must be released by reconfigure itself, before any restart.
+        module
+            .stop()
+            .await
+            .expect("stop settles before reconfigure, per MB-R-233");
+        // The old claim must be released by the settled stop, before any reconfigure/restart.
         assert_eq!(registry.conflict("B", &path), None);
 
+        let mut reconfigured = module.reconfigure(&spec(bad_rtu_endpoint()), &device);
         let _ = reconfigured
             .start(|_: String| async {}, |_: String| async {})
             .await;

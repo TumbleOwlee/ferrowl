@@ -414,6 +414,68 @@ mod tests {
     }
 
     #[tokio::test]
+    /// UI-R-316, UI-R-350 — closing a tab whose stop was signalled by an applied setup edit
+    /// (not just `:stop`/`:restart`/`:reload`) still waits for it to settle within the same
+    /// 1 s bound.
+    async fn ut_tab_close_settles_a_pending_edit_apply() {
+        use crate::config::{Endpoint, ModuleSpec, MonitorDeviceConfig, Role};
+        use crate::module::modbus::{ModbusMonitorModule, ModbusMonitorModuleView};
+        use crate::module::view::ModuleView;
+
+        let spec = ModuleSpec {
+            name: "mon1".to_string(),
+            device: String::new(),
+            role: Role::Monitor,
+            endpoint: Endpoint::Rtu {
+                path: "/dev/none".to_string(),
+                baud_rate: 9600,
+                parity: None,
+                data_bits: None,
+                stop_bits: None,
+            },
+        };
+        let mut device = MonitorDeviceConfig::default();
+        device.reconnect = Some(true);
+        let module = ModbusMonitorModule::new(&spec, &device);
+        let mut v = ModbusMonitorModuleView::new(module, spec.clone(), device);
+        v.handle_command("start").await;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        v.handle_command("edit").await;
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
+        // One manual tick: promotes the resolved edit into a signalled, still-settling stop —
+        // the same state a real tick loop would have reached by the time `:qall` runs.
+        v.refresh().await;
+        assert!(v.lifecycle_pending());
+
+        let log = v.log();
+        let (b, _hb) = MockView::pair("b");
+        let mut app = build_app(vec![Box::new(v), b.boxed()]);
+
+        assert!(!app.run_command("quit").await);
+        assert_eq!(
+            app.tabs.titles.len(),
+            1,
+            "the tab is removed once the applied edit's stop settles"
+        );
+
+        // `Cmd::Quit` re-requests a plain stop over whatever follow-up was pending (closing the
+        // tab makes the apply's own follow-up moot), but the deferred stop it thereby signals is
+        // the same one the apply already started settling — the settle loop must still join it.
+        let lines = log
+            .read()
+            .await
+            .peek_n(crate::app::LOG_SIZE)
+            .into_iter()
+            .map(|(_, _, l)| l)
+            .collect::<Vec<_>>();
+        assert!(
+            lines.iter().any(|l| l.contains("Stopped monitor")),
+            "expected the settle to have completed within quit, got {lines:?}"
+        );
+    }
+
+    #[tokio::test]
     /// CS-R-030, CS-R-069, CS-R-070 — `:write` saves the current instances as a session file,
     /// defaulting the target to `session.toml` and choosing the encoding from the path extension.
     async fn ut_write_defaults_to_session_toml_and_encodes_by_extension() {
