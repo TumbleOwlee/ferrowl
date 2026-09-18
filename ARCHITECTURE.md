@@ -11,9 +11,35 @@ Ferrowl is a Cargo workspace (resolver `"3"`, edition 2024) building one binary,
 `ferrowl`, from fourteen crates. All fourteen are versioned in lockstep; none is
 published independently.
 
-<p align="center">
-    <img src="./images/architecture.svg" alt="crate dependency graph">
-</p>
+```mermaid
+graph TD
+    ferrowl --> ferrowl_codec
+    ferrowl --> ferrowl_lua
+    ferrowl --> ferrowl_modbus
+    ferrowl --> ferrowl_ocpp
+    ferrowl --> ferrowl_ring
+    ferrowl --> ferrowl_store
+    ferrowl --> ferrowl_syntax
+    ferrowl --> ferrowl_templates
+    ferrowl --> ferrowl_ui
+    ferrowl --> ferrowl_ui_derive
+    ferrowl --> ferrowl_util
+    ferrowl_modbus --> ferrowl_codec
+    ferrowl_modbus --> ferrowl_store
+    ferrowl_modbus --> ferrowl_util
+    ferrowl_ocpp --> ferrowl_util
+    ferrowl_lua --> ferrowl_lua_derive
+    ferrowl_ui --> ferrowl_syntax
+    ferrowl -.-> ferrowl_test_support
+    ferrowl_modbus -.-> ferrowl_test_support
+    ferrowl_modbus -.-> ferrowl_codec
+    ferrowl_modbus -.-> ferrowl_store
+    ferrowl_ocpp -.-> ferrowl_test_support
+    ferrowl_lua_derive -.-> ferrowl_lua
+    ferrowl_ui_derive -.-> ferrowl_ui
+    ferrowl_ui -.-> ferrowl_ui_derive
+    ferrowl_templates -.-> ferrowl_lua
+```
 
 | Crate | Responsibility |
 |---|---|
@@ -32,11 +58,66 @@ published independently.
 | `ferrowl-util` | Shared helpers with two or more consumers: the exponential-backoff retry driver (`backoff`) consumed by `ferrowl-modbus`'s client and all six server transports and by `ferrowl-ocpp`'s CS and CSMS reconnect loops, `~` path expansion (`path`), and the shared TLS policy enums (`tls`). A helper with a single consumer lives in that consumer instead. |
 | `ferrowl-test-support` | Dev-only test fixtures: held-port guards (`reserve_tcp_port`/`reserve_udp_port`) and per-run temp directories (`reserve_temp_dir`). `publish = false`, a dev-dependency of the crates that test against sockets or the filesystem; no production code depends on it. |
 
+New code goes in the crate whose Responsibility row covers it; if no row covers
+it, the same branch changes a row.
+
 Grouped by concern: **Modbus** (`ferrowl-codec`, `ferrowl-store`, `ferrowl-modbus`),
 **OCPP** (`ferrowl-ocpp`), **Lua** (`ferrowl-lua`, `ferrowl-lua-derive`, `ferrowl-templates`),
 **UI** (`ferrowl-ui`, `ferrowl-ui-derive`, `ferrowl-syntax`),
 **Infra** (`ferrowl-ring`, `ferrowl-util`, `ferrowl-test-support` (dev-only)), and the **binary** (`ferrowl`) that ties
 them together.
+
+## Dependency rules
+
+The allowed internal edges, both normal (production) and dev-dependency:
+
+| From | Kind | To |
+|---|---|---|
+| `ferrowl` | normal | `ferrowl-codec`, `ferrowl-lua`, `ferrowl-modbus`, `ferrowl-ocpp`, `ferrowl-ring`, `ferrowl-store`, `ferrowl-syntax`, `ferrowl-templates`, `ferrowl-ui`, `ferrowl-ui-derive`, `ferrowl-util` |
+| `ferrowl` | dev | `ferrowl-test-support` |
+| `ferrowl-modbus` | normal | `ferrowl-codec`, `ferrowl-store`, `ferrowl-util` |
+| `ferrowl-modbus` | dev | `ferrowl-test-support`, `ferrowl-codec`, `ferrowl-store` |
+| `ferrowl-ocpp` | normal | `ferrowl-util` |
+| `ferrowl-ocpp` | dev | `ferrowl-test-support` |
+| `ferrowl-lua` | normal | `ferrowl-lua-derive` |
+| `ferrowl-ui` | normal | `ferrowl-syntax` |
+| `ferrowl-ui` | dev | `ferrowl-ui-derive` |
+| `ferrowl-lua-derive` | dev | `ferrowl-lua` |
+| `ferrowl-ui-derive` | dev | `ferrowl-ui` |
+| `ferrowl-templates` | dev | `ferrowl-lua` |
+| `ferrowl-codec` | normal | none |
+| `ferrowl-store` | normal | none |
+| `ferrowl-ring` | normal | none |
+| `ferrowl-util` | normal | none |
+| `ferrowl-syntax` | normal | none |
+| `ferrowl-templates` | normal | none |
+| `ferrowl-ui-derive` | normal | none |
+| `ferrowl-lua-derive` | normal | none |
+| `ferrowl-test-support` | normal | none |
+
+The three dev edges `ferrowl-lua-derive → ferrowl-lua`, `ferrowl-ui-derive →
+ferrowl-ui`, and `ferrowl-templates → ferrowl-lua` run opposite their crate's
+normal dependency (or have no normal counterpart at all): a proc-macro or
+template crate testing itself through the crate that consumes it. This is by
+design, not a cycle.
+
+Crates absent from a `From` row have no internal dependency of that kind;
+absence from the table never means "unconstrained".
+
+- No crate depends on `ferrowl`.
+- `ferrowl-ring` and `ferrowl-util` never depend on another workspace crate.
+- The Modbus group (`ferrowl-codec`, `ferrowl-store`, `ferrowl-modbus`) and the
+  OCPP group (`ferrowl-ocpp`) never depend on each other; anything spanning
+  both lives in the binary.
+- UI crates (`ferrowl-ui`, `ferrowl-ui-derive`, `ferrowl-syntax`) never depend
+  on a protocol crate.
+- `ferrowl-lua` never depends on a protocol crate; the concrete `C_Register` /
+  `C_OCPP` wiring lives in the binary.
+- No production dependency on `ferrowl-test-support`; it is a dev-dependency
+  only.
+- A new internal edge is legal only if the same branch adds it to this table.
+  An edge in `Cargo.toml` that the table does not list is a defect in one of
+  the two.
 
 ## Runtime data flow
 
@@ -78,6 +159,17 @@ their observable contracts are specified where they are used:
   [`docs/specs/tui/`](./docs/specs/tui/).
 - `ferrowl-ring` and `ferrowl-util` are plain infrastructure; their contracts are
   their rustdoc.
+
+A library crate's error type never carries another workspace crate's error as
+a `String`; it keeps the typed cause. One crate's error enters another's
+through a `From` impl that maps variant to variant — `impl
+From<ferrowl_util::tls::PolicyError> for TlsError`, in both `ferrowl-modbus`
+and `ferrowl-ocpp`. A `String` payload carries data the error is about (a
+path, a field name, a user-supplied value), never another workspace crate's
+cause. The `ferrowl` binary is exempt as the terminal consumer: rendering an
+error as a CLI message, a Lua error string or a wire payload at the point of
+final use is what that code is for. Wrapping a third-party error is outside
+this rule at every layer.
 
 ## Map to the specs
 

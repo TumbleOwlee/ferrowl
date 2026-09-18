@@ -19,10 +19,6 @@ Provide a CLI application to simulate Modbus Servers and Clients, passively obse
 
 The project is organized as a Cargo workspace and builds the `ferrowl` binary.
 
-<p align="center">
-    <img src="./images/architecture.svg">
-</p>
-
 The crate dependency graph, each crate's responsibility, and the runtime data-flow
 and concurrency model are documented in [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 Authoritative, per-capability behavior lives under [`docs/specs/`](./docs/specs/).
