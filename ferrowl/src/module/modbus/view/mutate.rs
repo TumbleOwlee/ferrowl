@@ -235,16 +235,15 @@ impl ModbusModuleView {
         self.module.rebuild_operations().await;
     }
 
-    /// UI-R-350 — applies a confirmed `:edit` setup: updates `self.spec`/`self.device`
-    /// synchronously, then signals the current instance's stop (if any) and returns without
-    /// waiting for it. The actual `reconfigure()` + `start()` follow-up runs inline here only when
-    /// nothing was running to stop; otherwise it is deferred to `refresh()`'s settle block via
-    /// `PendingLifecycle::ApplySetup` once `poll_stop()` reports the stop complete.
+    /// UI-R-350 — applies a confirmed `:edit` setup: updates `self.device` synchronously, then
+    /// signals the current instance's stop (if any) and returns without waiting for it. The
+    /// actual `reconfigure()` + `start()` follow-up runs inline here only when nothing was
+    /// running to stop; otherwise it is deferred to `refresh()`'s settle block via
+    /// `PendingLifecycle::ApplySetup` once `poll_stop()` reports the stop complete. UI-E-161 —
+    /// `self.spec` (name, device path, role, endpoint — the tab title and the rendered pre-edit
+    /// configuration) is only adopted once that settle actually runs, never here, so the view
+    /// keeps rendering the pre-edit configuration for as long as the stop is still pending.
     pub(super) async fn apply_setup(&mut self, values: SetupValues) {
-        self.spec.device.clone_from(&values.config_path);
-        self.spec.name.clone_from(&values.name);
-        self.spec.role = values.role;
-        self.spec.endpoint = values.endpoint.clone();
         self.device.timeout_ms = values.timeout_ms;
         self.device.delay_ms = values.delay_ms;
         self.device.interval_ms = values.interval_ms;
@@ -257,17 +256,17 @@ impl ModbusModuleView {
         }
 
         let timing = ModbusModule::resolve_timing(&self.device);
-        let role = self.spec.role.to_string();
-        let endpoint = self.spec.endpoint.to_string();
 
         // See `ModbusCmd::Stop` in `mod.rs`: a stop already in flight is overwritten with the new
         // follow-up rather than re-requested.
         if self.pending_lifecycle.is_some() {
             self.pending_lifecycle = Some(PendingLifecycle::ApplySetup {
+                name: values.name,
+                config_path: values.config_path,
                 endpoint: values.endpoint,
                 role: values.role,
                 timing,
-                read_ranges: values.read_ranges,
+                read_ranges: Box::new(values.read_ranges),
                 tls: Box::new(self.device.tls.clone()),
             });
             return;
@@ -275,16 +274,24 @@ impl ModbusModuleView {
         match self.module.request_stop().await {
             Ok(()) => {
                 self.pending_lifecycle = Some(PendingLifecycle::ApplySetup {
+                    name: values.name,
+                    config_path: values.config_path,
                     endpoint: values.endpoint,
                     role: values.role,
                     timing,
-                    read_ranges: values.read_ranges,
+                    read_ranges: Box::new(values.read_ranges),
                     tls: Box::new(self.device.tls.clone()),
                 });
             }
             // Nothing was running (Idle): run the follow-up inline — there is no in-flight task
             // `poll_stop()` could ever resolve.
             Err(_) => {
+                self.spec.name.clone_from(&values.name);
+                self.spec.device.clone_from(&values.config_path);
+                self.spec.role = values.role;
+                self.spec.endpoint = values.endpoint.clone();
+                let role = self.spec.role.to_string();
+                let endpoint = self.spec.endpoint.to_string();
                 if let Err(e) = self
                     .module
                     .reconfigure(

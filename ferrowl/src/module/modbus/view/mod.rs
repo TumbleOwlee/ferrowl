@@ -89,10 +89,12 @@ enum PendingLifecycle {
         device: Box<DeviceConfig>,
     },
     ApplySetup {
+        name: String,
+        config_path: String,
         endpoint: Endpoint,
         role: Role,
         timing: Timing,
-        read_ranges: ReadRanges,
+        read_ranges: Box<ReadRanges>,
         tls: Box<ferrowl_modbus::tcp::ModbusTlsConfig>,
     },
 }
@@ -571,6 +573,8 @@ impl ModuleView for ModbusModuleView {
                         self.log().write().await.write(level, &msg);
                     }
                     Some(PendingLifecycle::ApplySetup {
+                        name: new_name,
+                        config_path: new_config_path,
                         endpoint: new_endpoint,
                         role: new_role,
                         timing,
@@ -578,9 +582,18 @@ impl ModuleView for ModbusModuleView {
                         tls,
                     }) => {
                         let stop_err = stop_result.err().filter(|e| !e.is_not_running());
+                        // UI-E-161 — the edited name/endpoint/role/device path are only adopted
+                        // here, once the deferred stop has actually settled, not back when the
+                        // edit was applied.
+                        self.spec.name = new_name;
+                        self.spec.device = new_config_path;
+                        self.spec.role = new_role;
+                        self.spec.endpoint = new_endpoint.clone();
+                        let role = new_role.to_string();
+                        let endpoint = new_endpoint.to_string();
                         if let Err(e) = self
                             .module
-                            .reconfigure(&new_endpoint, new_role, timing, read_ranges, *tls)
+                            .reconfigure(&new_endpoint, new_role, timing, *read_ranges, *tls)
                             .await
                         {
                             self.log()
@@ -2755,6 +2768,108 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// UI-E-161 — applying a setup edit against a module whose task is genuinely alive keeps the
+    /// view rendering the pre-edit name and endpoint (tab title, dialog-visible endpoint) while
+    /// the deferred stop is still pending, and only adopts the edited values once `refresh()`
+    /// settles the stop.
+    async fn ut_apply_setup_defers_name_and_endpoint_adoption_until_settle() {
+        let occupier = reserve_tcp_port();
+        let port = occupier.port();
+
+        let device = empty_device();
+        let spec = ModuleSpec {
+            name: "pre-edit name".into(),
+            device: "pre-edit.toml".into(),
+            role: Role::Server,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port,
+            },
+        };
+        let module = super::super::ModbusModule::new(&spec, &device);
+        let mut view = ModbusModuleView::new(module, spec.clone(), device);
+        view.module
+            .start()
+            .await
+            .expect("start must not fail synchronously");
+
+        let new_port = reserve_tcp_port().release();
+        let values = SetupValues {
+            name: "post-edit name".into(),
+            config_path: "post-edit.toml".into(),
+            role: Role::Client,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: new_port,
+            },
+            timeout_ms: None,
+            delay_ms: None,
+            interval_ms: None,
+            reconnect: None,
+            read_ranges: Default::default(),
+            tls: Default::default(),
+        };
+
+        view.apply_setup(values).await;
+        assert!(view.lifecycle_pending());
+        assert_eq!(
+            view.name(),
+            "pre-edit name",
+            "UI-E-161: the tab title must keep rendering the pre-edit name while the stop is pending"
+        );
+        assert_eq!(
+            view.spec.endpoint,
+            Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port,
+            },
+            "UI-E-161: the endpoint must keep rendering the pre-edit value while the stop is pending"
+        );
+        assert_eq!(
+            view.spec.role,
+            Role::Server,
+            "UI-E-161: the role must keep rendering the pre-edit value while the stop is pending"
+        );
+        assert_eq!(
+            view.spec.device, "pre-edit.toml",
+            "UI-E-161: the device config path must keep rendering the pre-edit value while the stop is pending"
+        );
+
+        for _ in 0..200 {
+            if !view.lifecycle_pending() {
+                break;
+            }
+            view.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(!view.lifecycle_pending());
+        assert_eq!(
+            view.name(),
+            "post-edit name",
+            "the tab title must adopt the edited name once the settle completes"
+        );
+        assert_eq!(
+            view.spec.endpoint,
+            Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: new_port,
+            },
+            "the endpoint must adopt the edited value once the settle completes"
+        );
+        assert_eq!(
+            view.spec.role,
+            Role::Client,
+            "the role must adopt the edited value once the settle completes"
+        );
+        assert_eq!(
+            view.spec.device, "post-edit.toml",
+            "the device config path must adopt the edited value once the settle completes"
+        );
+
+        view.module.stop().await.expect("cleanup stop");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     /// UI-R-350, UI-E-160, UI-E-161, MB-R-220 — applying a setup edit while the client's own
     /// connect attempt is genuinely in flight (TLS enabled against a held listener that
     /// TCP-accepts but never supplies a single handshake byte, so the attempt never settles on
@@ -2874,12 +2989,24 @@ mod tests {
 
     #[tokio::test]
     /// UI-R-350 — applying a setup edit against a stopped module completes within the call: no
-    /// deferred stop is ever set.
+    /// deferred stop is ever set, and (unlike the deferred path) the edited name, device path and
+    /// role are adopted immediately rather than held pre-edit.
     async fn ut_apply_setup_on_stopped_module_applies_immediately() {
-        let mut view = new_view();
+        let device = empty_device();
+        let spec = ModuleSpec {
+            name: "pre-edit name".into(),
+            device: "pre-edit.toml".into(),
+            role: Role::Client,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 0,
+            },
+        };
+        let module = super::super::ModbusModule::new(&spec, &device);
+        let mut view = ModbusModuleView::new(module, spec, device);
         let values = SetupValues {
-            name: "test module".into(),
-            config_path: String::new(),
+            name: "post-edit name".into(),
+            config_path: "post-edit.toml".into(),
             role: Role::Server,
             endpoint: Endpoint::Tcp {
                 ip: "127.0.0.1".into(),
@@ -2895,6 +3022,20 @@ mod tests {
 
         view.apply_setup(values).await;
         assert!(!view.lifecycle_pending());
+        assert_eq!(
+            view.name(),
+            "post-edit name",
+            "an inline apply must adopt the edited name immediately, not defer it"
+        );
+        assert_eq!(
+            view.spec.device, "post-edit.toml",
+            "an inline apply must adopt the edited device path immediately, not defer it"
+        );
+        assert_eq!(
+            view.spec.role,
+            Role::Server,
+            "an inline apply must adopt the edited role immediately, not defer it"
+        );
 
         let mut status = view.module.connection_status();
         for _ in 0..100 {
