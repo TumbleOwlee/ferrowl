@@ -3,6 +3,7 @@
 //! stays a monitor). Mirrors `module/modbus/setup_dialog.rs::SetupDialog` at roughly 1/20th the
 //! size, since a monitor has no TCP/UDP/RtuOverTcp/AsciiOverTcp fields and no role selector.
 
+use crate::convert::FileType;
 use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
 use ferrowl_ui::{
@@ -16,7 +17,6 @@ use ferrowl_ui::{
     },
 };
 use ferrowl_ui_derive::{Focus, focusable};
-use ferrowl_util::convert::FileType;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, HorizontalAlignment, Layout, Margin, Rect},

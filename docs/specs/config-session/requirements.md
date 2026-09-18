@@ -14,7 +14,7 @@ Per [`../README.md`](../README.md)'s ownership rule, this area owns only the *en
 
 **CS-R-003** — A path whose extension is neither `.toml` nor `.json` (including no extension) fails with an unknown-format error on load and save, before any read or write of contents.
 
-**CS-R-004** — The two encodings describe the same data model: a value serialized to one and re-serialized to the other (via the conversion helper) deserializes back to an equal value.
+**CS-R-004** — The two encodings describe the same data model: a value saved in one encoding and saved again in the other loads back to an equal value.
 
 **CS-R-005** — On TOML serialization a numeric value is emitted as a plain TOML integer or float, never an internal arbitrary-precision wrapper table.
 

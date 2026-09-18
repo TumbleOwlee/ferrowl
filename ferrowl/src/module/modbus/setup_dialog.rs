@@ -4,6 +4,7 @@
 //! validated live and must point at a loadable config. While any field is invalid the dialog
 //! cannot be confirmed (only cancelled with Esc).
 
+use crate::convert::FileType;
 use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
 use ferrowl_ui::{
@@ -17,7 +18,6 @@ use ferrowl_ui::{
     },
 };
 use ferrowl_ui_derive::{Focus, focusable};
-use ferrowl_util::convert::FileType;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, HorizontalAlignment, Layout, Margin, Rect},
@@ -990,7 +990,7 @@ mod tests {
     fn ut_config_path_validate_expands_tilde() {
         let home = std::env::home_dir().expect("HOME must resolve in test environment");
         let name = format!("ferrowl_modbus_setup_tilde_cfg_{}.toml", std::process::id());
-        ferrowl_util::convert::Converter::save(
+        crate::convert::Converter::save(
             &DeviceConfig::default(),
             home.join(&name).to_str().unwrap(),
             FileType::Toml,
@@ -1019,12 +1019,8 @@ mod tests {
             timeout_ms: Some(12345),
             ..DeviceConfig::default()
         };
-        ferrowl_util::convert::Converter::save(
-            &saved,
-            home.join(&name).to_str().unwrap(),
-            FileType::Toml,
-        )
-        .unwrap();
+        crate::convert::Converter::save(&saved, home.join(&name).to_str().unwrap(), FileType::Toml)
+            .unwrap();
 
         let mut dialog = SetupDialog::create(Timing {
             timeout_ms: 0,

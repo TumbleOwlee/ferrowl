@@ -3,6 +3,7 @@
 //! and driving the read-only Protocol display, and an independent Basic Authentication toggle
 //! with its credential inputs, validating live like the Modbus dialog.
 
+use crate::convert::FileType;
 use crossterm::event::{KeyCode, KeyModifiers};
 use derive_builder::Builder;
 use ferrowl_ui::{
@@ -16,7 +17,6 @@ use ferrowl_ui::{
     },
 };
 use ferrowl_ui_derive::{Focus, focusable};
-use ferrowl_util::convert::FileType;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, HorizontalAlignment, Layout, Margin, Rect},
@@ -914,7 +914,7 @@ mod tests {
     fn ut_config_path_validate_expands_tilde() {
         let home = std::env::home_dir().expect("HOME must resolve in test environment");
         let name = format!("ferrowl_ocpp_setup_tilde_cfg_{}.toml", std::process::id());
-        ferrowl_util::convert::Converter::save(
+        crate::convert::Converter::save(
             &crate::module::ocpp::config::device::OcppDeviceConfig::default(),
             home.join(&name).to_str().unwrap(),
             FileType::Toml,

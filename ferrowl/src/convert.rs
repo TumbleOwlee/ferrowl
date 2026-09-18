@@ -2,10 +2,7 @@
 
 use clap::ValueEnum;
 use serde::{Serialize, de::DeserializeOwned};
-use std::{
-    fs::File,
-    io::{BufReader, Write},
-};
+use std::{fs::File, io::Write};
 
 /// Supported config file formats.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
@@ -49,7 +46,7 @@ pub struct Converter {}
 impl Converter {
     /// Deserialize a value from a file of the given type.
     pub fn load<T: DeserializeOwned>(path: &str, ty: FileType) -> Result<T, Error> {
-        let resolved = crate::path::expand(path);
+        let resolved = ferrowl_util::path::expand(path);
         let content = std::fs::read_to_string(&resolved)
             .map_err(|e| Error::Deserialize(format!("Failed to read {path} [{e}].")))?;
         match ty {
@@ -78,56 +75,11 @@ impl Converter {
             FileType::Json => serde_json::to_string_pretty(value)
                 .map_err(|e| Error::Serialize(format!("Failed to serialize JSON [{e}].")))?,
         };
-        let resolved = crate::path::expand(path);
+        let resolved = ferrowl_util::path::expand(path);
         let mut file = File::create(&resolved)
             .map_err(|e| Error::Serialize(format!("Failed to create {path} [{e}].")))?;
         write!(file, "{content}")
             .map_err(|e| Error::Serialize(format!("Failed to write {path} [{e}].")))
-    }
-    /// Re-serialize a file from `src_type` to `dest_type` by round-tripping
-    /// it through `T`.
-    pub fn convert<T: Serialize + DeserializeOwned>(
-        src: &str,
-        src_type: FileType,
-        dest: &str,
-        dest_type: FileType,
-    ) -> Result<(), Error> {
-        let resolved_src = crate::path::expand(src);
-        let data: T = match src_type {
-            FileType::Toml => {
-                let content = std::fs::read_to_string(&resolved_src)
-                    .map_err(|e| Error::Serialize(format!("Failed to read TOML file [{e}].")))?;
-                toml::from_str::<T>(&content)
-                    .map_err(|e| Error::Serialize(format!("Failed to deserialize TOML [{e}].")))?
-            }
-            FileType::Json => {
-                let file = File::open(&resolved_src)
-                    .map_err(|e| Error::Serialize(format!("Failed to open JSON file [{e}].")))?;
-                let reader = BufReader::new(file);
-                serde_json::from_reader(reader)
-                    .map_err(|e| Error::Serialize(format!("Failed to deserialize JSON [{e}].")))?
-            }
-        };
-
-        let resolved_dest = crate::path::expand(dest);
-        match dest_type {
-            FileType::Toml => {
-                let content = toml::to_string::<T>(&data)
-                    .map_err(|e| Error::Serialize(format!("Failed to serialize TOML [{e}].")))?;
-                let mut file = File::create(&resolved_dest)
-                    .map_err(|e| Error::Serialize(format!("Failed to create TOML file [{e}].")))?;
-                write!(file, "{content}")
-                    .map_err(|e| Error::Serialize(format!("Failed to serialize TOML [{e}].")))
-            }
-            FileType::Json => {
-                let content = serde_json::to_string_pretty::<T>(&data)
-                    .map_err(|e| Error::Serialize(format!("Failed to serialize JSON [{e}].")))?;
-                let mut file = File::create(&resolved_dest)
-                    .map_err(|e| Error::Serialize(format!("Failed to create JSON file [{e}].")))?;
-                write!(file, "{content}")
-                    .map_err(|e| Error::Serialize(format!("Failed to serialize JSON [{e}].")))
-            }
-        }
     }
 }
 
@@ -255,116 +207,41 @@ mod tests {
     }
 
     #[test]
-    /// CS-R-004 — converting TOML to JSON preserves the data model.
-    fn ut_convert_toml_to_json_preserves_data() {
+    /// CS-R-004 — a value saved as TOML then saved again as JSON loads back equal.
+    fn ut_toml_to_json_save_load_preserves_data() {
         let dir = reserve_temp_dir("ferrowl_convert");
-        let src = dir.join("src.toml");
-        let src = src.to_str().unwrap();
-        let dst = dir.join("dst.json");
-        let dst = dst.to_str().unwrap();
+        let toml_path = dir.join("src.toml");
+        let toml_path = toml_path.to_str().unwrap();
+        let json_path = dir.join("dst.json");
+        let json_path = json_path.to_str().unwrap();
         let value = Sample {
             a: 3,
             b: "x".into(),
         };
-        Converter::save(&value, src, FileType::Toml).unwrap();
-        Converter::convert::<Sample>(src, FileType::Toml, dst, FileType::Json).unwrap();
-        let loaded: Sample = Converter::load(dst, FileType::Json).unwrap();
+        Converter::save(&value, toml_path, FileType::Toml).unwrap();
+        let via_toml: Sample = Converter::load(toml_path, FileType::Toml).unwrap();
+        Converter::save(&via_toml, json_path, FileType::Json).unwrap();
+        let loaded: Sample = Converter::load(json_path, FileType::Json).unwrap();
         assert_eq!(loaded, value);
     }
 
     #[test]
-    /// CS-R-004 — converting JSON to TOML preserves the data model.
-    fn ut_convert_json_to_toml_preserves_data() {
-        // Exercises the JSON-source read path and the TOML-destination write path.
+    /// CS-R-004 — a value saved as JSON then saved again as TOML loads back equal.
+    fn ut_json_to_toml_save_load_preserves_data() {
         let dir = reserve_temp_dir("ferrowl_convert");
-        let src = dir.join("src.json");
-        let src = src.to_str().unwrap();
-        let dst = dir.join("dst.toml");
-        let dst = dst.to_str().unwrap();
+        let json_path = dir.join("src.json");
+        let json_path = json_path.to_str().unwrap();
+        let toml_path = dir.join("dst.toml");
+        let toml_path = toml_path.to_str().unwrap();
         let value = Sample {
             a: 11,
             b: "y".into(),
         };
-        Converter::save(&value, src, FileType::Json).unwrap();
-        Converter::convert::<Sample>(src, FileType::Json, dst, FileType::Toml).unwrap();
-        let loaded: Sample = Converter::load(dst, FileType::Toml).unwrap();
+        Converter::save(&value, json_path, FileType::Json).unwrap();
+        let via_json: Sample = Converter::load(json_path, FileType::Json).unwrap();
+        Converter::save(&via_json, toml_path, FileType::Toml).unwrap();
+        let loaded: Sample = Converter::load(toml_path, FileType::Toml).unwrap();
         assert_eq!(loaded, value);
-    }
-
-    #[test]
-    fn ut_convert_json_source_open_error() {
-        let dir = reserve_temp_dir("ferrowl_convert");
-        let dst = dir.join("dst.toml");
-        let r = Converter::convert::<Sample>(
-            "/no/such/ferrowl/src.json",
-            FileType::Json,
-            dst.to_str().unwrap(),
-            FileType::Toml,
-        );
-        assert!(matches!(r, Err(Error::Serialize(_))));
-    }
-
-    #[test]
-    /// CS-R-050 — a malformed source fails to convert with a deserialize error.
-    fn ut_convert_json_source_malformed_error() {
-        let dir = reserve_temp_dir("ferrowl_convert");
-        let src = dir.join("src.json");
-        std::fs::write(&src, "{ not valid json ").unwrap();
-        let dst = dir.join("dst.toml");
-        let r = Converter::convert::<Sample>(
-            src.to_str().unwrap(),
-            FileType::Json,
-            dst.to_str().unwrap(),
-            FileType::Toml,
-        );
-        assert!(matches!(r, Err(Error::Serialize(_))));
-    }
-
-    #[test]
-    fn ut_convert_toml_dest_create_error() {
-        // Valid source, but the destination directory does not exist -> create fails.
-        let dir = reserve_temp_dir("ferrowl_convert");
-        let src = dir.join("src.toml");
-        let src = src.to_str().unwrap();
-        Converter::save(
-            &Sample {
-                a: 1,
-                b: "z".into(),
-            },
-            src,
-            FileType::Toml,
-        )
-        .unwrap();
-        let r = Converter::convert::<Sample>(
-            src,
-            FileType::Toml,
-            "/no/such/ferrowl/dir/out.toml",
-            FileType::Toml,
-        );
-        assert!(matches!(r, Err(Error::Serialize(_))));
-    }
-
-    #[test]
-    fn ut_convert_json_dest_create_error() {
-        let dir = reserve_temp_dir("ferrowl_convert");
-        let src = dir.join("src.toml");
-        let src = src.to_str().unwrap();
-        Converter::save(
-            &Sample {
-                a: 1,
-                b: "z".into(),
-            },
-            src,
-            FileType::Toml,
-        )
-        .unwrap();
-        let r = Converter::convert::<Sample>(
-            src,
-            FileType::Toml,
-            "/no/such/ferrowl/dir/out.json",
-            FileType::Json,
-        );
-        assert!(matches!(r, Err(Error::Serialize(_))));
     }
 
     #[test]
@@ -483,27 +360,5 @@ mod tests {
         let _ = std::fs::remove_file(&actual);
 
         assert!(contents.is_ok(), "expected a file at {actual:?}");
-    }
-
-    #[test]
-    /// NF-R-054 — `Converter::convert` expands a leading `~` on both `src` and `dest`.
-    fn ut_convert_expands_tilde_both_sides() {
-        let (src_tilde, src_actual) = home_tilde_path("json");
-        let (dst_tilde, dst_actual) = home_tilde_path("toml");
-        let value = Sample {
-            a: 3,
-            b: "convert".into(),
-        };
-        Converter::save(&value, src_actual.to_str().unwrap(), FileType::Json).unwrap();
-
-        let result =
-            Converter::convert::<Sample>(&src_tilde, FileType::Json, &dst_tilde, FileType::Toml);
-        let loaded: Result<Sample, Error> = Converter::load(&dst_tilde, FileType::Toml);
-
-        let _ = std::fs::remove_file(&src_actual);
-        let _ = std::fs::remove_file(&dst_actual);
-
-        result.unwrap();
-        assert_eq!(loaded.unwrap(), value);
     }
 }

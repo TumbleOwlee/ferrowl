@@ -93,7 +93,7 @@ impl<V: ClientVersion> ClientView<V> {
 
     /// Write the device config (reconciled with the live spec, scripts + connectors preserved).
     fn save_device_to(&self, path: &str) -> CommandResult {
-        use ferrowl_util::convert::{Converter, FileType};
+        use crate::convert::{Converter, FileType};
         let Some(ty) = FileType::from_path(path) else {
             return CommandResult::Handled(Some((
                 Level::Warning,

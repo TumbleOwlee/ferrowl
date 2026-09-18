@@ -10,17 +10,14 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-clap = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt", "sync", "time"] }
-toml = { workspace = true }
 
 [dev-dependencies]
-# Held-port and per-run temp-dir guards for tests (NF-R-043/044).
-ferrowl-test-support = { path = "../ferrowl-test-support" }
 futures-util = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
 # The `#[tokio::test]`/`#[tokio::test(start_paused = true)]` tests in `backoff.rs` need the macro,
 # multi-thread runtime, and paused-time control, which the library itself does not depend on.
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }

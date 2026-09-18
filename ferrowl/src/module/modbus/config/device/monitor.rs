@@ -94,10 +94,10 @@ impl MonitorRegisterDef {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::convert::{Converter, FileType};
     use ferrowl_codec::BitField;
     use ferrowl_codec::format::{Endian, Resolution, WordOrder};
     use ferrowl_test_support::{TempDirGuard, reserve_temp_dir};
-    use ferrowl_util::convert::{Converter, FileType};
 
     fn sample() -> MonitorDeviceConfig {
         let definitions = vec![MonitorRegisterDef {

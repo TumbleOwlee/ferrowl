@@ -22,8 +22,8 @@
 
 use std::collections::BTreeMap;
 
+use crate::convert::{Converter, FileType};
 use ferrowl_codec::Kind;
-use ferrowl_util::convert::{Converter, FileType};
 use serde::Deserialize;
 
 use crate::cli::MigrateArgs;

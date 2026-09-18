@@ -34,7 +34,7 @@ impl ModbusModuleView {
     }
 
     pub(super) fn save_device_to(&self, path: &str) -> CommandResult {
-        use ferrowl_util::convert::{Converter, FileType};
+        use crate::convert::{Converter, FileType};
         let Some(ty) = FileType::from_path(path) else {
             return CommandResult::Handled(Some((
                 Level::Warning,

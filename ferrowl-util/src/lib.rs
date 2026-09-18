@@ -1,9 +1,7 @@
 //! Small general-purpose helpers shared across the ferrowl crates:
-//! config file (de)serialization ([`convert`]), user-supplied filesystem path expansion
-//! ([`path`]), and wall-clock helpers ([`time`]).
+//! user-supplied filesystem path expansion ([`path`]), and wall-clock helpers ([`time`]).
 
 pub mod backoff;
-pub mod convert;
 pub mod path;
 pub mod time;
 pub mod tls;

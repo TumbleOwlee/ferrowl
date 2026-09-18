@@ -9,6 +9,7 @@ mod app;
 mod cli;
 mod command;
 mod config;
+mod convert;
 mod dialog;
 mod instance;
 mod lua;
@@ -428,11 +429,11 @@ mod tests {
     use super::{build_tabs, demo_session_script};
     use crate::cli::{CliArgs, create_module_spec_by_device};
     use crate::config::{self, OcppModuleSpec, Session};
+    use crate::convert::{Converter, FileType};
     use crate::registry::ModuleRegistry;
     use ferrowl_lua::ContextBuilder;
     use ferrowl_lua::module::ModuleDirModule;
     use ferrowl_test_support::{TempDirGuard, reserve_tcp_port, reserve_temp_dir};
-    use ferrowl_util::convert::{Converter, FileType};
     use std::sync::Arc;
 
     fn demo_args(modules: Vec<String>, devices: Vec<String>) -> CliArgs {

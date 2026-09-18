@@ -879,7 +879,7 @@ mod tests {
     #[test]
     /// CL-R-007 — the instance set concatenates session, --module, then --device sources in order.
     fn ut_module_specs_combines_all_sources() {
-        use ferrowl_util::convert::{Converter, FileType};
+        use crate::convert::{Converter, FileType};
         let session = config::Session {
             version: None,
             modules: vec![
@@ -908,7 +908,7 @@ mod tests {
     #[test]
     /// CL-R-054 — session instances resolve before --module instances.
     fn ut_session_instances_resolve_before_module_instances() {
-        use ferrowl_util::convert::{Converter, FileType};
+        use crate::convert::{Converter, FileType};
         let session = config::Session {
             version: None,
             modules: vec![
@@ -941,7 +941,7 @@ mod tests {
     #[test]
     /// CL-R-003, CL-R-053 — a --session file's instances resolve, split into modbus and ocpp.
     fn ut_session_splits_modbus_and_ocpp() {
-        use ferrowl_util::convert::{Converter, FileType};
+        use crate::convert::{Converter, FileType};
         let mut modbus =
             serde_json::to_value(create_module_spec_by_device("mb".into(), "s.toml".into()))
                 .unwrap();
@@ -1236,7 +1236,7 @@ mod tests {
         tag: &str,
         modules: Vec<serde_json::Value>,
     ) -> Result<Vec<ModuleSpec>, String> {
-        use ferrowl_util::convert::{Converter, FileType};
+        use crate::convert::{Converter, FileType};
         let session = config::Session {
             version: None,
             modules,

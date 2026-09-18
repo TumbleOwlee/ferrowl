@@ -558,7 +558,7 @@ mod tests {
     /// CL-R-027 — session scripts concatenate across files in order; the last file's interval wins.
     fn ut_load_session_scripts_aggregates_across_files_last_interval_wins() {
         use crate::config::Session as SessionConfig;
-        use ferrowl_util::convert::{Converter, FileType};
+        use crate::convert::{Converter, FileType};
 
         let s1 = SessionConfig {
             version: None,
@@ -640,7 +640,7 @@ mod tests {
     /// `script_enabled` toggles whether the session script is enabled, so both the "sim runs"
     /// and "zero enabled scripts spawns nothing" cases share one fixture.
     fn session_run_args(tag: &str, script_enabled: bool) -> (RunArgs, TempDirGuard) {
-        use ferrowl_util::convert::{Converter, FileType};
+        use crate::convert::{Converter, FileType};
 
         let dir = reserve_temp_dir(&format!("ferrowl_headless_{tag}"));
         let device_path = dir.join("device.toml");
@@ -751,7 +751,7 @@ mod tests {
 
     /// A device config on disk for a headless module fixture, under `dir`.
     fn write_device(dir: &TempDirGuard) -> String {
-        use ferrowl_util::convert::{Converter, FileType};
+        use crate::convert::{Converter, FileType};
         let p = dir.join("device.toml");
         Converter::save(
             &holding_device_config(),
@@ -780,7 +780,7 @@ mod tests {
     /// A client device whose first poll times out fast and whose client then stops instead of
     /// retrying — the shortest route to an Error-level line in a module's log ring.
     fn write_timing_out_client_device(dir: &TempDirGuard) -> String {
-        use ferrowl_util::convert::{Converter, FileType};
+        use crate::convert::{Converter, FileType};
         let mut cfg = holding_device_config();
         cfg.timeout_ms = Some(100);
         cfg.delay_ms = Some(0);
@@ -856,7 +856,7 @@ mod tests {
 
     /// A minimal OCPP server device config on disk, under `dir`.
     fn write_ocpp_device(dir: &TempDirGuard) -> String {
-        use ferrowl_util::convert::{Converter, FileType};
+        use crate::convert::{Converter, FileType};
         let cfg = config::OcppDeviceConfig {
             role: OcppRole::Server,
             ..Default::default()
@@ -1244,7 +1244,7 @@ mod tests {
     #[tokio::test]
     /// CL-R-031, BR-E-011 — with --exit-on-error set, an error line makes the run exit 3.
     async fn ut_run_exit_on_error_returns_three() {
-        use ferrowl_util::convert::{Converter, FileType};
+        use crate::convert::{Converter, FileType};
         let session = config::Session {
             version: None,
             modules: vec![],

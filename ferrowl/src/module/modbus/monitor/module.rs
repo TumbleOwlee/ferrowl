@@ -1024,12 +1024,8 @@ mod tests {
             .join("same-name-roundtrip.toml")
             .to_string_lossy()
             .into_owned();
-        ferrowl_util::convert::Converter::save(
-            &device,
-            &path,
-            ferrowl_util::convert::FileType::Toml,
-        )
-        .expect("save");
+        crate::convert::Converter::save(&device, &path, crate::convert::FileType::Toml)
+            .expect("save");
         let reloaded = crate::config::load_monitor_device(&path).expect("load");
 
         let reconstructed = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &reloaded);

@@ -812,6 +812,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
+ "toml",
 ]
 
 [[package]]
@@ -952,8 +953,6 @@ dependencies = [
 name = "ferrowl-util"
 version = "0.6.1"
 dependencies = [
- "clap",
- "ferrowl-test-support",
  "futures-util",
  "serde",
  "serde_json",
