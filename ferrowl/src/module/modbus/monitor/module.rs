@@ -122,9 +122,9 @@ impl ModbusMonitorModule {
     /// `new()` would.
     ///
     /// The caller must have already settled its own deferred stop (`request_stop`/`poll_stop`,
-    /// MB-R-233) before calling this: `command_tx`/`task` are therefore already `None` and the
+    /// MB-R-255) before calling this: `command_tx`/`task` are therefore already `None` and the
     /// serial-path claim already released by that settle, not by this call. The rebuilt instance
-    /// is not started (MB-R-232); the caller is expected to `:start` it explicitly afterwards,
+    /// is not started (MB-R-254); the caller is expected to `:start` it explicitly afterwards,
     /// exactly as it already had to after a fresh `new()`'d module.
     pub fn reconfigure(self, spec: &ModuleSpec, device: &MonitorDeviceConfig) -> Self {
         let file_sink: FileSink = Arc::new(std::sync::Mutex::new(None));
@@ -732,7 +732,7 @@ mod tests {
         }
     }
 
-    /// MB-R-230 — a receive task that never reacts to the `Terminate` sent by `request_stop`
+    /// MB-R-252 — a receive task that never reacts to the `Terminate` sent by `request_stop`
     /// (here, a task with no `command_tx` counterpart at all, so nothing is ever listening) is
     /// still ended by `poll_stop` once the 100 ms grace period has passed: the join is aborted,
     /// mapping to `Ok(())`, and `task` is left `None`.
@@ -880,7 +880,7 @@ mod tests {
     }
 
     /// `reconfigure` requires the caller to have already settled its own deferred stop
-    /// (`request_stop`/`poll_stop`, MB-R-233): a previously running task's `command_tx`/`task`
+    /// (`request_stop`/`poll_stop`, MB-R-255): a previously running task's `command_tx`/`task`
     /// handle is therefore already `None` by the time `reconfigure` runs, and the reconfigured
     /// instance carries that forward, starting in the same not-yet-started state a fresh
     /// `new()` would.
@@ -897,7 +897,7 @@ mod tests {
         module
             .stop()
             .await
-            .expect("stop settles before reconfigure, per MB-R-233");
+            .expect("stop settles before reconfigure, per MB-R-255");
         assert!(
             module.command_tx.is_none() && module.task.is_none(),
             "the settle itself (not reconfigure) must have already dropped the connection"
@@ -931,7 +931,7 @@ mod tests {
         assert_eq!(registry.conflict("B", &path), None);
     }
 
-    /// MB-R-150 — the settle that must precede `reconfigure()` (MB-R-233) releases the previous
+    /// MB-R-150 — the settle that must precede `reconfigure()` (MB-R-255) releases the previous
     /// claim, and `reconfigure()` carries the same shared registry forward, so a subsequent
     /// `start()` on the reconfigured instance still participates in the same session-wide
     /// conflict check.
@@ -955,7 +955,7 @@ mod tests {
         module
             .stop()
             .await
-            .expect("stop settles before reconfigure, per MB-R-233");
+            .expect("stop settles before reconfigure, per MB-R-255");
         // The old claim must be released by the settled stop, before any reconfigure/restart.
         assert_eq!(registry.conflict("B", &path), None);
 

@@ -814,7 +814,7 @@ pub struct ModbusMonitorModuleView {
     /// CL-R-057 — the settled outcome of the most recently completed `PendingLifecycle::Stop`,
     /// consumed by [`ModuleView::take_stop_outcome`] rather than re-derived from the log.
     last_stop_outcome: Option<StopOutcome>,
-    /// UI-R-350, MB-R-233 — a `:edit` confirmed by `confirm_edit` in the (synchronous) key
+    /// UI-R-350, MB-R-255 — a `:edit` confirmed by `confirm_edit` in the (synchronous) key
     /// handler, resolved but not yet acted on: `refresh` signals the deferred stop and the
     /// rebuild happens once it settles.
     pending_setup: Option<Box<(ModuleSpec, MonitorDeviceConfig)>>,
@@ -892,7 +892,7 @@ impl ModbusMonitorModuleView {
 
     /// Resolve the open `Edit` overlay's dialog (MB-R-140) into a pending setup edit: `refresh`
     /// signals the deferred stop this synchronous key handler cannot itself await, and the
-    /// rebuild happens once that stop settles (MB-R-233, UI-R-350). No-op if the overlay isn't
+    /// rebuild happens once that stop settles (MB-R-255, UI-R-350). No-op if the overlay isn't
     /// open or the dialog doesn't resolve.
     fn confirm_edit(&mut self) {
         let MonitorOverlay::EditSetup(dialog) = &self.overlay else {
@@ -1373,7 +1373,7 @@ impl ModuleView for ModbusMonitorModuleView {
                 }
             }
 
-            // UI-R-350, MB-R-233 — a `:edit` confirm resolved in the (synchronous) key handler;
+            // UI-R-350, MB-R-255 — a `:edit` confirm resolved in the (synchronous) key handler;
             // signal its deferred stop now and defer the rebuild to this settling, overwriting
             // (not losing) any stop already pending — `ModbusMonitorModule::request_stop` always
             // returns `Ok(())` and arms `stop_deadline` even with no task running, so there is no
@@ -3024,7 +3024,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    /// UI-R-350, MB-R-233 — confirming a monitor's `:edit` setup dialog against a module whose
+    /// UI-R-350, MB-R-255 — confirming a monitor's `:edit` setup dialog against a module whose
     /// task is genuinely alive (retrying a bad serial path) returns immediately and defers the
     /// stop it signals to `refresh()`'s settle, instead of rebuilding the module inline.
     async fn ut_confirm_edit_returns_without_blocking() {
@@ -3061,10 +3061,10 @@ mod tests {
         assert!(!v.lifecycle_pending());
     }
 
-    /// MB-R-230, MB-R-233, UI-R-350 — a receive task that ends on its own `Terminate` well
+    /// MB-R-252, MB-R-255, UI-R-350 — a receive task that ends on its own `Terminate` well
     /// inside the 100 ms grace period settles promptly (no abort-fallback wait), and its
     /// settle-time outcome (UI-R-350) logs cleanly (not `Level::Error`), pinning the graceful
-    /// half of MB-R-230 that `ut_monitor_stop_aborts_a_task_that_outlives_the_grace_period`
+    /// half of MB-R-252 that `ut_monitor_stop_aborts_a_task_that_outlives_the_grace_period`
     /// deliberately never reaches.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn ut_confirm_edit_stops_gracefully_not_by_abort() {
@@ -3162,7 +3162,7 @@ mod tests {
         assert_eq!(v.name(), "renamed");
     }
 
-    /// MB-R-231 — the frame table, message records, log and interpretations accumulated before
+    /// MB-R-253 — the frame table, message records, log and interpretations accumulated before
     /// an edit apply all survive it, once the settle it defers actually lands.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn ut_edit_apply_carries_table_records_log_and_interpretations_forward() {
@@ -3219,7 +3219,7 @@ mod tests {
         );
     }
 
-    /// MB-R-232 — once an edit apply's deferred stop settles, the rebuilt module is left
+    /// MB-R-254 — once an edit apply's deferred stop settles, the rebuilt module is left
     /// stopped, not restarted.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn ut_edit_apply_leaves_monitor_stopped() {
@@ -3262,7 +3262,7 @@ mod tests {
         );
     }
 
-    /// MB-E-096, MB-R-150, MB-R-233 — the pre-edit serial path stays claimed in the session-wide
+    /// MB-E-097, MB-R-150, MB-R-255 — the pre-edit serial path stays claimed in the session-wide
     /// registry while the applied edit's stop is still pending, and is released only once it
     /// settles; a second module configured onto that same path during the window is rejected as
     /// a same-path conflict.
