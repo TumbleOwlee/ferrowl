@@ -444,7 +444,7 @@ mod tests {
         v.handle_command("edit").await;
         ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
         // One manual tick: promotes the resolved edit into a signalled, still-settling stop —
-        // the same state a real tick loop would have reached by the time `:qall` runs.
+        // the same state a real tick loop would have reached by the time `:quit` runs.
         v.refresh().await;
         assert!(v.lifecycle_pending());
 

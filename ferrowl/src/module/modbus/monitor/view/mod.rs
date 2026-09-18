@@ -3081,20 +3081,31 @@ mod tests {
         v.handle_command("edit").await;
         v.confirm_edit();
 
-        let before = std::time::Instant::now();
-        for _ in 0..200 {
+        // MB-R-252's graceful half settles as soon as the receive task ends on its own
+        // `Terminate`, in only a few polls, with no intervening abort-fallback wait. Pinned
+        // structurally, never by a wall-clock ceiling over the polling loop, which flakes under a
+        // loaded runner.
+        let mut polls = 0;
+        loop {
+            v.refresh().await;
+            polls += 1;
             if v.pending_setup.is_none() && !v.lifecycle_pending() {
                 break;
             }
-            v.refresh().await;
+            assert!(
+                polls < 200,
+                "the deferred stop never settled within 200 polls"
+            );
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
         assert!(!v.lifecycle_pending());
+        // The abort-after-grace fallback can only fire once the 100 ms grace period has fully
+        // elapsed; settling in only a few polls is a structural stand-in for "ended on its own",
+        // with no wall-clock read anywhere in the assertion.
         assert!(
-            before.elapsed() < std::time::Duration::from_millis(90),
-            "settle took {:?}, expected the task to end gracefully well inside the 100 ms grace \
-             period, not via the abort-after-grace fallback",
-            before.elapsed()
+            polls <= 5,
+            "settled after {polls} polls, expected the task to end gracefully in only a few, \
+             not via the abort-after-grace fallback"
         );
 
         let lines = v
