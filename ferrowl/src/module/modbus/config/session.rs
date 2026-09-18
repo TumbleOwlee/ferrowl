@@ -269,8 +269,8 @@ fn default_baud() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::convert::{Converter, FileType};
     use ferrowl_test_support::reserve_temp_dir;
-    use ferrowl_util::convert::{Converter, FileType};
     use std::time::Duration;
 
     fn sample_spec(name: &str, device: &str, role: Role, endpoint: Endpoint) -> serde_json::Value {

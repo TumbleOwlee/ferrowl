@@ -83,7 +83,7 @@ pub async fn run(args: &BridgeArgs) -> i32 {
                 let Some(msg) = msg else { break };
                 let line = format!(
                     "[{}] {SOURCE} | {msg}",
-                    format_timestamp(ferrowl_util::time::now_unix_ms())
+                    format_timestamp(crate::time::now_unix_ms())
                 );
                 println!("{line}");
                 if let Some(f) = log_file.as_mut() {

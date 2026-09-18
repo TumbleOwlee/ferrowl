@@ -28,8 +28,8 @@ mod tests {
     /// `enabled` are optional on read (default empty / on), and a full round-trip through both
     /// TOML and JSON files preserves the value.
     fn ut_script_def_persists_per_config_session_envelope() {
+        use crate::convert::{Converter, FileType};
         use ferrowl_test_support::reserve_temp_dir;
-        use ferrowl_util::convert::{Converter, FileType};
 
         let dir = reserve_temp_dir("ferrowl_script_def_envelope");
         let toml_path = dir.join("minimal.toml");

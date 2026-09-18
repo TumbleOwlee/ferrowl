@@ -17,7 +17,7 @@ pub use device::{DeviceConfig, MonitorDeviceConfig};
 pub use ocpp::{OcppDeviceConfig, OcppModuleSpec, OcppSpec};
 pub use session::{ClientOrServer, Endpoint, ModuleSpec, Role, Session};
 
-use ferrowl_util::convert::{Converter, FileType};
+use crate::convert::{Converter, FileType};
 
 /// Ferrowl version stamped into device/session files on save (see `DeviceConfig::version`,
 /// `Session::version`) — informational only, never consulted by any load-time or migration
@@ -249,8 +249,8 @@ pub fn load_session(path: &str) -> Result<Session, ConfigError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::convert::{Converter, FileType};
     use ferrowl_test_support::reserve_temp_dir;
-    use ferrowl_util::convert::{Converter, FileType};
 
     #[test]
     /// CS-R-033 — a saved device/session file reloads to an equal value (envelope round-trips).

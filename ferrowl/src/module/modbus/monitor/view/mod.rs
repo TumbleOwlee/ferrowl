@@ -88,7 +88,7 @@ impl ferrowl_ui::traits::OverlayKeys for InterpretationEdit {
 /// Save `device` to `path`, mirroring `ModbusModuleView::save_device_to`'s pattern (stamps the
 /// current `VERSION`, format from the path's extension).
 fn save_device_to(device: &MonitorDeviceConfig, path: &str) -> CommandResult {
-    use ferrowl_util::convert::{Converter, FileType};
+    use crate::convert::{Converter, FileType};
     let Some(ty) = FileType::from_path(path) else {
         return CommandResult::Handled(Some((
             Level::Warning,
@@ -2898,8 +2898,8 @@ mod tests {
     /// must actually appear in the file after `:write`, not be silently dropped.
     #[tokio::test]
     async fn ut_write_device_command_persists_runtime_added_interpretation() {
+        use crate::convert::{Converter, FileType};
         use crate::module::modbus::dialog::set_input;
-        use ferrowl_util::convert::{Converter, FileType};
 
         let dir = reserve_temp_dir("ferrowl_modbus_monitor_view");
         let path = dir.join("write-test.toml");

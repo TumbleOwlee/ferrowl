@@ -308,10 +308,10 @@ impl RegisterDef {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::convert::{Converter, FileType};
     use ferrowl_codec::Access;
     use ferrowl_codec::format::{Alignment, Endian};
     use ferrowl_test_support::reserve_temp_dir;
-    use ferrowl_util::convert::{Converter, FileType};
 
     fn sample() -> DeviceConfig {
         let mut definitions = BTreeMap::new();

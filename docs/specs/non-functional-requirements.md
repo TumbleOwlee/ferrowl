@@ -58,7 +58,7 @@ IDs stable, append-only (`NF-R-nnn`). See [`README.md`](./README.md).
 
 **NF-R-053** — `~` expansion (NF-R-042) is performed once by a single shared resolver, applied at every filesystem-touching call site.
 
-**NF-R-054** — The filesystem-touching call sites that apply `~` expansion (NF-R-042) are: config/session/device config files (`ferrowl-util::convert::Converter`), CLI `--session`/`--device`/`--module`/`--log-file`, per-module log files, Modbus/OCPP TLS cert/key/CA files (including the setup dialogs' path-existence validation).
+**NF-R-054** — The filesystem-touching call sites that apply `~` expansion (NF-R-042) are: config/session/device config files, CLI `--session`/`--device`/`--module`/`--log-file`, per-module log files, Modbus/OCPP TLS cert/key/CA files (including the setup dialogs' path-existence validation).
 
 ## Versioning & testing
 

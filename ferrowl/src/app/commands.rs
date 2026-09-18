@@ -1,7 +1,7 @@
 //! Execution of `:` commands against the active tab: tab lifecycle and session persistence.
 //! Module-specific commands are forwarded to the active view as raw strings.
 
-use ferrowl_util::convert::{Converter, FileType};
+use crate::convert::{Converter, FileType};
 
 use crate::config::Session;
 use crate::module::view::CommandResult;

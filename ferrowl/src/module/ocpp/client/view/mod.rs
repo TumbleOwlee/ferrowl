@@ -1248,9 +1248,9 @@ mod tests {
     /// OC-R-103, OC-R-140 — `:wd` persists CS boot identity, and reloading the written device config seeds
     /// it back into a fresh view instead of the built-in defaults.
     async fn ut_write_device_persists_and_reloads_boot_identity() {
+        use crate::convert::{Converter, FileType};
         use crate::module::view::CommandResult;
         use ferrowl_lua::module::ValueType;
-        use ferrowl_util::convert::{Converter, FileType};
 
         let mut v = client_view::<V1_6>(OcppVersion::V1_6);
         with_state_mut(&v.state, |s| {
@@ -1282,9 +1282,9 @@ mod tests {
     /// OC-R-104, OC-R-141 — `:wd` persists the 1.6-only meter/modem identity fields, and reloading the
     /// written device config seeds them back into a fresh view.
     async fn ut_write_device_persists_and_reloads_meter_identity() {
+        use crate::convert::{Converter, FileType};
         use crate::module::view::CommandResult;
         use ferrowl_lua::module::ValueType;
-        use ferrowl_util::convert::{Converter, FileType};
 
         let mut v = client_view::<V1_6>(OcppVersion::V1_6);
         with_state_mut(&v.state, |s| {

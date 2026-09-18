@@ -9,6 +9,7 @@ mod app;
 mod cli;
 mod command;
 mod config;
+mod convert;
 mod dialog;
 mod instance;
 mod lua;
@@ -17,6 +18,7 @@ mod module;
 mod registry;
 mod script_template;
 mod session;
+mod time;
 mod view;
 
 use std::collections::BTreeMap;
@@ -25,7 +27,6 @@ use std::io::Stdout;
 use clap::Parser;
 use ferrowl_codec::Kind;
 use ferrowl_ui::AlternateScreen;
-use ferrowl_util::Expect;
 use tokio::runtime::Runtime;
 
 use crate::app::{App, Level, Tab};
@@ -372,7 +373,7 @@ fn main() {
     }
 
     // Multi-threaded runtime: background modbus/OCPP tasks run concurrently with the UI loop.
-    let runtime = Runtime::new().panic(|e| format!("Failed to create runtime. [{e}]"));
+    let runtime = Runtime::new().unwrap_or_else(|e| panic!("Failed to create runtime. [{e}]"));
 
     if let Some(SubCommand::Run(ref run_args)) = args.command {
         let code = runtime.block_on(cli::headless::run(run_args));
@@ -428,11 +429,11 @@ mod tests {
     use super::{build_tabs, demo_session_script};
     use crate::cli::{CliArgs, create_module_spec_by_device};
     use crate::config::{self, OcppModuleSpec, Session};
+    use crate::convert::{Converter, FileType};
     use crate::registry::ModuleRegistry;
     use ferrowl_lua::ContextBuilder;
     use ferrowl_lua::module::ModuleDirModule;
     use ferrowl_test_support::{TempDirGuard, reserve_tcp_port, reserve_temp_dir};
-    use ferrowl_util::convert::{Converter, FileType};
     use std::sync::Arc;
 
     fn demo_args(modules: Vec<String>, devices: Vec<String>) -> CliArgs {

@@ -259,8 +259,8 @@ impl OcppDeviceConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::convert::{Converter, FileType};
     use ferrowl_test_support::reserve_temp_dir;
-    use ferrowl_util::convert::{Converter, FileType};
 
     #[test]
     /// SC-R-022 — a script entry with no `enabled` flag defaults to enabled.

@@ -16,7 +16,7 @@ pub fn expand(path: &str) -> PathBuf {
 
 /// [`expand`] with an injectable home directory, so tests can supply a fake one instead of the
 /// process's real `$HOME`.
-pub fn expand_with_home(path: &str, home: Option<&Path>) -> PathBuf {
+pub(crate) fn expand_with_home(path: &str, home: Option<&Path>) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
         if let Some(home) = home {
             return home.join(rest);
