@@ -483,9 +483,10 @@ impl ModbusModule {
     }
 
     /// Rebuild the underlying instance for a new endpoint/role (e.g. switching client↔server),
-    /// reusing the existing memory + registers. Stops the current instance first; the caller is
-    /// expected to `start()` afterwards. This keeps the instance in sync with the spec so writes
-    /// dispatch correctly. The simulation thread is left running (it's decoupled from the network
+    /// reusing the existing memory + registers. The caller must have already settled its own
+    /// deferred stop of any previously running instance before calling; the caller is expected to
+    /// `start()` afterwards. This keeps the instance in sync with the spec so writes dispatch
+    /// correctly. The simulation thread is left running (it's decoupled from the network
     /// instance) but is restarted at the end so a changed sim interval takes effect.
     pub async fn reconfigure(
         &mut self,
@@ -495,9 +496,6 @@ impl ModbusModule {
         read_ranges: ReadRanges,
         tls: ferrowl_modbus::tcp::ModbusTlsConfig,
     ) -> Result<(), Error> {
-        // Best-effort stop of any running instance; the caller is expected to `start()` afterwards.
-        let _ = self.instance.stop().await;
-
         // Adopt new explicit read ranges: cover their gaps in memory, then rebuild operations.
         self.read_ranges = read_ranges;
         for (key, mem_kind, range) in explicit_read_coverage(&self.registers, &self.read_ranges) {

@@ -564,7 +564,9 @@ impl<T: KeyParams> Instance<T> {
     }
 
     /// Stops the running task: asks clients to terminate gracefully, then
-    /// aborts the task if it is still alive.
+    /// aborts the task if it is still alive. Test-only: production code drives the same sequence
+    /// through `request_stop`/`poll_stop` so a deferred stop never blocks a tick.
+    #[cfg(test)]
     pub async fn stop(&mut self) -> Result<(), Error> {
         self.request_stop().await?;
         loop {
