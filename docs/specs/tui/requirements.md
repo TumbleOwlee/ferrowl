@@ -108,7 +108,9 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-315** — The outcome of a stop-bearing lifecycle command (stop, restart, reload) dispatched per UI-R-314 is appended to that module's message log when the stop completes, a failure at Error level (MB-R-098, OC-R-102), never discarded and never carried as the command's immediate `(level, message)` result. `:start` is outside this rule: spawning only schedules the task, so it has no deferred outcome and keeps its immediate result.
 
-**UI-R-316** — Closing a tab other than the last (UI-R-019) waits at most 1 s for that tab's module stop to complete; on expiry the close proceeds regardless, the stop having already been signalled (UI-R-314).
+**UI-R-316** — Closing a tab other than the last (UI-R-019) waits at most 1 s for that tab's module stop to complete; on expiry the close proceeds regardless, the stop having already been signalled (UI-R-314, UI-R-350).
+
+**UI-R-350** — Applying an edited module configuration never blocks the application's input and redraw loop: the apply signals the backend's stop and returns, the restart completing asynchronously exactly as a lifecycle command does (UI-R-314), with the outcome appended to that module's message log when it lands (UI-R-315).
 
 ## Dialogs & overlays mechanism
 

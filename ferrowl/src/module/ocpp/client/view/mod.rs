@@ -479,11 +479,25 @@ pub struct ClientView<V: ClientVersion> {
     _version: PhantomData<V>,
 }
 
-/// UI-R-314/UI-R-315 — the follow-up state a deferred stop-bearing lifecycle command needs once
-/// its `poll_stop()` completes.
+/// UI-R-314/UI-R-315/UI-R-350 — the follow-up state a deferred stop-bearing lifecycle command or
+/// applied configuration edit needs once its `poll_stop()` completes.
 enum PendingLifecycle {
     Stop,
     Restart,
+    ApplySetup(Box<SetupFollowUp>),
+}
+
+/// What an applied `:edit` still has to do once its deferred stop settles: swap the whole view
+/// (role or version changed), or adopt the new spec in place and reconnect if the station was
+/// connected when the edit was confirmed (OC-R-085).
+enum SetupFollowUp {
+    Replace(Box<dyn ModuleView>),
+    InPlace {
+        spec: Box<OcppSpec>,
+        path: String,
+        device: Box<OcppDeviceConfig>,
+        was_online: bool,
+    },
 }
 
 impl<V: ClientVersion> HasState for ClientView<V> {
@@ -1104,6 +1118,19 @@ mod tests {
         );
     }
 
+    /// Drive `refresh_impl()` until a deferred stop-bearing follow-up (UI-R-350) has settled, or
+    /// once if none was pending.
+    async fn settle<V: ClientVersion>(v: &mut ClientView<V>) {
+        for _ in 0..200 {
+            v.refresh_impl().await;
+            if !v.lifecycle_pending() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        panic!("lifecycle never settled");
+    }
+
     #[tokio::test]
     /// OC-R-085 — changing role or OCPP version replaces the view; any other change reconfigures
     /// the running instance in place, reconnecting only if it was connected.
@@ -1113,7 +1140,7 @@ mod tests {
         let mut edited = v.spec.clone();
         edited.role = OcppRole::Server;
         v.deferred.setup = Some((edited, String::new(), Vec::new()));
-        v.refresh_impl().await;
+        settle(&mut v).await;
         assert!(
             v.take_replacement().is_some(),
             "a role change must replace the view"
@@ -1124,7 +1151,7 @@ mod tests {
         let mut edited = v.spec.clone();
         edited.version = OcppVersion::V2_0_1;
         v.deferred.setup = Some((edited, String::new(), Vec::new()));
-        v.refresh_impl().await;
+        settle(&mut v).await;
         assert!(
             v.take_replacement().is_some(),
             "a version change must replace the view"
@@ -1136,7 +1163,7 @@ mod tests {
         let mut edited = v.spec.clone();
         edited.port = 4711;
         v.deferred.setup = Some((edited.clone(), String::new(), Vec::new()));
-        v.refresh_impl().await;
+        settle(&mut v).await;
         assert!(
             v.take_replacement().is_none(),
             "a non-role/version change must not replace the view"
@@ -1160,7 +1187,7 @@ mod tests {
         let edited = v.spec.clone(); // same role/version: in-place reconfigure, not a replacement
         let headers = vec![ferrowl_ocpp::HeaderDef::new("X-Tenant", "acme-1").unwrap()];
         v.deferred.setup = Some((edited, String::new(), headers.clone()));
-        v.refresh_impl().await;
+        settle(&mut v).await;
         assert!(
             v.take_replacement().is_none(),
             "same role/version must reconfigure in place, not replace the view"
@@ -1181,7 +1208,7 @@ mod tests {
         let mut edited = v.spec.clone();
         edited.version = OcppVersion::V2_0_1;
         v.deferred.setup = Some((edited, String::new(), Vec::new()));
-        v.refresh_impl().await;
+        settle(&mut v).await;
 
         let replacement = v
             .take_replacement()

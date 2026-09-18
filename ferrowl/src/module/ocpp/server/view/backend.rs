@@ -24,7 +24,7 @@ use crate::module::view::{CommandFuture, CommandResult, RefreshFuture, parse_com
 
 use super::{
     Entry, EntryState, EntryStateT, OCPP_SERVER_COMMAND_SPECS, OcppServerCmd, PendingLifecycle,
-    ServerOverlay, ServerVersion, ServerView, fill_device_rfids,
+    ServerOverlay, ServerVersion, ServerView, SetupFollowUp, fill_device_rfids,
 };
 
 /// The start/restart log line, built from the TLS mode the backend reports it actually bound
@@ -97,6 +97,47 @@ where
     /// Forget every station's registered state (after the entry set is cleared).
     fn clear_lua_states(&mut self) {
         with_state_mut(&self.lua_states, |s| s.stations.clear());
+    }
+
+    /// UI-R-350 — signal the stop an applied configuration edit needs and defer `follow_up` to
+    /// the settle block, following the same overwrite/nothing-was-running rules as
+    /// `:stop`/`:restart` (`OcppServerCmd::Stop`). Returns `true` if the follow-up was deferred
+    /// (caller must not fall through to code that assumes it already ran), `false` if it ran
+    /// inline because nothing was running.
+    async fn apply_setup_follow_up(&mut self, follow_up: SetupFollowUp) -> bool {
+        if self.pending_lifecycle.is_some() {
+            self.pending_lifecycle = Some(PendingLifecycle::ApplySetup(Box::new(follow_up)));
+            return true;
+        }
+        match self.backend.request_stop().await {
+            Ok(()) => {
+                self.pending_lifecycle = Some(PendingLifecycle::ApplySetup(Box::new(follow_up)));
+                true
+            }
+            // Nothing was running: no in-flight task for `poll_stop()` to ever resolve, so the
+            // follow-up runs inline right here.
+            Err(_) => {
+                self.entries.clear();
+                self.conn_identity.clear();
+                self.cs_configs.clear();
+                self.clear_lua_states();
+                match follow_up {
+                    SetupFollowUp::Replace(view) => {
+                        self.deferred.replacement = Some(view);
+                    }
+                    SetupFollowUp::InPlace { spec, path, device } => {
+                        self.spec = *spec;
+                        self.device = *device;
+                        self.device_path = path;
+                        self.log
+                            .write()
+                            .await
+                            .write(Level::Info, "Settings updated");
+                    }
+                }
+                false
+            }
+        }
     }
 
     fn set_compact(&mut self, compact: bool) {
@@ -531,10 +572,11 @@ where
 
     pub(super) fn refresh_impl<'a>(&'a mut self) -> RefreshFuture<'a> {
         Box::pin(async move {
-            // UI-R-314/UI-R-315 — a deferred stop-bearing lifecycle command only signalled
-            // `request_stop()`; drain its outcome (and run any follow-up) once the task actually
-            // ends. Row/state housekeeping stays here, not the command handler, so a CSMS that is
-            // still unbinding does not lose its rows before the stop lands.
+            // UI-R-314/UI-R-315/UI-R-350 — a deferred stop-bearing lifecycle command or applied
+            // configuration edit only signalled `request_stop()`; drain its outcome (and run any
+            // follow-up) once the task actually ends. Row/state housekeeping stays here, not the
+            // command handler, so a CSMS that is still unbinding does not lose its rows before the
+            // stop lands.
             if self.pending_lifecycle.is_some()
                 && let Some(stop_result) = self.backend.poll_stop().await
             {
@@ -570,6 +612,30 @@ where
                         };
                         self.log.write().await.write(level, &msg);
                     }
+                    Some(PendingLifecycle::ApplySetup(follow_up)) => {
+                        // OC-R-102 — a stop failure logs at Error, same as the sibling `Stop` and
+                        // `Restart` arms above.
+                        if let Err(e) = stop_result {
+                            self.log
+                                .write()
+                                .await
+                                .write(Level::Error, &format!("Settings update: stop failed: {e}"));
+                        }
+                        match *follow_up {
+                            SetupFollowUp::Replace(view) => {
+                                self.deferred.replacement = Some(view);
+                            }
+                            SetupFollowUp::InPlace { spec, path, device } => {
+                                self.spec = *spec;
+                                self.device = *device;
+                                self.device_path = path;
+                                self.log
+                                    .write()
+                                    .await
+                                    .write(Level::Info, "Settings updated");
+                            }
+                        }
+                    }
                     None => unreachable!("outer condition checked pending_lifecycle.is_some()"),
                 }
             }
@@ -585,53 +651,40 @@ where
                 device.extra_headers = extra_headers;
                 if spec.role == OcppRole::Client {
                     // Stop the listener first: dropping `Server<V>` only detaches its accept task,
-                    // leaving the port bound, so the swapped-in view could never rebind.
-                    if let Err(e) = self.backend.stop().await {
-                        self.log.write().await.write(
-                            Level::Error,
-                            &format!("Stop before role switch failed: {e}"),
-                        );
-                    }
-                    self.deferred.replacement = Some(build_client_view(spec, path, device));
+                    // leaving the port bound, so the swapped-in view could never rebind — the
+                    // replacement now waits for the settle rather than for a blocking stop.
+                    let replacement = build_client_view(spec, path, device);
+                    self.apply_setup_follow_up(SetupFollowUp::Replace(replacement))
+                        .await;
                     return;
                 }
                 if spec.version != self.spec.version {
                     // A version change must swap the whole view: `ServerView<V>`/`OcppServer<V>` are
                     // generic over the *old* version and would rebind with the old subprotocol,
                     // rejecting the (now-different-version) client handshake with a 400.
-                    if let Err(e) = self.backend.stop().await {
-                        self.log.write().await.write(
-                            Level::Error,
-                            &format!("Stop before version switch failed: {e}"),
-                        );
-                    }
-                    self.deferred.replacement = Some(build_server_view(spec, path, device));
+                    let replacement = build_server_view(spec, path, device);
+                    self.apply_setup_follow_up(SetupFollowUp::Replace(replacement))
+                        .await;
                     return;
                 }
                 // Rebind on the (possibly changed) endpoint: the backend builds its listener
                 // config from the spec passed into `start`, so updating `self.spec` is all an
                 // edit needs.
-                if let Err(e) = self.backend.stop().await {
-                    self.log.write().await.write(
-                        Level::Error,
-                        &format!("Stop for settings update failed: {e}"),
-                    );
+                let follow_up = SetupFollowUp::InPlace {
+                    spec: Box::new(spec),
+                    path,
+                    device: Box::new(device),
+                };
+                if self.apply_setup_follow_up(follow_up).await {
+                    return;
                 }
-                self.spec = spec;
-                self.device = device;
-                self.device_path = path;
-                self.entries.clear();
-                self.conn_identity.clear();
-                self.cs_configs.clear();
-                self.clear_lua_states();
-                self.log
-                    .write()
-                    .await
-                    .write(Level::Info, "Settings updated");
             }
 
-            // Auto-bind / honour `:start`.
-            if self.want_running && !self.backend.is_online() {
+            // Auto-bind / honour `:start`. Gated on no pending stop: an in-place apply on a
+            // running CSMS would otherwise try to bind the new listener in the same tick the old
+            // one is still unbinding and fail with address-in-use; `:restart`'s rebind is then
+            // deterministically the settle arm's own `start`, not a race with this block.
+            if self.want_running && !self.backend.is_online() && self.pending_lifecycle.is_none() {
                 let handler = V::handler(self.events_tx.clone(), self.rfids.clone());
                 if let Err(e) = self.backend.start(&self.spec, handler).await {
                     self.log
@@ -1087,6 +1140,227 @@ mod tests {
         assert!(
             v.backend.bound_addr().is_none(),
             "the stop's follow-up must win: no rebind behind a later stop"
+        );
+    }
+    /// UI-R-350 — applying a module configuration edit against a running CSMS signals the stop
+    /// and returns without waiting for the listener to unbind.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_edit_apply_returns_without_blocking() {
+        let port = ferrowl_test_support::reserve_tcp_port().release();
+
+        let mut v = server_view(port);
+        v.handle_command("start").await;
+        wait_bound(&v).await;
+
+        let mut edited = v.spec.clone();
+        edited.port = ferrowl_test_support::reserve_tcp_port().release();
+        v.deferred.setup = Some((edited.clone(), String::new(), Vec::new()));
+
+        let before = std::time::Instant::now();
+        v.refresh().await;
+        assert!(
+            before.elapsed() < std::time::Duration::from_millis(50),
+            "refresh() took {:?}, expected to return immediately",
+            before.elapsed()
+        );
+        assert!(v.lifecycle_pending());
+
+        for _ in 0..200 {
+            if !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(!v.lifecycle_pending());
+    }
+
+    /// UI-R-350, UI-E-161 — the new endpoint is not bound while the deferred stop is still
+    /// pending (`self.spec` still holds the pre-edit port), and only once the settle loop plus
+    /// the following auto-bind tick have run does the CSMS come back online on the new port,
+    /// with no `listen failed` line in the log.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_edit_apply_rebinds_only_after_stop_settles() {
+        let port = ferrowl_test_support::reserve_tcp_port().release();
+
+        let mut v = server_view(port);
+        v.handle_command("start").await;
+        wait_bound(&v).await;
+
+        let pre_edit_port = v.spec.port;
+        let mut edited = v.spec.clone();
+        edited.port = ferrowl_test_support::reserve_tcp_port().release();
+        v.deferred.setup = Some((edited.clone(), String::new(), Vec::new()));
+
+        v.refresh().await;
+        assert!(v.lifecycle_pending());
+        assert_eq!(
+            v.spec.port, pre_edit_port,
+            "the pre-edit spec must still render until the deferred stop settles"
+        );
+
+        for _ in 0..200 {
+            if !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(!v.lifecycle_pending());
+        assert_eq!(
+            v.spec.port, edited.port,
+            "the edited spec must be adopted at settle"
+        );
+
+        wait_bound(&v).await;
+
+        let lines = v
+            .log
+            .read()
+            .await
+            .peek_n(crate::app::LOG_SIZE)
+            .into_iter()
+            .map(|(_, level, l)| (level, l))
+            .collect::<Vec<_>>();
+        assert!(
+            !lines.iter().any(|(_, l)| l.starts_with("listen failed")),
+            "no bind race expected: {lines:?}"
+        );
+    }
+
+    /// UI-R-350 — a role switch (server → client) confirmed against a running CSMS signals the
+    /// stop and defers `take_replacement()` until that deferred stop settles.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_edit_apply_role_switch_defers_replacement_until_stop_settles() {
+        let port = ferrowl_test_support::reserve_tcp_port().release();
+
+        let mut v = server_view(port);
+        v.handle_command("start").await;
+        wait_bound(&v).await;
+
+        let mut edited = v.spec.clone();
+        edited.role = OcppRole::Client;
+        v.deferred.setup = Some((edited, String::new(), Vec::new()));
+        v.refresh().await;
+        assert!(v.lifecycle_pending());
+        assert!(
+            v.take_replacement().is_none(),
+            "the replacement must not be installed while the stop is still pending"
+        );
+
+        for _ in 0..200 {
+            if !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(!v.lifecycle_pending());
+        assert!(
+            v.take_replacement().is_some(),
+            "the replacement must be installed once the deferred stop settles"
+        );
+    }
+
+    /// UI-R-350 — applying an edit against a stopped CSMS lands within the same `refresh()`
+    /// call, since `request_stop()` errors `NotRunning` and there is no in-flight task for
+    /// `poll_stop()` to ever resolve.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_edit_apply_on_stopped_csms_applies_immediately() {
+        let port = ferrowl_test_support::reserve_tcp_port().release();
+
+        let mut v = server_view(port);
+        v.want_running = false;
+
+        let mut edited = v.spec.clone();
+        edited.port = ferrowl_test_support::reserve_tcp_port().release();
+        v.deferred.setup = Some((edited.clone(), String::new(), Vec::new()));
+        v.refresh().await;
+
+        assert!(
+            !v.lifecycle_pending(),
+            "nothing was running, so the apply must land inline, not defer"
+        );
+        assert_eq!(v.spec.port, edited.port);
+    }
+
+    /// UI-R-350 — an edit confirmed while a `:stop` is already pending overwrites the follow-up
+    /// in place rather than re-requesting `request_stop()` against a backend already `Stopping`,
+    /// same as `ut_restart_while_stop_pending_overwrites_the_follow_up`: only the apply's own
+    /// outcome (`Settings updated`) lands at settle, not `CSMS server stopped`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_edit_apply_while_stop_pending_overwrites_the_follow_up() {
+        let port = ferrowl_test_support::reserve_tcp_port().release();
+
+        let mut v = server_view(port);
+        v.handle_command("start").await;
+        wait_bound(&v).await;
+
+        assert!(matches!(
+            v.handle_command("stop").await,
+            CommandResult::Handled(None)
+        ));
+        assert!(v.lifecycle_pending());
+
+        // `apply_setup_follow_up` is called directly, bypassing `deferred.setup` + `refresh()`:
+        // the CSMS backend's `Terminate` is handled promptly (UI-R-314 never waits on a
+        // connection's own close), so routing this through a real `refresh()` tick races the
+        // settle block against this very overwrite check — the stop can (and, under slower
+        // instrumentation, reliably does) settle inside the same tick before the overwrite
+        // check runs. `pending_lifecycle` itself is pure view state, touched only here and by
+        // that settle block, so calling this method with no intervening `.await` on `refresh()`
+        // pins the overwrite decision deterministically without racing the backend at all.
+        let mut edited = v.spec.clone();
+        edited.port = ferrowl_test_support::reserve_tcp_port().release();
+        let follow_up = SetupFollowUp::InPlace {
+            spec: Box::new(edited.clone()),
+            path: String::new(),
+            device: Box::new(OcppDeviceConfig::default()),
+        };
+        assert!(
+            v.apply_setup_follow_up(follow_up).await,
+            "the follow-up must be deferred, not applied inline"
+        );
+        assert!(
+            matches!(v.pending_lifecycle, Some(PendingLifecycle::ApplySetup(_))),
+            "the follow-up must overwrite the pending stop in place"
+        );
+
+        for _ in 0..200 {
+            if !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(
+            !v.lifecycle_pending(),
+            "a stop overwritten with an apply must still settle, not latch forever"
+        );
+        assert_eq!(
+            v.spec.port, edited.port,
+            "the overwritten follow-up must be the apply, not the original stop"
+        );
+
+        let lines = v
+            .log
+            .read()
+            .await
+            .peek_n(crate::app::LOG_SIZE)
+            .into_iter()
+            .map(|(_, level, l)| (level, l))
+            .collect::<Vec<_>>();
+        assert!(
+            lines
+                .iter()
+                .any(|(level, l)| *level == Level::Info && l == "Settings updated"),
+            "missing 'Settings updated' Info line: {lines:?}"
+        );
+        assert!(
+            !lines
+                .iter()
+                .any(|(level, l)| *level == Level::Info && l == "CSMS server stopped"),
+            "the overwritten stop's own outcome must not be logged: {lines:?}"
         );
     }
 

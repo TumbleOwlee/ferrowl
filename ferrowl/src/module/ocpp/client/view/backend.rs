@@ -17,7 +17,7 @@ use crate::module::view::{CommandFuture, CommandResult, RefreshFuture, parse_com
 
 use super::{
     ClientState, ClientVersion, ClientView, OCPP_CLIENT_COMMAND_SPECS, OcppClientCmd,
-    PendingLifecycle, config_rows, conn_rows, msg_row, nv_rows,
+    PendingLifecycle, SetupFollowUp, config_rows, conn_rows, msg_row, nv_rows,
 };
 
 /// Read a CS-level string field (boot identity) by its `ClientFields` name, for persisting on
@@ -89,6 +89,61 @@ impl<V: ClientVersion> ClientView<V> {
             self.state.clone(),
             self.backend.sender(),
         )
+    }
+
+    /// UI-R-350 — signal the stop an applied configuration edit needs and defer `follow_up` to the
+    /// settle block, following the same overwrite/nothing-was-running rules as `:stop`/`:restart`
+    /// (`OcppClientCmd::Stop`). Returns `true` if the follow-up was deferred (caller must not fall
+    /// through to code that assumes it already ran), `false` if it ran inline because nothing was
+    /// running.
+    async fn apply_setup_follow_up(&mut self, follow_up: SetupFollowUp) -> bool {
+        if self.pending_lifecycle.is_some() {
+            self.pending_lifecycle = Some(PendingLifecycle::ApplySetup(Box::new(follow_up)));
+            return true;
+        }
+        match self.backend.request_stop().await {
+            Ok(()) => {
+                self.pending_lifecycle = Some(PendingLifecycle::ApplySetup(Box::new(follow_up)));
+                true
+            }
+            // Nothing was running: no in-flight task for `poll_stop()` to ever resolve, so the
+            // follow-up runs inline right here.
+            Err(_) => {
+                match follow_up {
+                    SetupFollowUp::Replace(view) => {
+                        self.deferred.replacement = Some(view);
+                    }
+                    SetupFollowUp::InPlace {
+                        spec,
+                        path,
+                        device,
+                        was_online,
+                    } => {
+                        self.spec = *spec;
+                        self.device = *device;
+                        self.device_path = path;
+                        self.log
+                            .write()
+                            .await
+                            .write(Level::Info, "Settings updated");
+                        if was_online {
+                            let handler = self.make_handler();
+                            if let Err(e) = self
+                                .backend
+                                .start(&self.spec, &self.device, &self.log, handler)
+                                .await
+                            {
+                                self.log.write().await.write(
+                                    Level::Error,
+                                    &format!("Restart after settings update failed: {e}"),
+                                );
+                            }
+                        }
+                    }
+                }
+                false
+            }
+        }
     }
 
     /// Write the device config (reconciled with the live spec, scripts + connectors preserved).
@@ -221,9 +276,9 @@ impl<V: ClientVersion> ClientView<V> {
 
     pub(super) fn refresh_impl<'a>(&'a mut self) -> RefreshFuture<'a> {
         Box::pin(async move {
-            // UI-R-314/UI-R-315 — a deferred stop-bearing lifecycle command only signalled
-            // `request_stop()`; drain its outcome (and run any follow-up) once the task actually
-            // ends.
+            // UI-R-314/UI-R-315/UI-R-350 — a deferred stop-bearing lifecycle command or applied
+            // configuration edit only signalled `request_stop()`; drain its outcome (and run any
+            // follow-up) once the task actually ends.
             if self.pending_lifecycle.is_some()
                 && let Some(stop_result) = self.backend.poll_stop().await
             {
@@ -258,6 +313,49 @@ impl<V: ClientVersion> ClientView<V> {
                         };
                         self.log.write().await.write(level, &msg);
                     }
+                    Some(PendingLifecycle::ApplySetup(follow_up)) => {
+                        // OC-R-102 — a stop failure logs at Error, same as the sibling `Stop` and
+                        // `Restart` arms above; `Client<V>::join` has no path back to `Err` in the
+                        // current fixtures, so this arm is untested there too.
+                        if let Err(e) = stop_result {
+                            self.log
+                                .write()
+                                .await
+                                .write(Level::Error, &format!("Settings update: stop failed: {e}"));
+                        }
+                        match *follow_up {
+                            SetupFollowUp::Replace(view) => {
+                                self.deferred.replacement = Some(view);
+                            }
+                            SetupFollowUp::InPlace {
+                                spec,
+                                path,
+                                device,
+                                was_online,
+                            } => {
+                                self.spec = *spec;
+                                self.device = *device;
+                                self.device_path = path;
+                                self.log
+                                    .write()
+                                    .await
+                                    .write(Level::Info, "Settings updated");
+                                if was_online {
+                                    let handler = self.make_handler();
+                                    if let Err(e) = self
+                                        .backend
+                                        .start(&self.spec, &self.device, &self.log, handler)
+                                        .await
+                                    {
+                                        self.log.write().await.write(
+                                            Level::Error,
+                                            &format!("Restart after settings update failed: {e}"),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
                     None => unreachable!("outer condition checked pending_lifecycle.is_some()"),
                 }
             }
@@ -280,57 +378,32 @@ impl<V: ClientVersion> ClientView<V> {
                 // metadata the dialog never exposes.
                 device.extra_headers = extra_headers;
                 if spec.role == OcppRole::Server {
-                    if let Err(e) = self.backend.stop().await {
-                        self.log.write().await.write(
-                            Level::Error,
-                            &format!("Stop before role switch failed: {e}"),
-                        );
-                    }
-                    self.deferred.replacement = Some(build_server_view(spec, path, device));
+                    let replacement = build_server_view(spec, path, device);
+                    self.apply_setup_follow_up(SetupFollowUp::Replace(replacement))
+                        .await;
                     return;
                 }
                 if spec.version != self.spec.version {
-                    if let Err(e) = self.backend.stop().await {
-                        self.log.write().await.write(
-                            Level::Error,
-                            &format!("Stop before version switch failed: {e}"),
-                        );
-                    }
                     if !device.scripts.is_empty() {
                         self.log.write().await.write(
                             Level::Warning,
                             "Version switched: scripts kept but may call actions the new version lacks",
                         );
                     }
-                    self.deferred.replacement = Some(build_client_view(spec, path, device));
+                    let replacement = build_client_view(spec, path, device);
+                    self.apply_setup_follow_up(SetupFollowUp::Replace(replacement))
+                        .await;
                     return;
                 } else {
                     let was_online = self.backend.is_online();
-                    if let Err(e) = self.backend.stop().await {
-                        self.log.write().await.write(
-                            Level::Error,
-                            &format!("Stop for settings update failed: {e}"),
-                        );
-                    }
-                    self.spec = spec;
-                    self.device = device;
-                    self.device_path = path;
-                    self.log
-                        .write()
-                        .await
-                        .write(Level::Info, "Settings updated");
-                    if was_online {
-                        let handler = self.make_handler();
-                        if let Err(e) = self
-                            .backend
-                            .start(&self.spec, &self.device, &self.log, handler)
-                            .await
-                        {
-                            self.log.write().await.write(
-                                Level::Error,
-                                &format!("Restart after settings update failed: {e}"),
-                            );
-                        }
+                    let follow_up = SetupFollowUp::InPlace {
+                        spec: Box::new(spec),
+                        path,
+                        device: Box::new(device),
+                        was_online,
+                    };
+                    if self.apply_setup_follow_up(follow_up).await {
+                        return;
                     }
                 }
             }
@@ -906,6 +979,255 @@ mod tests {
         );
 
         v.backend.stop().await.expect("cleanup stop");
+    }
+
+    /// UI-R-350, UI-E-161 — applying a module configuration edit signals the stop and returns
+    /// without waiting; while the stop is still pending, `self.spec` still holds the pre-edit URL,
+    /// and only once the settle loop drains it does `self.spec` adopt the edited URL and the log
+    /// carry `Settings updated`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_edit_apply_returns_without_blocking() {
+        let guard = reserve_tcp_port();
+        let port = guard.port();
+        let _listener = guard.into_listener();
+
+        let mut v = client_view::<ferrowl_ocpp::V1_6>(OcppVersion::V1_6, port);
+        v.spec.timeout_ms = Some(60_000);
+        let handler = v.make_handler();
+        v.backend
+            .start(&v.spec, &v.device, &v.log, handler)
+            .await
+            .expect("start must not fail synchronously");
+
+        let pre_edit_port = v.spec.port;
+        let mut edited = v.spec.clone();
+        edited.port = pre_edit_port + 1;
+        v.deferred.setup = Some((edited.clone(), String::new(), Vec::new()));
+
+        let before = std::time::Instant::now();
+        v.refresh().await;
+        assert!(
+            before.elapsed() < std::time::Duration::from_millis(50),
+            "refresh() took {:?}, expected to return immediately",
+            before.elapsed()
+        );
+        assert!(v.lifecycle_pending());
+        assert_eq!(
+            v.spec.port, pre_edit_port,
+            "the pre-edit spec must still render until the deferred stop settles"
+        );
+
+        for _ in 0..200 {
+            if !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(!v.lifecycle_pending());
+        assert_eq!(
+            v.spec.port, edited.port,
+            "the edited spec must be adopted at settle"
+        );
+
+        let lines = v
+            .log
+            .read()
+            .await
+            .peek_n(crate::app::LOG_SIZE)
+            .into_iter()
+            .map(|(_, level, l)| (level, l))
+            .collect::<Vec<_>>();
+        assert!(
+            lines
+                .iter()
+                .any(|(level, l)| *level == Level::Info && l == "Settings updated"),
+            "missing 'Settings updated' Info line: {lines:?}"
+        );
+
+        v.backend.stop().await.expect("cleanup stop");
+    }
+
+    /// UI-R-350 — applying an edit while the module's connection attempt is still in flight (a
+    /// held listener that TCP-accepts but never completes the handshake) abandons that attempt
+    /// (OC-R-175) once the deferred stop settles, and the new configuration is adopted (`v.spec`
+    /// matches the edited spec). The dial never reached `is_online()`, so per OC-R-085 the station
+    /// stays idle rather than reconnecting; UI-E-160's "reconnects" outcome needs a station that
+    /// was actually connected before the edit, which this fixture does not produce.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_edit_apply_while_connect_in_flight_adopts_spec_after_settle() {
+        let guard = reserve_tcp_port();
+        let port = guard.port();
+        let _listener = guard.into_listener();
+
+        let mut v = client_view::<ferrowl_ocpp::V1_6>(OcppVersion::V1_6, port);
+        v.spec.timeout_ms = Some(60_000);
+        let handler = v.make_handler();
+        v.backend
+            .start(&v.spec, &v.device, &v.log, handler)
+            .await
+            .expect("start must not fail synchronously");
+
+        let mut edited = v.spec.clone();
+        edited.timeout_ms = Some(1500);
+        v.deferred.setup = Some((edited.clone(), String::new(), Vec::new()));
+        v.refresh().await;
+        assert!(v.lifecycle_pending());
+
+        for _ in 0..200 {
+            if !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(!v.lifecycle_pending());
+        assert_eq!(
+            v.spec.timeout_ms, edited.timeout_ms,
+            "the edited spec must be adopted once the abandoned in-flight attempt settles"
+        );
+        use crate::view::status_bar::ConnStatus;
+        assert_eq!(
+            v.backend.connection_status(),
+            ConnStatus::Disconnected,
+            "OC-R-085: the abandoned dial never connected, so the settle must not restart it"
+        );
+
+        v.backend.stop().await.expect("cleanup stop");
+    }
+
+    /// UI-R-350 — a role switch (client → server) confirmed against a running station signals the
+    /// stop and defers `take_replacement()` until that deferred stop settles.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_edit_apply_role_switch_defers_replacement_until_stop_settles() {
+        let guard = reserve_tcp_port();
+        let port = guard.port();
+        let _listener = guard.into_listener();
+
+        let mut v = client_view::<ferrowl_ocpp::V1_6>(OcppVersion::V1_6, port);
+        v.spec.timeout_ms = Some(60_000);
+        let handler = v.make_handler();
+        v.backend
+            .start(&v.spec, &v.device, &v.log, handler)
+            .await
+            .expect("start must not fail synchronously");
+
+        let mut edited = v.spec.clone();
+        edited.role = OcppRole::Server;
+        v.deferred.setup = Some((edited, String::new(), Vec::new()));
+        v.refresh().await;
+        assert!(v.lifecycle_pending());
+        assert!(
+            v.take_replacement().is_none(),
+            "the replacement must not be installed while the stop is still pending"
+        );
+
+        for _ in 0..200 {
+            if !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(!v.lifecycle_pending());
+        assert!(
+            v.take_replacement().is_some(),
+            "the replacement must be installed once the deferred stop settles"
+        );
+    }
+
+    /// UI-R-350 — applying an edit against a stopped station lands within the same `refresh()`
+    /// call, since `request_stop()` errors `NotRunning` and there is no in-flight task for
+    /// `poll_stop()` to ever resolve.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_edit_apply_on_stopped_station_applies_immediately() {
+        let guard = reserve_tcp_port();
+        let port = guard.port();
+        let _listener = guard.into_listener();
+
+        let mut v = client_view::<ferrowl_ocpp::V1_6>(OcppVersion::V1_6, port);
+
+        let mut edited = v.spec.clone();
+        edited.port = port + 1;
+        v.deferred.setup = Some((edited.clone(), String::new(), Vec::new()));
+        v.refresh().await;
+
+        assert!(
+            !v.lifecycle_pending(),
+            "nothing was running, so the apply must land inline, not defer"
+        );
+        assert_eq!(v.spec.port, edited.port);
+    }
+
+    /// UI-R-350 — an edit confirmed while a `:stop` is already pending overwrites the follow-up
+    /// in place rather than re-requesting `request_stop()` against a backend already `Stopping`,
+    /// same as `ut_restart_while_stop_pending_overwrites_the_follow_up`: only the apply's own
+    /// outcome (`Settings updated`) lands at settle, not `Disconnected`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_edit_apply_while_stop_pending_overwrites_the_follow_up() {
+        let guard = reserve_tcp_port();
+        let port = guard.port();
+        let _listener = guard.into_listener();
+
+        let mut v = client_view::<ferrowl_ocpp::V1_6>(OcppVersion::V1_6, port);
+        v.spec.timeout_ms = Some(60_000);
+        let handler = v.make_handler();
+        v.backend
+            .start(&v.spec, &v.device, &v.log, handler)
+            .await
+            .expect("start must not fail synchronously");
+
+        assert!(matches!(
+            v.handle_command("stop").await,
+            CommandResult::Handled(None)
+        ));
+        assert!(v.lifecycle_pending());
+
+        let mut edited = v.spec.clone();
+        edited.timeout_ms = Some(1500);
+        v.deferred.setup = Some((edited.clone(), String::new(), Vec::new()));
+        v.refresh().await;
+        assert!(
+            v.lifecycle_pending(),
+            "the follow-up must still be pending, not dropped"
+        );
+
+        for _ in 0..200 {
+            if !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(
+            !v.lifecycle_pending(),
+            "a stop overwritten with an apply must still settle, not latch forever"
+        );
+        assert_eq!(
+            v.spec.timeout_ms, edited.timeout_ms,
+            "the overwritten follow-up must be the apply, not the original stop"
+        );
+
+        let lines = v
+            .log
+            .read()
+            .await
+            .peek_n(crate::app::LOG_SIZE)
+            .into_iter()
+            .map(|(_, level, l)| (level, l))
+            .collect::<Vec<_>>();
+        assert!(
+            lines
+                .iter()
+                .any(|(level, l)| *level == Level::Info && l == "Settings updated"),
+            "missing 'Settings updated' Info line: {lines:?}"
+        );
+        assert!(
+            !lines
+                .iter()
+                .any(|(level, l)| *level == Level::Info && l == "Disconnected"),
+            "the overwritten stop's own outcome must not be logged: {lines:?}"
+        );
     }
 
     /// CSMS handler answering every action used by these tests and recording the ordered list of

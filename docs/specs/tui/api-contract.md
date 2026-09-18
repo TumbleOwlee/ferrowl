@@ -34,7 +34,7 @@ Forwarded to the active view; **semantics owned by the protocol area**. Each vie
 
 | Command | Arguments | Purpose (→ modbus) | Req |
 |---|---|---|---|
-| `:edit` / `:e` | — | Open the module setup dialog | UI-R-018 |
+| `:edit` / `:e` | — | Open the module setup dialog | UI-R-018, UI-R-350 |
 | `:add` / `:a` | — | Open the add-register dialog | UI-R-018, UI-R-024 |
 | `:start` | — | Start the module (connect/bind) | UI-R-018 |
 | `:stop` | — | Stop the module | UI-R-018, UI-R-314 |
@@ -51,7 +51,7 @@ Modbus monitor module (`role = monitor`, MB-R-140–145, MB-R-191–198):
 
 | Command | Arguments | Purpose (→ modbus) | Req |
 |---|---|---|---|
-| `:edit` / `:e` | — | Open the module setup dialog | UI-R-018 |
+| `:edit` / `:e` | — | Open the module setup dialog | UI-R-018, UI-R-350 |
 | `:add` / `:a` | — | Open the add-register-interpretation dialog (UI-R-061) | UI-R-018, UI-R-061 |
 | `:start` | — | Start the module (open the serial port receive-only) | UI-R-018 |
 | `:stop` | — | Stop the module | UI-R-018, UI-R-314 |
@@ -68,7 +68,7 @@ Modbus monitor module (`role = monitor`, MB-R-140–145, MB-R-191–198):
 
 | Command | Arguments | Purpose (→ ocpp) | Req |
 |---|---|---|---|
-| `:edit` / `:e` | — | Open the module setup dialog | UI-R-018 |
+| `:edit` / `:e` | — | Open the module setup dialog | UI-R-018, UI-R-350 |
 | `:start` | — | Connect to the CSMS | UI-R-018 |
 | `:stop` | — | Disconnect | UI-R-018, UI-R-314 |
 | `:restart` | — | Reconnect | UI-R-018 |
@@ -83,7 +83,7 @@ Modbus monitor module (`role = monitor`, MB-R-140–145, MB-R-191–198):
 | `:start` | — | Bind the CSMS listener | UI-R-018 |
 | `:stop` | — | Unbind (clears connected-station entries) | UI-R-018, UI-R-314 |
 | `:restart` | — | Rebind (clears entries) | UI-R-018 |
-| `:edit` / `:e` | — | Open the module setup dialog | UI-R-018 |
+| `:edit` / `:e` | — | Open the module setup dialog | UI-R-018, UI-R-350 |
 | `:write-device` / `:wd` `[path]` | optional path | Save the device config | UI-R-018 |
 | `:compact` | — | Toggle compact rows | UI-R-018 |
 | `:log [file]` | optional file path | Set the file sink; bare `:log` or empty path disables | UI-R-018 |

@@ -808,21 +808,31 @@ pub struct ModbusMonitorModuleView {
     cached_messages_generation: u64,
     /// UI-R-314/UI-R-315 — a stop-bearing lifecycle command (`:stop`/`:restart`/`:reload`) that
     /// has signalled `request_stop()` and is waiting for `refresh()` to observe `poll_stop()`
-    /// complete before logging its outcome (and, for `Restart`/`Reload`, running the follow-up).
+    /// complete before logging its outcome (and, for `Restart`/`Reload`/`ApplyEdit`, running the
+    /// follow-up).
     pending_lifecycle: Option<PendingLifecycle>,
     /// CL-R-057 — the settled outcome of the most recently completed `PendingLifecycle::Stop`,
     /// consumed by [`ModuleView::take_stop_outcome`] rather than re-derived from the log.
     last_stop_outcome: Option<StopOutcome>,
+    /// UI-R-350, MB-R-255 — a `:edit` confirmed by `confirm_edit` in the (synchronous) key
+    /// handler, resolved but not yet acted on: `refresh` signals the deferred stop and the
+    /// rebuild happens once it settles.
+    pending_setup: Option<Box<(ModuleSpec, MonitorDeviceConfig)>>,
 }
 
 /// UI-R-314/UI-R-315 — the follow-up state a deferred stop-bearing lifecycle command needs once
 /// its `poll_stop()` completes. `Reload` carries the config already loaded synchronously at
-/// dispatch time (`handle_command`), so `refresh()` never re-reads the file.
+/// dispatch time (`handle_command`), so `refresh()` never re-reads the file. UI-R-350 —
+/// `ApplyEdit` carries a `:edit` confirm's already-resolved spec/device the same way.
 enum PendingLifecycle {
     Stop,
     Restart,
     Reload {
         path: String,
+        device: Box<MonitorDeviceConfig>,
+    },
+    ApplyEdit {
+        spec: Box<ModuleSpec>,
         device: Box<MonitorDeviceConfig>,
     },
 }
@@ -850,6 +860,7 @@ impl ModbusMonitorModuleView {
             cached_messages_generation: 0,
             pending_lifecycle: None,
             last_stop_outcome: None,
+            pending_setup: None,
         }
     }
 
@@ -879,10 +890,10 @@ impl ModbusMonitorModuleView {
         self.overlay.close();
     }
 
-    /// Resolve the open `Edit` overlay's dialog and rebuild `spec`/`device`/`module` from it
-    /// (MB-R-140), mirroring `:reload`'s "stop the old task, build a fresh module" shape but
-    /// without an implicit restart — the user starts the monitor explicitly, same as after any
-    /// other setup edit. No-op if the overlay isn't open or the dialog doesn't resolve.
+    /// Resolve the open `Edit` overlay's dialog (MB-R-140) into a pending setup edit: `refresh`
+    /// signals the deferred stop this synchronous key handler cannot itself await, and the
+    /// rebuild happens once that stop settles (MB-R-255, UI-R-350). No-op if the overlay isn't
+    /// open or the dialog doesn't resolve.
     fn confirm_edit(&mut self) {
         let MonitorOverlay::EditSetup(dialog) = &self.overlay else {
             return;
@@ -895,28 +906,19 @@ impl ModbusMonitorModuleView {
         // client/server module's own edit-confirm); the device-path *field* itself must
         // still apply on every edit-confirm regardless, so it comes from `values.config_path`
         // unconditionally rather than being silently dropped whenever `outcome.device` is `None`.
-        self.spec.device = outcome.values.config_path.clone();
+        //
+        // Built into a clone rather than mutating `self.spec`/`self.device` directly (UI-E-161):
+        // the pre-edit values keep driving the rendered status and tab name until the deferred
+        // stop this schedules actually settles.
+        let mut spec = self.spec.clone();
+        spec.device.clone_from(&outcome.values.config_path);
+        spec.name = outcome.values.name;
+        spec.endpoint = outcome.values.endpoint;
         let mut device = outcome
             .device
             .map_or_else(|| self.device.clone(), |(_, d)| d);
-        self.spec.name = outcome.values.name;
-        self.spec.endpoint = outcome.values.endpoint;
         device.reconnect = Some(outcome.values.reconnect);
-        // `reconfigure` carries the running module's accumulated `table`/
-        // `records`/`log`/`interpretations` over instead of `ModbusMonitorModule::new()`'s
-        // always-fresh-and-empty construction.
-        let placeholder = ModbusMonitorModule::new(&self.spec, &device);
-        self.module =
-            std::mem::replace(&mut self.module, placeholder).reconfigure(&self.spec, &device);
-        // MB-R-150 — the resulting module is what a later `:start` actually runs (not a
-        // throwaway preview instance), so it must carry the session-wide registry forward too.
-        self.module.set_serial_paths(self.serial_paths.clone());
-        // Resync `definitions`
-        // from the reconfigured module's own live map (kept in sync at every `:add`/edit/delete,
-        // `confirm_add`) rather than trusting whatever `device.definitions` was seeded with
-        // above, so a runtime-added interpretation never regresses to a stale on-disk snapshot.
-        device.definitions = self.module.definitions();
-        self.device = device;
+        self.pending_setup = Some(Box::new((spec, device)));
         self.overlay.close();
     }
 
@@ -1345,8 +1347,46 @@ impl ModuleView for ModbusMonitorModuleView {
                         };
                         self.log().write().await.write(level, &msg);
                     }
+                    Some(PendingLifecycle::ApplyEdit { spec, device }) => {
+                        self.spec = *spec;
+                        let mut device = *device;
+                        let placeholder = ModbusMonitorModule::new(&self.spec, &device);
+                        self.module = std::mem::replace(&mut self.module, placeholder)
+                            .reconfigure(&self.spec, &device);
+                        // MB-R-150 — the resulting module is what a later `:start` actually runs
+                        // (not a throwaway preview instance), so it must carry the session-wide
+                        // registry forward too.
+                        self.module.set_serial_paths(self.serial_paths.clone());
+                        // Resync `definitions` from the reconfigured module's own live map (kept
+                        // in sync at every `:add`/edit/delete, `confirm_add`) rather than trusting
+                        // whatever `device.definitions` was seeded with in `confirm_edit`, so a
+                        // runtime-added interpretation never regresses to a stale on-disk snapshot.
+                        device.definitions = self.module.definitions();
+                        self.device = device;
+                        let (level, msg) = match stop_result {
+                            Ok(()) => (Level::Info, "Settings updated".to_string()),
+                            Err(e) => (Level::Error, format!("Settings update: stop failed: {e}")),
+                        };
+                        self.log().write().await.write(level, &msg);
+                    }
                     None => unreachable!("outer condition checked pending_lifecycle.is_some()"),
                 }
+            }
+
+            // UI-R-350, MB-R-255 — a `:edit` confirm resolved in the (synchronous) key handler;
+            // signal its deferred stop now and defer the rebuild to this settling, overwriting
+            // (not losing) any stop already pending — `ModbusMonitorModule::request_stop` always
+            // returns `Ok(())` and arms `stop_deadline` even with no task running, so there is no
+            // nothing-was-running branch here.
+            if let Some(pending) = self.pending_setup.take() {
+                let (spec, device) = *pending;
+                if self.pending_lifecycle.is_none() {
+                    let _ = self.module.request_stop().await;
+                }
+                self.pending_lifecycle = Some(PendingLifecycle::ApplyEdit {
+                    spec: Box::new(spec),
+                    device: Box::new(device),
+                });
             }
 
             {
@@ -2017,7 +2057,7 @@ mod tests {
         assert!(v.lifecycle_pending());
 
         for _ in 0..200 {
-            if !v.lifecycle_pending() {
+            if v.pending_setup.is_none() && !v.lifecycle_pending() {
                 break;
             }
             v.refresh().await;
@@ -2044,7 +2084,7 @@ mod tests {
         assert!(matches!(result, CommandResult::Handled(None)));
 
         for _ in 0..200 {
-            if !v.lifecycle_pending() {
+            if v.pending_setup.is_none() && !v.lifecycle_pending() {
                 break;
             }
             v.refresh().await;
@@ -2967,7 +3007,7 @@ mod tests {
         // (and its registry reattachment) only happens once `refresh()` observes the deferred
         // stop complete.
         for _ in 0..200 {
-            if !v.lifecycle_pending() {
+            if v.pending_setup.is_none() && !v.lifecycle_pending() {
                 break;
             }
             v.refresh().await;
@@ -2981,6 +3021,315 @@ mod tests {
         );
 
         let _ = v.handle_command("stop").await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// UI-R-350, MB-R-255 — confirming a monitor's `:edit` setup dialog against a module whose
+    /// task is genuinely alive (retrying a bad serial path) returns immediately and defers the
+    /// stop it signals to `refresh()`'s settle, instead of rebuilding the module inline.
+    async fn ut_confirm_edit_returns_without_blocking() {
+        let mut device = device();
+        device.reconnect = Some(true);
+        let module = ModbusMonitorModule::new(&spec(), &device);
+        let mut v = ModbusMonitorModuleView::new(module, spec(), device);
+        v.module
+            .start(|_: String| async {}, |_: String| async {})
+            .await
+            .expect("start always succeeds for a valid transport");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        v.handle_command("edit").await;
+        ModuleView::handle_events(&mut v, KeyModifiers::NONE, KeyCode::Enter);
+        assert!(
+            matches!(v.overlay, MonitorOverlay::None),
+            "the dialog must close on the same keypress that confirms it"
+        );
+
+        v.refresh().await;
+        assert!(
+            v.lifecycle_pending(),
+            "the first refresh() after confirm must leave the apply's stop pending"
+        );
+
+        for _ in 0..200 {
+            if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(!v.lifecycle_pending());
+    }
+
+    /// MB-R-252, MB-R-255, UI-R-350 — a receive task that ends on its own `Terminate` well
+    /// inside the 100 ms grace period settles promptly (no abort-fallback wait), and its
+    /// settle-time outcome (UI-R-350) logs cleanly (not `Level::Error`), pinning the graceful
+    /// half of MB-R-252 that `ut_monitor_stop_aborts_a_task_that_outlives_the_grace_period`
+    /// deliberately never reaches.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_confirm_edit_stops_gracefully_not_by_abort() {
+        let mut device = device();
+        device.reconnect = Some(true);
+        let module = ModbusMonitorModule::new(&spec(), &device);
+        let mut v = ModbusMonitorModuleView::new(module, spec(), device);
+        v.module
+            .start(|_: String| async {}, |_: String| async {})
+            .await
+            .expect("start always succeeds for a valid transport");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        v.handle_command("edit").await;
+        v.confirm_edit();
+
+        // MB-R-252's graceful half settles as soon as the receive task ends on its own
+        // `Terminate`, in only a few polls, with no intervening abort-fallback wait. Pinned
+        // structurally, never by a wall-clock ceiling over the polling loop, which flakes under a
+        // loaded runner.
+        let mut polls = 0;
+        loop {
+            v.refresh().await;
+            polls += 1;
+            if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                break;
+            }
+            assert!(
+                polls < 200,
+                "the deferred stop never settled within 200 polls"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(!v.lifecycle_pending());
+        // The abort-after-grace fallback can only fire once the 100 ms grace period has fully
+        // elapsed; settling in only a few polls is a structural stand-in for "ended on its own",
+        // with no wall-clock read anywhere in the assertion.
+        assert!(
+            polls <= 5,
+            "settled after {polls} polls, expected the task to end gracefully in only a few, \
+             not via the abort-after-grace fallback"
+        );
+
+        let lines = v
+            .log()
+            .read()
+            .await
+            .peek_n(crate::app::LOG_SIZE)
+            .into_iter()
+            .map(|(_, level, l)| (level, l))
+            .collect::<Vec<_>>();
+        assert!(
+            lines
+                .iter()
+                .any(|(level, l)| *level != Level::Error && l.contains("Settings updated")),
+            "expected a clean (non-Error) settings-updated outcome line, got {lines:?}"
+        );
+    }
+
+    /// UI-E-161 — between the confirm and the deferred stop's settle, the pre-edit spec keeps
+    /// driving the rendered status/tab name; only once the settle lands does it switch to the
+    /// edited one.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_pre_edit_module_renders_until_stop_settles() {
+        let mut device = device();
+        device.reconnect = Some(true);
+        let module = ModbusMonitorModule::new(&spec(), &device);
+        let mut v = ModbusMonitorModuleView::new(module, spec(), device);
+        v.module
+            .start(|_: String| async {}, |_: String| async {})
+            .await
+            .expect("start always succeeds for a valid transport");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        v.handle_command("edit").await;
+        let MonitorOverlay::EditSetup(dialog) = &mut v.overlay else {
+            panic!(":edit did not open the setup dialog");
+        };
+        crate::dialog::widgets::set_input(&mut dialog.name, "renamed");
+        v.confirm_edit();
+
+        assert_eq!(
+            v.name(),
+            "mon1",
+            "the pre-edit name must keep driving the tab name until the settle lands"
+        );
+
+        // One tick in: the deferred stop is now signalled and pending (not yet settled) — the
+        // pre-edit name must still be the one rendered during this window, not just before the
+        // first `refresh()` ever ran.
+        v.refresh().await;
+        assert!(v.lifecycle_pending());
+        assert_eq!(
+            v.name(),
+            "mon1",
+            "the pre-edit name must still drive the tab name while the stop is pending, not yet settled"
+        );
+
+        for _ in 0..200 {
+            if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert_eq!(v.name(), "renamed");
+    }
+
+    /// MB-R-253 — the frame table, message records, log and interpretations accumulated before
+    /// an edit apply all survive it, once the settle it defers actually lands.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_edit_apply_carries_table_records_log_and_interpretations_forward() {
+        let mut device = device();
+        device.reconnect = Some(true);
+        let module = ModbusMonitorModule::new(&spec(), &device);
+        let mut v = ModbusMonitorModuleView::new(module, spec(), device);
+        v.module
+            .add_interpretation(UnitId(3), "power".to_string(), def(10, ""));
+        let table_before = v.module.table();
+        let records_before = v.module.records();
+        let log_before = v.module.log();
+        v.module
+            .start(|_: String| async {}, |_: String| async {})
+            .await
+            .expect("start always succeeds for a valid transport");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        v.handle_command("edit").await;
+        let MonitorOverlay::EditSetup(dialog) = &mut v.overlay else {
+            panic!(":edit did not open the setup dialog");
+        };
+        crate::dialog::widgets::set_input(&mut dialog.name, "renamed");
+        v.confirm_edit();
+
+        for _ in 0..200 {
+            if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+
+        assert_eq!(
+            v.spec.name, "renamed",
+            "the edit must actually have landed by the time the settle loop exits"
+        );
+        assert!(
+            std::sync::Arc::ptr_eq(&table_before, &v.module.table()),
+            "table must be the same shared instance across an applied edit"
+        );
+        assert!(
+            std::sync::Arc::ptr_eq(&records_before, &v.module.records()),
+            "records must be the same shared instance across an applied edit"
+        );
+        assert!(
+            std::sync::Arc::ptr_eq(&log_before, &v.module.log()),
+            "log must be the same shared instance across an applied edit"
+        );
+        assert_eq!(
+            v.module.interpretations_for(UnitId(3)).len(),
+            1,
+            "an interpretation added at runtime must survive an applied edit"
+        );
+    }
+
+    /// MB-R-254 — once an edit apply's deferred stop settles, the rebuilt module is left
+    /// stopped, not restarted.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_edit_apply_leaves_monitor_stopped() {
+        let mut device = device();
+        device.reconnect = Some(true);
+        let module = ModbusMonitorModule::new(&spec(), &device);
+        let mut v = ModbusMonitorModuleView::new(module, spec(), device);
+        v.module
+            .start(|_: String| async {}, |_: String| async {})
+            .await
+            .expect("start always succeeds for a valid transport");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        v.handle_command("edit").await;
+        v.confirm_edit();
+
+        for _ in 0..200 {
+            if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+
+        assert!(
+            !v.module.is_running(),
+            "an applied edit must leave the monitor stopped, not restart it"
+        );
+        let lines = v
+            .log()
+            .read()
+            .await
+            .peek_n(crate::app::LOG_SIZE)
+            .into_iter()
+            .map(|(_, _, l)| l)
+            .collect::<Vec<_>>();
+        assert!(
+            !lines.iter().any(|l| l.contains("Started monitor")),
+            "an applied edit must never log a Started line, got {lines:?}"
+        );
+    }
+
+    /// MB-E-097, MB-R-150, MB-R-255 — the pre-edit serial path stays claimed in the session-wide
+    /// registry while the applied edit's stop is still pending, and is released only once it
+    /// settles; a second module configured onto that same path during the window is rejected as
+    /// a same-path conflict.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_serial_path_claim_released_only_when_edit_stop_settles() {
+        use crate::module::modbus::SerialPathRegistry;
+
+        let mut device = device();
+        device.reconnect = Some(true);
+        let module = ModbusMonitorModule::new(&spec(), &device);
+        let mut v = ModbusMonitorModuleView::new(module, spec(), device);
+        let registry = SerialPathRegistry::new();
+        v.set_serial_paths(registry.clone());
+        v.module
+            .start(|_: String| async {}, |_: String| async {})
+            .await
+            .expect("start always succeeds for a valid transport");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let serial_path = match &spec().endpoint {
+            Endpoint::Rtu { path, .. } => path.clone(),
+            other => panic!("fixture spec() must be Rtu, got {other:?}"),
+        };
+        assert_eq!(
+            registry.conflict("B", &serial_path),
+            Some("mon1".to_string())
+        );
+
+        v.handle_command("edit").await;
+        v.confirm_edit();
+        v.refresh().await;
+        assert!(v.lifecycle_pending());
+        assert_eq!(
+            registry.conflict("B", &serial_path),
+            Some("mon1".to_string()),
+            "the pre-edit claim must survive while the edit's deferred stop is still pending"
+        );
+        assert_eq!(
+            registry.conflict("C", &serial_path),
+            Some("mon1".to_string()),
+            "a second instance configured onto the same path while the edit is pending must \
+             still be rejected as a conflict"
+        );
+
+        for _ in 0..200 {
+            if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert_eq!(
+            registry.conflict("B", &serial_path),
+            None,
+            "the pre-edit claim must be released once the applied edit's stop settles"
+        );
     }
 
     /// MB-R-150 — the Edit-confirm reconfigure path (`confirm_edit`) also rebuilds `self.module`
@@ -3009,6 +3358,13 @@ mod tests {
         v.overlay =
             MonitorOverlay::EditSetup(Box::new(MonitorSetupDialog::edit(&s.name, &s, &device())));
         v.confirm_edit();
+        for _ in 0..200 {
+            if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
         let _ = v.handle_command("start").await;
 
         assert_eq!(
@@ -3079,9 +3435,16 @@ mod tests {
         };
         crate::dialog::widgets::set_input(&mut dialog.name, "renamed");
         v.confirm_edit();
-
-        assert_eq!(v.spec.name, "renamed");
         assert!(matches!(v.overlay, MonitorOverlay::None));
+
+        for _ in 0..200 {
+            if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert_eq!(v.spec.name, "renamed");
     }
 
     /// `confirm_edit` carries the typed device-config path through to `spec.device`.
@@ -3095,6 +3458,13 @@ mod tests {
         crate::dialog::widgets::set_suggest_input(&mut dialog.config_path, "new-device.toml");
         v.confirm_edit();
 
+        for _ in 0..200 {
+            if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
         assert_eq!(v.spec.device, "new-device.toml");
     }
 
@@ -3149,6 +3519,13 @@ mod tests {
         crate::dialog::widgets::set_input(&mut dialog.name, "renamed");
         v.confirm_edit();
 
+        for _ in 0..200 {
+            if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
         assert!(
             std::sync::Arc::ptr_eq(&table_before, &v.module.table()),
             "table must be the same shared instance across an edit-confirm"

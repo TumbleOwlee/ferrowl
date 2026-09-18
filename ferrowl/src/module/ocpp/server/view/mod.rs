@@ -385,11 +385,24 @@ pub struct ServerView<V: ServerVersion> {
     last_stop_outcome: Option<crate::module::view::StopOutcome>,
 }
 
-/// UI-R-314/UI-R-315 — the follow-up state a deferred stop-bearing lifecycle command needs once
-/// its `poll_stop()` completes.
+/// UI-R-314/UI-R-315/UI-R-350 — the follow-up state a deferred stop-bearing lifecycle command or
+/// applied configuration edit needs once its `poll_stop()` completes.
 enum PendingLifecycle {
     Stop,
     Restart,
+    ApplySetup(Box<SetupFollowUp>),
+}
+
+/// What an applied `:edit` still has to do once its deferred stop settles: swap the whole view
+/// (role or version changed), or adopt the new spec in place (the auto-bind block rebinds it on
+/// the next tick, gated on `want_running`).
+enum SetupFollowUp {
+    Replace(Box<dyn ModuleView>),
+    InPlace {
+        spec: Box<OcppSpec>,
+        path: String,
+        device: Box<OcppDeviceConfig>,
+    },
 }
 
 impl<V: ServerVersion> ServerView<V>
@@ -729,9 +742,17 @@ mod tests {
         edited.security.password = Some("password".into());
         v.deferred.setup = Some((edited.clone(), String::new(), Vec::new()));
         v.refresh_impl().await;
+        for _ in 0..200 {
+            if !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh_impl().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(!v.lifecycle_pending());
         assert_eq!(v.spec, edited);
         assert!(v.spec.csms_self_signed_fallback());
-        // The same tick stops the old listener and rebinds from the edited spec (want_running
+        // The settle loop stops the old listener and rebinds from the edited spec (want_running
         // is on by default); OC-R-083's bind is async, so poll rather than asserting `is_online()`
         // synchronously.
         assert!(
@@ -751,6 +772,14 @@ mod tests {
         let headers = vec![ferrowl_ocpp::HeaderDef::new("X-Tenant", "acme-1").unwrap()];
         v.deferred.setup = Some((edited, String::new(), headers.clone()));
         v.refresh_impl().await;
+        for _ in 0..200 {
+            if !v.lifecycle_pending() {
+                break;
+            }
+            v.refresh_impl().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(!v.lifecycle_pending());
         assert_eq!(v.device.extra_headers, headers);
     }
 

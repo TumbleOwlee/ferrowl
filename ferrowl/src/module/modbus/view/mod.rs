@@ -12,10 +12,11 @@ use ratatui::layout::Rect;
 
 use crate::app::Level;
 use crate::config::script::ScriptDef;
-use crate::config::{DeviceConfig, ModuleSpec};
+use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role, device::ReadRanges};
 use crate::dialog::close_confirm::CloseConfirmEvent;
 use crate::dialog::lua_help::ScriptContext;
 use crate::dialog::scripts::ScriptDialog;
+use crate::module::modbus::build::Timing;
 use crate::module::modbus::dialog::{EditInputDialog, EditSelectionDialog};
 use crate::module::modbus::setup_dialog::SetupDialog;
 use crate::module::modbus::table::{Definition, TableView, cmp_definitions};
@@ -77,13 +78,24 @@ pub struct ModbusModuleView {
 
 /// UI-R-314/UI-R-315 — the follow-up state a deferred stop-bearing lifecycle command needs once
 /// its `poll_stop()` completes. `Reload` carries the config already loaded synchronously at
-/// dispatch time (`handle_command`), so `refresh()` never re-reads the file.
+/// dispatch time (`handle_command`), so `refresh()` never re-reads the file. UI-R-350 —
+/// `ApplySetup` carries a `:edit` confirm's already-resolved `reconfigure()` arguments the same
+/// way.
 enum PendingLifecycle {
     Stop,
     Restart,
     Reload {
         path: String,
         device: Box<DeviceConfig>,
+    },
+    ApplySetup {
+        name: String,
+        config_path: String,
+        endpoint: Endpoint,
+        role: Role,
+        timing: Timing,
+        read_ranges: Box<ReadRanges>,
+        tls: Box<ferrowl_modbus::tcp::ModbusTlsConfig>,
     },
 }
 
@@ -559,6 +571,50 @@ impl ModuleView for ModbusModuleView {
                             }
                         };
                         self.log().write().await.write(level, &msg);
+                    }
+                    Some(PendingLifecycle::ApplySetup {
+                        name: new_name,
+                        config_path: new_config_path,
+                        endpoint: new_endpoint,
+                        role: new_role,
+                        timing,
+                        read_ranges,
+                        tls,
+                    }) => {
+                        let stop_err = stop_result.err().filter(|e| !e.is_not_running());
+                        // UI-E-161 — the edited name/endpoint/role/device path are only adopted
+                        // here, once the deferred stop has actually settled, not back when the
+                        // edit was applied.
+                        self.spec.name = new_name;
+                        self.spec.device = new_config_path;
+                        self.spec.role = new_role;
+                        self.spec.endpoint = new_endpoint.clone();
+                        let role = new_role.to_string();
+                        let endpoint = new_endpoint.to_string();
+                        if let Err(e) = self
+                            .module
+                            .reconfigure(&new_endpoint, new_role, timing, *read_ranges, *tls)
+                            .await
+                        {
+                            self.log()
+                                .write()
+                                .await
+                                .write(Level::Error, &format!("Reconfigure failed: {e}"));
+                        } else {
+                            let (level, msg) = match self.module.start().await {
+                                Ok(()) => match stop_err {
+                                    None => (Level::Info, format!("Started {role} on {endpoint}")),
+                                    Some(e) => (
+                                        Level::Error,
+                                        format!(
+                                            "Started {role} on {endpoint}, but stop of previous instance failed: {e}"
+                                        ),
+                                    ),
+                                },
+                                Err(e) => (Level::Error, format!("Start {role} failed: {e}")),
+                            };
+                            self.log().write().await.write(level, &msg);
+                        }
                     }
                     None => unreachable!("outer condition checked pending_lifecycle.is_some()"),
                 }
@@ -2643,7 +2699,442 @@ mod tests {
             tls: Default::default(),
         };
         view.apply_setup(values).await;
+        for _ in 0..200 {
+            if !view.lifecycle_pending() {
+                break;
+            }
+            view.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
         assert_eq!(view.device.reconnect, Some(false));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// UI-R-350 — applying a setup edit against a module whose task is genuinely alive (backing
+    /// off from an occupied bind) defers the reconfigure + start rather than running it inline:
+    /// `apply_setup` leaves the deferred stop pending (not already resolved), for `refresh()` to
+    /// settle later.
+    async fn ut_apply_setup_defers_rather_than_blocking() {
+        let occupier = reserve_tcp_port();
+        let port = occupier.port();
+
+        let mut device = empty_device();
+        device.timeout_ms = Some(200);
+        let spec = ModuleSpec {
+            name: "test module".into(),
+            device: String::new(),
+            role: Role::Server,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port,
+            },
+        };
+        let module = super::super::ModbusModule::new(&spec, &device);
+        let mut view = ModbusModuleView::new(module, spec.clone(), device);
+        view.module
+            .start()
+            .await
+            .expect("start must not fail synchronously");
+
+        let values = SetupValues {
+            name: spec.name.clone(),
+            config_path: String::new(),
+            role: Role::Server,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 0,
+            },
+            timeout_ms: Some(200),
+            delay_ms: None,
+            interval_ms: None,
+            reconnect: None,
+            read_ranges: Default::default(),
+            tls: Default::default(),
+        };
+
+        view.apply_setup(values).await;
+        assert!(view.lifecycle_pending());
+
+        for _ in 0..200 {
+            if !view.lifecycle_pending() {
+                break;
+            }
+            view.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(!view.lifecycle_pending());
+
+        view.module.stop().await.expect("cleanup stop");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// UI-E-161 — applying a setup edit against a module whose task is genuinely alive keeps the
+    /// view rendering the pre-edit name and endpoint (tab title, dialog-visible endpoint) while
+    /// the deferred stop is still pending, and only adopts the edited values once `refresh()`
+    /// settles the stop.
+    async fn ut_apply_setup_defers_name_and_endpoint_adoption_until_settle() {
+        let occupier = reserve_tcp_port();
+        let port = occupier.port();
+
+        let device = empty_device();
+        let spec = ModuleSpec {
+            name: "pre-edit name".into(),
+            device: "pre-edit.toml".into(),
+            role: Role::Server,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port,
+            },
+        };
+        let module = super::super::ModbusModule::new(&spec, &device);
+        let mut view = ModbusModuleView::new(module, spec.clone(), device);
+        view.module
+            .start()
+            .await
+            .expect("start must not fail synchronously");
+
+        let new_port = reserve_tcp_port().release();
+        let values = SetupValues {
+            name: "post-edit name".into(),
+            config_path: "post-edit.toml".into(),
+            role: Role::Client,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: new_port,
+            },
+            timeout_ms: None,
+            delay_ms: None,
+            interval_ms: None,
+            reconnect: None,
+            read_ranges: Default::default(),
+            tls: Default::default(),
+        };
+
+        view.apply_setup(values).await;
+        assert!(view.lifecycle_pending());
+        assert_eq!(
+            view.name(),
+            "pre-edit name",
+            "UI-E-161: the tab title must keep rendering the pre-edit name while the stop is pending"
+        );
+        assert_eq!(
+            view.spec.endpoint,
+            Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port,
+            },
+            "UI-E-161: the endpoint must keep rendering the pre-edit value while the stop is pending"
+        );
+        assert_eq!(
+            view.spec.role,
+            Role::Server,
+            "UI-E-161: the role must keep rendering the pre-edit value while the stop is pending"
+        );
+        assert_eq!(
+            view.spec.device, "pre-edit.toml",
+            "UI-E-161: the device config path must keep rendering the pre-edit value while the stop is pending"
+        );
+
+        for _ in 0..200 {
+            if !view.lifecycle_pending() {
+                break;
+            }
+            view.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(!view.lifecycle_pending());
+        assert_eq!(
+            view.name(),
+            "post-edit name",
+            "the tab title must adopt the edited name once the settle completes"
+        );
+        assert_eq!(
+            view.spec.endpoint,
+            Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: new_port,
+            },
+            "the endpoint must adopt the edited value once the settle completes"
+        );
+        assert_eq!(
+            view.spec.role,
+            Role::Client,
+            "the role must adopt the edited value once the settle completes"
+        );
+        assert_eq!(
+            view.spec.device, "post-edit.toml",
+            "the device config path must adopt the edited value once the settle completes"
+        );
+
+        view.module.stop().await.expect("cleanup stop");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// UI-R-350, UI-E-160, UI-E-161, MB-R-220 — applying a setup edit while the client's own
+    /// connect attempt is genuinely in flight (TLS enabled against a held listener that
+    /// TCP-accepts but never supplies a single handshake byte, so the attempt never settles on
+    /// its own) leaves the module untouched until the deferred stop settles: nothing reaps or
+    /// replaces the pre-edit instance until a `refresh()` tick runs the settle block, so
+    /// `connection_status()` still reports the pre-edit dial (`Reconnecting`) even after a real
+    /// wall-clock wait with no tick in between (UI-E-161), and a redraw still succeeds (the tick
+    /// loop was never blocked, UI-E-160). MB-R-220 aborts the abandoned attempt, and once
+    /// `refresh()` settles, the module reconnects using the NEW configuration (UI-E-160) — proven
+    /// by pointing the edit at an endpoint that is actually reachable, unlike the held listener.
+    async fn ut_apply_setup_while_connect_in_flight_reconnects_with_new_config() {
+        use ferrowl_modbus::tcp::ModbusTlsConfig;
+        use ferrowl_util::tls::{CertVerification, ClientTlsPolicy};
+
+        let held = reserve_tcp_port();
+        let held_port = held.port();
+        let _listener = held.into_listener();
+
+        let mut device = empty_device();
+        device.timeout_ms = Some(60_000);
+        device.tls = ModbusTlsConfig {
+            client: ClientTlsPolicy::Tls {
+                verification: CertVerification::Skip {},
+            },
+            ..Default::default()
+        };
+        let spec = ModuleSpec {
+            name: "test module".into(),
+            device: String::new(),
+            role: Role::Client,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: held_port,
+            },
+        };
+        let module = super::super::ModbusModule::new(&spec, &device);
+        let mut view = ModbusModuleView::new(module, spec.clone(), device);
+        view.module
+            .start()
+            .await
+            .expect("start must not fail synchronously");
+
+        // A real (plain TCP) server, standing in for the reachable new endpoint the edit
+        // switches to; started up front so the settle's reconnect attempt can actually succeed.
+        let new_port = reserve_tcp_port().release();
+        let server_spec = ModuleSpec {
+            name: "new endpoint".into(),
+            device: String::new(),
+            role: Role::Server,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: new_port,
+            },
+        };
+        let server_device = empty_device();
+        let server_module = super::super::ModbusModule::new(&server_spec, &server_device);
+        let mut server_view = ModbusModuleView::new(server_module, server_spec, server_device);
+        server_view
+            .module
+            .start()
+            .await
+            .expect("server start must not fail synchronously");
+
+        let values = SetupValues {
+            name: spec.name.clone(),
+            config_path: String::new(),
+            role: Role::Client,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: new_port,
+            },
+            timeout_ms: Some(200),
+            delay_ms: None,
+            interval_ms: None,
+            reconnect: None,
+            read_ranges: Default::default(),
+            tls: Some(ModbusTlsConfig::default()),
+        };
+
+        view.apply_setup(values).await;
+        assert!(view.lifecycle_pending());
+
+        // UI-E-161: the new configuration is not installed until the stop settles. Nothing
+        // reaps or replaces the pre-edit instance until a `refresh()` tick runs the settle
+        // block, so a real wall-clock wait with no tick in between must not show `Connected` —
+        // an inline-applied replacement would have reached the real, reachable new server well
+        // within this wait; the abandoned attempt, left untouched, cannot.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert_ne!(
+            view.module.connection_status(),
+            crate::view::status_bar::ConnStatus::Connected,
+            "the new configuration must not be installed before the stop settles"
+        );
+
+        // UI-E-160: the application keeps processing redraws while the apply is pending.
+        let area = Rect::new(0, 0, 120, 24);
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 24)).unwrap();
+        term.draw(|f: &mut Frame| view.render(f, area)).unwrap();
+
+        for _ in 0..200 {
+            if !view.lifecycle_pending() {
+                break;
+            }
+            view.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(!view.lifecycle_pending());
+        assert_eq!(
+            view.module.connection_status(),
+            crate::view::status_bar::ConnStatus::Connected,
+            "UI-E-160: the settle must reconnect using the new (now-reachable) configuration"
+        );
+
+        view.module.stop().await.expect("cleanup stop");
+        server_view.module.stop().await.expect("cleanup stop");
+    }
+
+    #[tokio::test]
+    /// UI-R-350 — applying a setup edit against a stopped module completes within the call: no
+    /// deferred stop is ever set, and (unlike the deferred path) the edited name, device path and
+    /// role are adopted immediately rather than held pre-edit.
+    async fn ut_apply_setup_on_stopped_module_applies_immediately() {
+        let device = empty_device();
+        let spec = ModuleSpec {
+            name: "pre-edit name".into(),
+            device: "pre-edit.toml".into(),
+            role: Role::Client,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 0,
+            },
+        };
+        let module = super::super::ModbusModule::new(&spec, &device);
+        let mut view = ModbusModuleView::new(module, spec, device);
+        let values = SetupValues {
+            name: "post-edit name".into(),
+            config_path: "post-edit.toml".into(),
+            role: Role::Server,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 0,
+            },
+            timeout_ms: None,
+            delay_ms: None,
+            interval_ms: None,
+            reconnect: None,
+            read_ranges: Default::default(),
+            tls: Default::default(),
+        };
+
+        view.apply_setup(values).await;
+        assert!(!view.lifecycle_pending());
+        assert_eq!(
+            view.name(),
+            "post-edit name",
+            "an inline apply must adopt the edited name immediately, not defer it"
+        );
+        assert_eq!(
+            view.spec.device, "post-edit.toml",
+            "an inline apply must adopt the edited device path immediately, not defer it"
+        );
+        assert_eq!(
+            view.spec.role,
+            Role::Server,
+            "an inline apply must adopt the edited role immediately, not defer it"
+        );
+
+        let mut status = view.module.connection_status();
+        for _ in 0..100 {
+            status = view.module.connection_status();
+            if status == crate::view::status_bar::ConnStatus::Connected {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert_eq!(
+            status,
+            crate::view::status_bar::ConnStatus::Connected,
+            "apply against a stopped module must start it inline"
+        );
+
+        view.module.stop().await.expect("cleanup stop");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// UI-R-350 — applying a setup edit while a `:stop` is already pending must not be rejected
+    /// as `NotRunning` (the instance is `Stopping`, not `Idle`) and silently drop the earlier
+    /// command's outcome forever: it overwrites the pending follow-up, and `refresh()` still
+    /// settles it and runs the apply's own reconfigure + start, not the plain stop.
+    async fn ut_apply_setup_while_stop_pending_overwrites_the_follow_up() {
+        let mut device = empty_device();
+        let spec = ModuleSpec {
+            name: "test module".into(),
+            device: String::new(),
+            role: Role::Server,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 0,
+            },
+        };
+        device.timeout_ms = Some(200);
+        let module = super::super::ModbusModule::new(&spec, &device);
+        let mut view = ModbusModuleView::new(module, spec.clone(), device);
+        view.module.start().await.expect("start");
+
+        assert!(matches!(
+            view.handle_command("stop").await,
+            CommandResult::Handled(None)
+        ));
+        assert!(view.lifecycle_pending());
+
+        let free = reserve_tcp_port().release();
+        let values = SetupValues {
+            name: spec.name.clone(),
+            config_path: String::new(),
+            role: Role::Server,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: free,
+            },
+            timeout_ms: Some(200),
+            delay_ms: None,
+            interval_ms: None,
+            reconnect: None,
+            read_ranges: Default::default(),
+            tls: Default::default(),
+        };
+        view.apply_setup(values).await;
+        assert!(
+            view.lifecycle_pending(),
+            "the follow-up must still be pending, not dropped"
+        );
+
+        for _ in 0..200 {
+            if !view.lifecycle_pending() {
+                break;
+            }
+            view.refresh().await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(
+            !view.lifecycle_pending(),
+            "a stop overwritten with an apply must still settle, not latch forever"
+        );
+
+        let lines = view
+            .log()
+            .read()
+            .await
+            .peek_n(crate::app::LOG_SIZE)
+            .into_iter()
+            .map(|(_, level, l)| (level, l))
+            .collect::<Vec<_>>();
+        assert!(
+            lines
+                .iter()
+                .any(|(level, l)| *level == Level::Info && l.starts_with("Started")),
+            "the overwritten follow-up must be the apply's Started line, not a plain Stopped: {lines:?}"
+        );
+        assert!(
+            !lines.iter().any(|(_, l)| l == "Stopped Server"),
+            "the earlier stop's own outcome must not be logged once overwritten: {lines:?}"
+        );
+
+        view.module.stop().await.expect("cleanup stop");
     }
 
     #[tokio::test]

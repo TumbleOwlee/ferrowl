@@ -24,6 +24,8 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-140** | Command line with both an error and a notice set (UI-R-194, UI-R-195) | the error is shown and the notice is retained, appearing once the consumer clears the error |
 | **UI-E-093** | Command-line help box taller than the rows available above the line (UI-R-196) | the box is clipped to the available rows and stays anchored to the bottom, matching the app's no-minimum-size stance (UI-E-047) |
 | **UI-E-147** | `:stop` submitted while the module's connection attempt is still in flight | the command line closes and the application keeps processing keys and redrawing; the module's status stays `RECONNECTING` until the abort completes, then becomes `DISCONNECTED` (UI-R-314, UI-R-315) |
+| **UI-E-160** | Module configuration edit applied while that module's connection attempt is still in flight (UI-R-350) | the dialog closes and the application keeps processing keys and redrawing; the module reconnects with the new configuration once the abandoned attempt has been torn down (OC-R-175, MB-R-220) |
+| **UI-E-161** | Any module configuration apply, between the dialog closing and the deferred stop settling (UI-R-350) | the view keeps rendering the pre-edit configuration — the charging station's and CSMS's pre-edit spec, the Modbus client's, server's and monitor's pre-edit table, records and status — for one or more redraw ticks with the dialog already closed; the reconfigured or rebuilt module is installed only once the stop settles, the CSMS rebinding on the following auto-bind tick. The swap is deliberately no longer instantaneous, the alternative being the blocking apply UI-R-350 removes |
 
 ## Navigation and tab jumps
 
