@@ -436,6 +436,10 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-178** — A server logs a TLS handshake failure (MB-R-111) at Error level with the peer's socket address, its offered certificate identity where the handshake exposed one, and the error description.
 
+**MB-R-250** — A TLS configuration failure raised while building a Modbus endpoint's TLS material crosses the `ferrowl-modbus` crate boundary as one dedicated public TCP error variant holding `ferrowl-modbus`'s own typed TLS error as its typed `source`, never as a formatted `String` payload, so a caller can match on the cause rather than parse a message — the same typed hand-off OCPP's TLS material errors already make (OC-R-041).
+
+**MB-R-251** — `ferrowl-modbus`'s typed TLS error (MB-R-250) covers both failure tiers as distinct cases: each of MB-R-167's three construction rejections, mapped from the shared TLS policy error rather than carrying it by identity; a certificate, key, or CA file that cannot be read, carrying the path and the underlying I/O cause; a readable certificate, key, or CA file whose PEM cannot be parsed, carrying the path and the underlying parse cause; a readable file holding no certificate; and a failure to generate a self-signed pair (MB-R-106).
+
 **MB-R-112** — The RTU connection config carries no `tls` field; TLS applies to TCP transports only.
 
 ## Region-declaration diagnostics

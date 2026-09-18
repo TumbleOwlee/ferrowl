@@ -54,6 +54,16 @@ Exactly six: **TCP**, **RTU** (serial), **RtuOverTcp** (RTU framing over TCP), *
 
 ---
 
+## Error variants
+
+Public error surface of `ferrowl-modbus` documented here as it is added; a variant absent from this table is not yet contract.
+
+| Variant | Carries | Raised when | Req |
+|---|---|---|---|
+| TLS configuration | `ferrowl-modbus`'s own typed TLS error, as a typed `source` (not a `String`); its cases are the three construction rejections mapped from the shared policy error, an unreadable cert/key/CA file with path and I/O cause, a readable cert/key/CA file whose PEM does not parse with path and parse cause, a file holding no certificate, and a self-signed generation failure | building a TCP/`RtuOverTcp`/`AsciiOverTcp` endpoint's TLS material fails | MB-R-250, MB-R-251, MB-E-063, MB-R-167 |
+
+---
+
 ## Modbus TCP connection config
 
 Shared by client and server roles.
