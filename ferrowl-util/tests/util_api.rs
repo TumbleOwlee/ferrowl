@@ -1,13 +1,9 @@
 //! Integration coverage for `ferrowl-util`'s public surface: the [`Converter`] file
-//! (de)serialization helpers and [`FileType`] inference, the `str!` macro, the [`Expect`]
-//! trait, and the tracked-task `tokio::spawn_detach`/`join_all` pair.
-
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+//! (de)serialization helpers and [`FileType`] inference, and the [`Expect`] trait.
 
 use ferrowl_test_support::reserve_temp_dir;
+use ferrowl_util::Expect;
 use ferrowl_util::convert::{Converter, Error, FileType};
-use ferrowl_util::{Expect, str};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -77,12 +73,6 @@ fn it_load_missing_file_is_deserialize_error() {
 }
 
 #[test]
-fn it_str_macro_returns_owned_string() {
-    let owned: String = str!("literal");
-    assert_eq!(owned, "literal".to_string());
-}
-
-#[test]
 fn it_expect_trait_returns_value_on_ok() {
     let r: Result<u8, &str> = Ok(7);
     assert_eq!(r.panic(|e| format!("unexpected: {e}")), 7);
@@ -93,19 +83,4 @@ fn it_expect_trait_returns_value_on_ok() {
 fn it_expect_trait_panics_with_formatted_message_on_err() {
     let r: Result<u8, &str> = Err("boom");
     let _ = r.panic(|e| format!("{e} happened"));
-}
-
-#[tokio::test]
-async fn it_spawn_detach_runs_task_and_join_all_awaits_it() {
-    let done = Arc::new(AtomicBool::new(false));
-    let flag = done.clone();
-    ferrowl_util::tokio::spawn_detach(async move {
-        flag.store(true, Ordering::SeqCst);
-    })
-    .await;
-    ferrowl_util::tokio::join_all().await;
-    assert!(
-        done.load(Ordering::SeqCst),
-        "join_all must await the detached task to completion"
-    );
 }

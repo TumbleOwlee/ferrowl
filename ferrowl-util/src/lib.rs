@@ -1,33 +1,12 @@
 //! Small general-purpose helpers shared across the ferrowl crates:
 //! config file (de)serialization ([`convert`]), user-supplied filesystem path expansion
-//! ([`path`]), wall-clock helpers ([`time`]), tracked tokio task spawning ([`tokio`]), and a
-//! few ergonomic macros and traits.
+//! ([`path`]), and wall-clock helpers ([`time`]).
 
 pub mod backoff;
 pub mod convert;
 pub mod path;
 pub mod time;
 pub mod tls;
-pub mod tokio;
-
-/// Simple macro to prevent boilerplate of `.to_owned()`
-///
-/// The macro returns a `String` from the given `&str` value. It removes the boilerplate
-/// that normally exists because of various `.to_owned()` calls.
-///
-/// # Examples
-///
-/// ```rust
-/// use crate::ferrowl_util::str;
-///
-/// let value: String = str!("Some custom string");
-/// ```
-#[macro_export]
-macro_rules! str {
-    ($a:expr) => {
-        $a.to_owned()
-    };
-}
 
 /// Trait providing the `panic()` method that calls the given function and panics with the returned
 /// message
@@ -61,40 +40,9 @@ impl<T, E, F: FnOnce(E) -> String> Expect<F> for Result<T, E> {
     }
 }
 
-/// Clones the listed bindings, then moves the clones into an `async move`
-/// block — shorthand for the common "clone before spawning" pattern.
-///
-/// # Examples
-///
-/// ```rust
-/// use ferrowl_util::async_cloned;
-///
-/// let name = String::from("ferrowl");
-/// let fut = async_cloned!(name; {
-///     format!("hello {}", name)
-/// });
-/// // `name` is still usable here; the future owns a clone.
-/// assert_eq!(name, "ferrowl");
-/// ```
-#[macro_export]
-macro_rules! async_cloned {
-    ($($n:ident),+; $body:block) => (
-        {
-            $( let $n = $n.clone(); )+
-            async move { $body }
-        }
-    );
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn ut_str_macro_returns_string() {
-        let s: String = str!("hello");
-        assert_eq!(s, "hello".to_owned());
-    }
 
     #[test]
     fn ut_expect_ok_returns_value() {
