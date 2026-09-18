@@ -669,6 +669,51 @@ mod tests {
     }
 
     #[tokio::test]
+    /// MB-R-222 — adding a register with no value leaves the MB-R-079/MB-R-080 zero seeding
+    /// untouched: no value write happens.
+    async fn ut_apply_add_without_a_value_leaves_the_seeded_store() {
+        let mut v = view(Role::Server);
+        v.apply_add(edited("hold", holding(0), None)).await;
+
+        let key = Key {
+            id: SlaveKey {
+                slave_id: UnitId(1),
+                kind: Kind::HoldingRegister,
+            },
+        };
+        let stored = v
+            .module
+            .memory()
+            .read()
+            .read_unchecked(key, &Range::new(0, 1));
+        assert_eq!(stored, Some(vec![0]));
+    }
+
+    #[tokio::test]
+    /// MB-R-222, MB-R-223 — a non-empty value is written on add, and editing with an empty value
+    /// afterward leaves the previously stored value untouched.
+    async fn ut_apply_edit_without_a_value_keeps_the_stored_value() {
+        let mut v = view(Role::Server);
+        v.apply_add(edited("hold", holding(0), Some("7"))).await;
+
+        let key = Key {
+            id: SlaveKey {
+                slave_id: UnitId(1),
+                kind: Kind::HoldingRegister,
+            },
+        };
+        let range = Range::new(0, 1);
+        let snapshot = v.module.memory().read().read_unchecked(key.clone(), &range);
+        assert_eq!(snapshot, Some(vec![7]));
+
+        v.apply_edit(edited("hold", holding(0), None), 0, "hold".to_string())
+            .await;
+
+        let after = v.module.memory().read().read_unchecked(key, &range);
+        assert_eq!(after, snapshot);
+    }
+
+    #[tokio::test]
     async fn ut_set_register_value_unknown_warns() {
         let mut v = view(Role::Server);
         assert!(msg(&v.set_register_value("nope", "1").await).contains("unknown register"));

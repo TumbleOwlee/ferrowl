@@ -38,6 +38,12 @@ impl<V: ToLabel + Clone> EditSelectionDialog<V> {
                 vec![ValueType::Number, ValueType::Text],
                 0,
             ))
+            .boolean_type(widgets::text_boxed(
+                ("Type", HorizontalAlignment::Right),
+                "Boolean",
+                Default::default(),
+                false,
+            ))
             .number_format(widgets::selection(
                 ("Format", HorizontalAlignment::Left),
                 widgets::format_options(),

@@ -96,7 +96,7 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 | **MB-E-060** | Dialog Self-Signed toggled On after `cert_file`/`key_file` text entered | resolved config excludes both files; stored text preserved for Off (MB-R-135/MB-R-186) |
 | **MB-E-061** | Dialog client-role Skip-Verify toggled On after Root Store/CA list state entered | resolved verification excludes both, becoming `CertVerification::Skip` (MB-R-135) |
 | **MB-E-062** | `tls` set in an RTU device config | ignored; RTU `Config` has no `tls` field (MB-R-112) |
-| **MB-E-063** | `cert_file`/`key_file`/`ca_files`/`extra_ca_files`/client-identity path malformed PEM or unreadable | server or client start fails with a TLS configuration error (MB-R-107/MB-R-108 tier) |
+| **MB-E-063** | `cert_file`/`key_file`/`ca_files`/`extra_ca_files`/client-identity path malformed PEM or unreadable | server or client start fails with a TLS configuration error (MB-R-107/MB-R-108 tier), surfaced to the caller with its typed cause intact (MB-R-250/MB-R-251) |
 | **MB-E-064** | `ServerTlsPolicy::Mutual` client certificate signed by any one of several `ca_files` | accepted: `ca_files` is a trust-anchor set, not an ordered chain (MB-R-108) |
 | **MB-E-065** | `CertVerification::CaFiles` with empty `ca_files` | rejected at construction, never at handshake (MB-R-108/MB-R-109) |
 | **MB-E-066** | `ServerTlsPolicy::Mutual` with `CertVerification::Skip`, connection presents no client certificate | handshake still fails: `Skip` skips the CA/identity check on a *presented* cert, does not make presenting optional (MB-R-173) |
@@ -120,6 +120,16 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 | **MB-E-019** | Two configured instances share the same Rtu/Ascii path | MB-R-150 catches it before the OS-level open, reports a distinct conflict status, recovers once one instance stops or moves |
 | **MB-E-020** | Serial path held by something outside the session (external process, bridge-mode leg) | MB-R-150 sees only same-session instances; external holder surfaces as an ordinary OS-level open failure/retry |
 | **MB-E-097** | Another module is configured onto a monitor's serial path while that monitor's configuration edit is still settling (MB-R-150, MB-R-255) | rejected as a same-path conflict, the claim being released when the deferred stop settles rather than at apply time; retrying after the settle succeeds. Releasing the claim earlier would let the other module open the port while the receive task still holds it, which is the failure the claim exists to prevent |
+
+---
+
+## Register dialog boundaries
+
+| ID | Condition | Behavior |
+|---|---|---|
+| **MB-E-094** | Shown Value or Default Value *text* input holding only whitespace (a Coil/DiscreteInput pane in the register dialog's selection variant, MB-R-229, has no such state) | non-empty for MB-R-222/MB-R-225 (emptiness is zero length, never trimmed) and evaluated per MB-R-223/MB-R-226: an `Ascii` register takes the all-space value, a numeric register reports a parse error rather than silently falling back to its default |
+| **MB-E-095** | Non-empty Value or Default Value input on a register whose address is virtual (MB-R-003, MB-R-080) | accepted without the MB-R-223/MB-R-226 format-encoding check: a virtual register's value is stored by string parsing into the per-module virtual store, never by encoding into words, so the dialog applies the same acceptance as the `:set` path rather than rejecting an input no encode would ever see |
+| **MB-E-096** | `Coil`/`DiscreteInput` register whose configured `default` is neither 0 nor 1, its Default Value pane shown | the pane has no matching state, so MB-R-235 opens it at `OFF` and confirming rewrites `default` to 0 (MB-R-236). A hand-edited config's out-of-range boolean default therefore survives only until that register is confirmed through the dialog |
 
 ---
 
