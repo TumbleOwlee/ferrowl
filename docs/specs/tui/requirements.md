@@ -106,11 +106,21 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-314** — Dispatching a module lifecycle `:` command (start, stop, restart, reload) never blocks the application's input and redraw loop: the command signals the module and returns, the loop continuing to consume key events and render frames while the operation runs to completion.
 
-**UI-R-315** — The outcome of a stop-bearing lifecycle command (stop, restart, reload) dispatched per UI-R-314 is appended to that module's message log when the stop completes, a failure at Error level (MB-R-098, OC-R-102), never discarded and never carried as the command's immediate `(level, message)` result. `:start` is outside this rule: spawning only schedules the task, so it has no deferred outcome and keeps its immediate result.
+**UI-R-315** — The outcome of a stop-bearing lifecycle command (stop, restart, reload) dispatched per UI-R-314 is appended to that module's message log when the stop completes, a failure at Error level (MB-R-098, OC-R-102), never discarded and never carried as the command's immediate `(level, message)` result. `:start` is outside this rule while no edit apply is pending: spawning only schedules the task, so it has no deferred outcome and keeps its immediate result; a `:start` arriving while an edit apply is pending is deferred and reports its outcome per UI-R-352.
 
 **UI-R-316** — Closing a tab other than the last (UI-R-019) waits at most 1 s for that tab's module stop to complete; on expiry the close proceeds regardless, the stop having already been signalled (UI-R-314, UI-R-350).
 
 **UI-R-350** — Applying an edited module configuration never blocks the application's input and redraw loop: the apply signals the backend's stop and returns, the restart completing asynchronously exactly as a lifecycle command does (UI-R-314), with the outcome appended to that module's message log when it lands (UI-R-315).
+
+**UI-R-351** — A module lifecycle `:` command (start, stop, restart) arriving after a configuration edit's apply has been confirmed and before that apply's deferred stop has settled (UI-R-350) never discards the edited configuration: the edited configuration is installed when the stop settles exactly as the apply alone would have installed it, and the command determines only the module's resulting run state. `:reload` is the sole exception (UI-R-354).
+
+**UI-R-352** — A `:start` or `:restart` arriving during a pending edit apply (UI-R-351) leaves the module running the edited configuration after exactly one start of that module, never starting or restarting the pre-edit module and never starting the module a second time once the apply's own start has run.
+
+**UI-R-353** — A `:stop` arriving during a pending edit apply (UI-R-351) leaves the module stopped with the edited configuration installed, so the next `:start` (UI-R-314) starts the edited configuration and not the pre-edit one.
+
+**UI-R-354** — A `:reload` arriving during a pending edit apply (UI-R-351) discards the pending edit and loads the module's configuration from its file, the on-disk configuration being what the command explicitly asks for, and appends a Warning-level line to that module's message log naming the module whose confirmed edit was discarded.
+
+**UI-R-355** — When a lifecycle command is merged into a pending edit apply (UI-R-351, UI-R-354), that module's message log receives both the apply's outcome (UI-R-350) and the lifecycle command's outcome (UI-R-315) when the deferred work lands, neither line replacing the other.
 
 ## Dialogs & overlays mechanism
 
