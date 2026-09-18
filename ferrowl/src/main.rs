@@ -27,7 +27,6 @@ use std::io::Stdout;
 use clap::Parser;
 use ferrowl_codec::Kind;
 use ferrowl_ui::AlternateScreen;
-use ferrowl_util::Expect;
 use tokio::runtime::Runtime;
 
 use crate::app::{App, Level, Tab};
@@ -374,7 +373,7 @@ fn main() {
     }
 
     // Multi-threaded runtime: background modbus/OCPP tasks run concurrently with the UI loop.
-    let runtime = Runtime::new().panic(|e| format!("Failed to create runtime. [{e}]"));
+    let runtime = Runtime::new().unwrap_or_else(|e| panic!("Failed to create runtime. [{e}]"));
 
     if let Some(SubCommand::Run(ref run_args)) = args.command {
         let code = runtime.block_on(cli::headless::run(run_args));
