@@ -561,8 +561,9 @@ async fn it_tls_policy_never_requests_a_client_certificate() {
 }
 
 #[tokio::test]
-/// MB-R-108 — `Mutual`'s `CaFiles { ca_files: [] }` is rejected by `validate()` before the
-/// server ever binds, surfacing as the same TLS-configuration-error tier as a malformed PEM.
+/// MB-R-108, MB-R-250, MB-R-251 — `Mutual`'s `CaFiles { ca_files: [] }` is rejected by
+/// `validate()` before the server ever binds, surfacing as the typed `TlsError::EmptyCaFiles`
+/// case rather than a formatted string.
 async fn it_empty_ca_files_fails_server_start() {
     let dir = reserve_temp_dir("ferrowl_modbus_tcp_tls_server");
     let (cert_pem, key_pem) = self_signed_pem();
@@ -592,22 +593,19 @@ async fn it_empty_ca_files_fails_server_start() {
         .await
         .expect("task should end promptly on a rejected policy, not hang")
         .expect("task must not panic");
-    match result {
-        Err(ferrowl_modbus::Error::Tcp(ferrowl_modbus::TcpError::Configuration(msg))) => {
-            assert!(
-                msg.contains("ca_files"),
-                "expected the empty-ca_files rejection message, got: {msg}"
-            );
-        }
-        other => panic!("expected TcpError::Configuration naming ca_files, got {other:?}"),
-    }
+    assert!(matches!(
+        result,
+        Err(ferrowl_modbus::Error::Tcp(ferrowl_modbus::TcpError::Tls(
+            ferrowl_modbus::TlsError::EmptyCaFiles
+        )))
+    ));
 }
 
 #[tokio::test]
-/// edge-cases.md "TLS boundaries" — a malformed/unreadable PEM path fails the
-/// server's start with a TLS configuration error, the same tier as MB-R-107/108. `spawn()`
-/// itself always returns `Ok` now (MB-R-130/MB-R-134); the configuration error surfaces
-/// from the joined task instead, and never retries.
+/// edge-cases.md "TLS boundaries", MB-R-250, MB-R-251 — a malformed/unreadable PEM path fails
+/// the server's start with a TLS configuration error, surfaced as the typed `TlsError` cause.
+/// `spawn()` itself always returns `Ok` now (MB-R-130/MB-R-134); the configuration error
+/// surfaces from the joined task instead, and never retries.
 async fn malformed_pem_fails_server_start() {
     let dir = reserve_temp_dir("ferrowl_modbus_tcp_tls_server");
     let bad_cert = write_pem(&dir, "garbage-cert", "not a pem file at all");
@@ -638,8 +636,8 @@ async fn malformed_pem_fails_server_start() {
         .expect("task must not panic");
     assert!(matches!(
         result,
-        Err(ferrowl_modbus::Error::Tcp(
-            ferrowl_modbus::TcpError::Configuration(_)
-        ))
+        Err(ferrowl_modbus::Error::Tcp(ferrowl_modbus::TcpError::Tls(
+            ferrowl_modbus::TlsError::NoCertificates { .. }
+        )))
     ));
 }
