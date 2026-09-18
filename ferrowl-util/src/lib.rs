@@ -1,9 +1,8 @@
 //! Small general-purpose helpers shared across the ferrowl crates:
-//! user-supplied filesystem path expansion ([`path`]), and wall-clock helpers ([`time`]).
+//! user-supplied filesystem path expansion ([`path`]).
 
 pub mod backoff;
 pub mod path;
-pub mod time;
 pub mod tls;
 
 /// Trait providing the `panic()` method that calls the given function and panics with the returned

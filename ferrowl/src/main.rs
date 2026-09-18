@@ -18,6 +18,7 @@ mod module;
 mod registry;
 mod script_template;
 mod session;
+mod time;
 mod view;
 
 use std::collections::BTreeMap;

@@ -174,7 +174,7 @@ async fn drain_log(
         let dropped = new_count - window.len() as u64;
         lines.push(format!(
             "[{}] [{}] {name} | ({dropped} lines dropped: ring overflowed between ticks)",
-            format_timestamp(ferrowl_util::time::now_unix_ms()),
+            format_timestamp(crate::time::now_unix_ms()),
             Level::Error
         ));
     }

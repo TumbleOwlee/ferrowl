@@ -76,7 +76,7 @@ pub(crate) fn append(sink: &FileSink, line: &str) {
     if let Ok(mut guard) = sink.lock()
         && let Some(writer) = guard.as_mut()
     {
-        let ms = ferrowl_util::time::now_unix_ms();
+        let ms = crate::time::now_unix_ms();
         let ts = format_timestamp(ms);
         let _ = writeln!(writer, "[{ts}] {line}");
         let _ = writer.flush();

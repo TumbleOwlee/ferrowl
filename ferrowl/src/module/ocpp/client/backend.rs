@@ -107,7 +107,7 @@ impl OcppMessage {
     ) -> Self {
         Self {
             seq: next_seq(),
-            ts: ferrowl_util::time::now_unix_ms(),
+            ts: crate::time::now_unix_ms(),
             direction,
             name: name.into(),
             payload,
@@ -612,7 +612,7 @@ pub fn rfc3339(ms: u64) -> String {
 
 /// RFC3339 UTC string for the current time.
 pub fn rfc3339_now() -> String {
-    rfc3339(ferrowl_util::time::now_unix_ms())
+    rfc3339(crate::time::now_unix_ms())
 }
 
 /// Days since the Unix epoch to a Gregorian (year, month, day) triple (Howard Hinnant).

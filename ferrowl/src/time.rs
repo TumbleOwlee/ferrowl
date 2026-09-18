@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 ///
 /// A system clock set before the epoch (misconfigured host) yields 0 rather than killing a
 /// running simulation, hence `unwrap_or_default` rather than `expect`.
-pub fn now_unix_ms() -> u64 {
+pub(crate) fn now_unix_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
