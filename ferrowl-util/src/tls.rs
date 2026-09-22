@@ -5,7 +5,9 @@
 //! serialized form is the sole representation, no shadow struct or hand-written
 //! `Serialize`/`Deserialize` pair stands between file and type (MB-R-105/OC-R-126).
 
+use crate::path::{relativize_under, resolve_against};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 /// A `ServerTlsPolicy`/`ClientTlsPolicy` construction-time rejection (MB-R-105/MB-R-108/
 /// MB-R-109/MB-R-110) -- the three checks `validate()` performs that remain runtime rather than
@@ -31,6 +33,33 @@ pub enum CertSource {
     Files { cert_file: String, key_file: String },
 }
 
+impl CertSource {
+    /// NF-R-070 — resolve `cert_file`/`key_file` against `base` (NF-R-069). No-op for
+    /// `Ephemeral`/`SelfSigned`, which carry no path.
+    pub fn resolve_paths(&mut self, base: &Path) {
+        if let CertSource::Files {
+            cert_file,
+            key_file,
+        } = self
+        {
+            *cert_file = resolve_against(base, cert_file);
+            *key_file = resolve_against(base, key_file);
+        }
+    }
+
+    /// NF-R-072 — re-encode `cert_file`/`key_file` relative to `base` when they lie under it.
+    pub fn relativize_paths(&mut self, base: &Path) {
+        if let CertSource::Files {
+            cert_file,
+            key_file,
+        } = self
+        {
+            *cert_file = relativize_under(base, cert_file);
+            *key_file = relativize_under(base, key_file);
+        }
+    }
+}
+
 /// How a peer's certificate is verified (MB-R-105/MB-R-108/MB-R-109/OC-R-034/OC-R-036/OC-R-039).
 /// `RootStore` is client-only (verifying a server); `CaFiles` is used by both roles.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,6 +73,44 @@ pub enum CertVerification {
     CaFiles {
         ca_files: Vec<String>,
     },
+}
+
+impl CertVerification {
+    /// NF-R-070 — resolve every entry of `extra_ca_files`/`ca_files` against `base` (NF-R-069).
+    /// No-op for `Skip`, which carries no path.
+    pub fn resolve_paths(&mut self, base: &Path) {
+        match self {
+            CertVerification::RootStore { extra_ca_files } => {
+                for f in extra_ca_files.iter_mut() {
+                    *f = resolve_against(base, f);
+                }
+            }
+            CertVerification::CaFiles { ca_files } => {
+                for f in ca_files.iter_mut() {
+                    *f = resolve_against(base, f);
+                }
+            }
+            CertVerification::Skip {} => {}
+        }
+    }
+
+    /// NF-R-072 — re-encode every entry of `extra_ca_files`/`ca_files` relative to `base` when it
+    /// lies under it.
+    pub fn relativize_paths(&mut self, base: &Path) {
+        match self {
+            CertVerification::RootStore { extra_ca_files } => {
+                for f in extra_ca_files.iter_mut() {
+                    *f = relativize_under(base, f);
+                }
+            }
+            CertVerification::CaFiles { ca_files } => {
+                for f in ca_files.iter_mut() {
+                    *f = relativize_under(base, f);
+                }
+            }
+            CertVerification::Skip {} => {}
+        }
+    }
 }
 
 /// A server-role endpoint's TLS configuration (MB-R-105).
@@ -83,6 +150,37 @@ impl ServerTlsPolicy {
             }
         }
         Ok(())
+    }
+
+    /// NF-R-070 — forward resolution into this policy's `identity`/`verification` payloads
+    /// (NF-R-069). No-op for `None`, which carries no path.
+    pub fn resolve_paths(&mut self, base: &Path) {
+        match self {
+            ServerTlsPolicy::None {} => {}
+            ServerTlsPolicy::Tls { identity } => identity.resolve_paths(base),
+            ServerTlsPolicy::Mutual {
+                identity,
+                verification,
+            } => {
+                identity.resolve_paths(base);
+                verification.resolve_paths(base);
+            }
+        }
+    }
+
+    /// NF-R-072 — forward relativization into this policy's `identity`/`verification` payloads.
+    pub fn relativize_paths(&mut self, base: &Path) {
+        match self {
+            ServerTlsPolicy::None {} => {}
+            ServerTlsPolicy::Tls { identity } => identity.relativize_paths(base),
+            ServerTlsPolicy::Mutual {
+                identity,
+                verification,
+            } => {
+                identity.relativize_paths(base);
+                verification.relativize_paths(base);
+            }
+        }
     }
 }
 
@@ -136,11 +234,43 @@ impl ClientTlsPolicy {
         }
         Ok(())
     }
+
+    /// NF-R-070 — forward resolution into this policy's `verification`/`identity` payloads
+    /// (NF-R-069). No-op for `None`, which carries no path.
+    pub fn resolve_paths(&mut self, base: &Path) {
+        match self {
+            ClientTlsPolicy::None {} => {}
+            ClientTlsPolicy::Tls { verification } => verification.resolve_paths(base),
+            ClientTlsPolicy::Mutual {
+                verification,
+                identity,
+            } => {
+                verification.resolve_paths(base);
+                identity.resolve_paths(base);
+            }
+        }
+    }
+
+    /// NF-R-072 — forward relativization into this policy's `verification`/`identity` payloads.
+    pub fn relativize_paths(&mut self, base: &Path) {
+        match self {
+            ClientTlsPolicy::None {} => {}
+            ClientTlsPolicy::Tls { verification } => verification.relativize_paths(base),
+            ClientTlsPolicy::Mutual {
+                verification,
+                identity,
+            } => {
+                verification.relativize_paths(base);
+                identity.relativize_paths(base);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     fn toml_round_trip<T>(value: &T)
     where
@@ -459,5 +589,151 @@ mod tests {
             err.to_string().contains("unknown field `ca_files`"),
             "got: {err}"
         );
+    }
+
+    /// NF-R-070 — `CertSource::Files` resolves `cert_file`/`key_file` against a base directory,
+    /// and `relativize_paths` reverses it when the resolved path lies under the same base.
+    #[test]
+    fn ut_cert_source_files_resolve_and_relativize_round_trip() {
+        let base = Path::new("/dev/dir");
+        let mut source = CertSource::Files {
+            cert_file: "certs/c.pem".into(),
+            key_file: "certs/k.pem".into(),
+        };
+        source.resolve_paths(base);
+        assert_eq!(
+            source,
+            CertSource::Files {
+                cert_file: "/dev/dir/certs/c.pem".into(),
+                key_file: "/dev/dir/certs/k.pem".into(),
+            }
+        );
+        source.relativize_paths(base);
+        assert_eq!(
+            source,
+            CertSource::Files {
+                cert_file: "certs/c.pem".into(),
+                key_file: "certs/k.pem".into(),
+            }
+        );
+    }
+
+    /// NF-R-070 — `CertVerification::CaFiles` resolves every entry in `ca_files` against the
+    /// base directory.
+    #[test]
+    fn ut_cert_verification_ca_files_resolve_each_entry() {
+        let base = Path::new("/dev/dir");
+        let mut verification = CertVerification::CaFiles {
+            ca_files: vec!["a.pem".into(), "sub/b.pem".into()],
+        };
+        verification.resolve_paths(base);
+        assert_eq!(
+            verification,
+            CertVerification::CaFiles {
+                ca_files: vec!["/dev/dir/a.pem".into(), "/dev/dir/sub/b.pem".into()],
+            }
+        );
+    }
+
+    /// NF-R-070 — `CertVerification::RootStore` resolves every entry in `extra_ca_files` against
+    /// the base directory.
+    #[test]
+    fn ut_cert_verification_root_store_resolves_extra_ca_files() {
+        let base = Path::new("/dev/dir");
+        let mut verification = CertVerification::RootStore {
+            extra_ca_files: vec!["extra.pem".into()],
+        };
+        verification.resolve_paths(base);
+        assert_eq!(
+            verification,
+            CertVerification::RootStore {
+                extra_ca_files: vec!["/dev/dir/extra.pem".into()],
+            }
+        );
+    }
+
+    /// NF-R-070 — `ServerTlsPolicy::Mutual` forwards resolution into both its `identity` and its
+    /// `verification` payloads.
+    #[test]
+    fn ut_server_policy_mutual_resolves_identity_and_verification() {
+        let base = Path::new("/dev/dir");
+        let mut policy = ServerTlsPolicy::Mutual {
+            identity: CertSource::Files {
+                cert_file: "c.pem".into(),
+                key_file: "k.pem".into(),
+            },
+            verification: CertVerification::CaFiles {
+                ca_files: vec!["ca.pem".into()],
+            },
+        };
+        policy.resolve_paths(base);
+        assert_eq!(
+            policy,
+            ServerTlsPolicy::Mutual {
+                identity: CertSource::Files {
+                    cert_file: "/dev/dir/c.pem".into(),
+                    key_file: "/dev/dir/k.pem".into(),
+                },
+                verification: CertVerification::CaFiles {
+                    ca_files: vec!["/dev/dir/ca.pem".into()],
+                },
+            }
+        );
+    }
+
+    /// NF-R-070 — `ClientTlsPolicy::Mutual` forwards resolution into both its `verification` and
+    /// its `identity` payloads.
+    #[test]
+    fn ut_client_policy_mutual_resolves_identity_and_verification() {
+        let base = Path::new("/dev/dir");
+        let mut policy = ClientTlsPolicy::Mutual {
+            verification: CertVerification::RootStore {
+                extra_ca_files: vec!["extra.pem".into()],
+            },
+            identity: CertSource::Files {
+                cert_file: "c.pem".into(),
+                key_file: "k.pem".into(),
+            },
+        };
+        policy.resolve_paths(base);
+        assert_eq!(
+            policy,
+            ClientTlsPolicy::Mutual {
+                verification: CertVerification::RootStore {
+                    extra_ca_files: vec!["/dev/dir/extra.pem".into()],
+                },
+                identity: CertSource::Files {
+                    cert_file: "/dev/dir/c.pem".into(),
+                    key_file: "/dev/dir/k.pem".into(),
+                },
+            }
+        );
+    }
+
+    /// NF-R-070 — the path-free variants (`Skip`, `Ephemeral`, `SelfSigned`, `None`) are no-ops
+    /// under both `resolve_paths` and `relativize_paths`.
+    #[test]
+    fn ut_pathless_variants_are_unchanged_by_resolve() {
+        let base = Path::new("/dev/dir");
+
+        let mut verification = CertVerification::Skip {};
+        verification.resolve_paths(base);
+        assert_eq!(verification, CertVerification::Skip {});
+
+        let mut source = CertSource::Ephemeral {};
+        source.resolve_paths(base);
+        assert_eq!(source, CertSource::Ephemeral {});
+
+        let mut source = CertSource::SelfSigned {};
+        source.resolve_paths(base);
+        assert_eq!(source, CertSource::SelfSigned {});
+
+        let mut server = ServerTlsPolicy::None {};
+        server.resolve_paths(base);
+        assert_eq!(server, ServerTlsPolicy::None {});
+
+        let mut client = ClientTlsPolicy::None {};
+        client.resolve_paths(base);
+        assert_eq!(client, ClientTlsPolicy::None {});
     }
 }
