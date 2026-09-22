@@ -18,7 +18,6 @@ Boundary and error behavior of the process command line and headless runner, plu
 - **CL-E-007** — **Non-numeric `port`/`data_bits`/`stop_bits`/`baud`** → parse error.
 - **CL-E-008** — **Invalid enum value** — `role` other than `client`/`server`, `transport` other than `tcp`/`rtu`/`rtu_over_tcp`/`udp`/`ascii`/`ascii_over_tcp`, `protocol` other than `ws`/`wss` → parse error.
 - **CL-E-009** — In `ferrowl run`, any such error is a setup failure: exit **1** with `Error:` on stderr before the loop. In the TUI path it aborts startup with `Error:` on stderr.
-- **CL-E-030** — **A `--module` descriptor's `device=` is CWD-relative** (NF-R-071), unlike the same key inside a session file (CS-R-073): a command-line argument is not inside a file and has no base directory but the working directory. Paths *inside* the device file it names are still file-relative (NF-R-069), so `--device ./test/dev.toml` picks up `./test/`'s PEM files.
 
 ## `run` with no modules / no session
 
@@ -65,3 +64,4 @@ Boundary and error behavior of the process command line and headless runner, plu
 - **CL-E-027** — **`--exit-on-error` only catches logged Error-level lines.** A level match, not a structured result channel (``## `--exit-on-error` detection is level-based``). Errors never reaching the log, or logged below Error, are invisible.
 - **CL-E-028** — **Headless has no per-module error isolation.** Any one module's startup failure fails the whole `run` with exit 1 (`## Session / device load failures in headless`); no "start the good ones, report the bad" mode.
 - **CL-E-029** — **Teardown lines are stderr, not the drained log stream.** CL-R-056's `Stopped '<name>'` lines never reach stdout and are therefore never mirrored into `--log-file` (CL-R-041): a `--log-file` capture shows the run's logs but no teardown record. Deliberate — stdout stays a pure drained-log stream (CL-R-042), and the setup-failure teardown happens before any drain has run at all.
+- **CL-E-030** — **A `--module` descriptor's `device=` is CWD-relative** (NF-R-071), unlike the same key inside a session file (CS-R-073): a command-line argument is not inside a file and has no base directory but the working directory. Paths *inside* the device file it names are still file-relative (NF-R-069), so `--device ./test/dev.toml` picks up `./test/`'s PEM files.
