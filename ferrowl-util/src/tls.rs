@@ -619,7 +619,7 @@ mod tests {
     }
 
     /// NF-R-070 — `CertVerification::CaFiles` resolves every entry in `ca_files` against the
-    /// base directory.
+    /// base directory, and `relativize_paths` reverses it.
     #[test]
     fn ut_cert_verification_ca_files_resolve_each_entry() {
         let base = Path::new("/dev/dir");
@@ -633,10 +633,17 @@ mod tests {
                 ca_files: vec!["/dev/dir/a.pem".into(), "/dev/dir/sub/b.pem".into()],
             }
         );
+        verification.relativize_paths(base);
+        assert_eq!(
+            verification,
+            CertVerification::CaFiles {
+                ca_files: vec!["a.pem".into(), "sub/b.pem".into()],
+            }
+        );
     }
 
     /// NF-R-070 — `CertVerification::RootStore` resolves every entry in `extra_ca_files` against
-    /// the base directory.
+    /// the base directory, and `relativize_paths` reverses it.
     #[test]
     fn ut_cert_verification_root_store_resolves_extra_ca_files() {
         let base = Path::new("/dev/dir");
@@ -650,10 +657,17 @@ mod tests {
                 extra_ca_files: vec!["/dev/dir/extra.pem".into()],
             }
         );
+        verification.relativize_paths(base);
+        assert_eq!(
+            verification,
+            CertVerification::RootStore {
+                extra_ca_files: vec!["extra.pem".into()],
+            }
+        );
     }
 
     /// NF-R-070 — `ServerTlsPolicy::Mutual` forwards resolution into both its `identity` and its
-    /// `verification` payloads.
+    /// `verification` payloads, and `relativize_paths` reverses both.
     #[test]
     fn ut_server_policy_mutual_resolves_identity_and_verification() {
         let base = Path::new("/dev/dir");
@@ -679,10 +693,23 @@ mod tests {
                 },
             }
         );
+        policy.relativize_paths(base);
+        assert_eq!(
+            policy,
+            ServerTlsPolicy::Mutual {
+                identity: CertSource::Files {
+                    cert_file: "c.pem".into(),
+                    key_file: "k.pem".into(),
+                },
+                verification: CertVerification::CaFiles {
+                    ca_files: vec!["ca.pem".into()],
+                },
+            }
+        );
     }
 
     /// NF-R-070 — `ClientTlsPolicy::Mutual` forwards resolution into both its `verification` and
-    /// its `identity` payloads.
+    /// its `identity` payloads, and `relativize_paths` reverses both.
     #[test]
     fn ut_client_policy_mutual_resolves_identity_and_verification() {
         let base = Path::new("/dev/dir");
@@ -708,6 +735,19 @@ mod tests {
                 },
             }
         );
+        policy.relativize_paths(base);
+        assert_eq!(
+            policy,
+            ClientTlsPolicy::Mutual {
+                verification: CertVerification::RootStore {
+                    extra_ca_files: vec!["extra.pem".into()],
+                },
+                identity: CertSource::Files {
+                    cert_file: "c.pem".into(),
+                    key_file: "k.pem".into(),
+                },
+            }
+        );
     }
 
     /// NF-R-070 — the path-free variants (`Skip`, `Ephemeral`, `SelfSigned`, `None`) are no-ops
@@ -719,21 +759,31 @@ mod tests {
         let mut verification = CertVerification::Skip {};
         verification.resolve_paths(base);
         assert_eq!(verification, CertVerification::Skip {});
+        verification.relativize_paths(base);
+        assert_eq!(verification, CertVerification::Skip {});
 
         let mut source = CertSource::Ephemeral {};
         source.resolve_paths(base);
+        assert_eq!(source, CertSource::Ephemeral {});
+        source.relativize_paths(base);
         assert_eq!(source, CertSource::Ephemeral {});
 
         let mut source = CertSource::SelfSigned {};
         source.resolve_paths(base);
         assert_eq!(source, CertSource::SelfSigned {});
+        source.relativize_paths(base);
+        assert_eq!(source, CertSource::SelfSigned {});
 
         let mut server = ServerTlsPolicy::None {};
         server.resolve_paths(base);
         assert_eq!(server, ServerTlsPolicy::None {});
+        server.relativize_paths(base);
+        assert_eq!(server, ServerTlsPolicy::None {});
 
         let mut client = ClientTlsPolicy::None {};
         client.resolve_paths(base);
+        assert_eq!(client, ClientTlsPolicy::None {});
+        client.relativize_paths(base);
         assert_eq!(client, ClientTlsPolicy::None {});
     }
 }

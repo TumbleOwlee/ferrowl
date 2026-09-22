@@ -31,6 +31,8 @@ pub(crate) fn expand_with_home(path: &str, home: Option<&Path>) -> PathBuf {
 }
 
 /// NF-R-069 — the absolute directory that `file`'s file-relative path fields resolve against.
+/// Absolute unless the process working directory cannot be determined, in which case a relative
+/// `file` yields a still-relative parent rather than erroring.
 pub fn base_dir_of(file: &str) -> PathBuf {
     base_dir_of_with_cwd(file, std::env::current_dir().ok().as_deref())
 }
@@ -149,7 +151,7 @@ mod tests {
         let base = Path::new("/base/dir");
         assert_eq!(
             resolve_against(base, "sub/dev.toml"),
-            base.join("sub/dev.toml").to_string_lossy().into_owned()
+            "/base/dir/sub/dev.toml"
         );
     }
 
@@ -200,7 +202,9 @@ mod tests {
     }
 
     #[test]
-    /// NF-R-069 — `resolve_against` on a blank path (CS-R-067) leaves it blank.
+    /// `resolve_against` on a blank path leaves it blank — untagged: it exercises the helper's
+    /// blank-input branch, not a session rule; CS-R-067's quick-start behaviour is pinned where
+    /// an actual session instance exists to be blank.
     fn ut_resolve_against_blank_stays_blank() {
         assert_eq!(resolve_against(Path::new("/base"), ""), "");
         assert_eq!(resolve_against(Path::new("/base"), "  "), "  ");
@@ -225,7 +229,8 @@ mod tests {
     }
 
     #[test]
-    /// NF-R-072 — a blank path (CS-E-029) stays blank.
+    /// `relativize_under` on a blank path stays blank — untagged, same reason: CS-E-029 is about
+    /// `:write` leaving a blank `device` blank, pinned where an actual instance exists.
     fn ut_relativize_under_blank_stays_blank() {
         assert_eq!(relativize_under(Path::new("/base"), ""), "");
     }
@@ -236,7 +241,7 @@ mod tests {
         let base = Path::new("/base/dir");
         assert_eq!(
             resolve_against(base, "../up/dev.toml"),
-            base.join("../up/dev.toml").to_string_lossy().into_owned()
+            "/base/dir/../up/dev.toml"
         );
     }
 
