@@ -18,6 +18,7 @@ Boundary and error behavior of the process command line and headless runner, plu
 - **CL-E-007** — **Non-numeric `port`/`data_bits`/`stop_bits`/`baud`** → parse error.
 - **CL-E-008** — **Invalid enum value** — `role` other than `client`/`server`, `transport` other than `tcp`/`rtu`/`rtu_over_tcp`/`udp`/`ascii`/`ascii_over_tcp`, `protocol` other than `ws`/`wss` → parse error.
 - **CL-E-009** — In `ferrowl run`, any such error is a setup failure: exit **1** with `Error:` on stderr before the loop. In the TUI path it aborts startup with `Error:` on stderr.
+- **CL-E-030** — **A `--module` descriptor's `device=` is CWD-relative** (NF-R-071), unlike the same key inside a session file (CS-R-073): a command-line argument is not inside a file and has no base directory but the working directory. Paths *inside* the device file it names are still file-relative (NF-R-069), so `--device ./test/dev.toml` picks up `./test/`'s PEM files.
 
 ## `run` with no modules / no session
 
@@ -33,7 +34,7 @@ Boundary and error behavior of the process command line and headless runner, plu
 ## Session / device load failures in headless
 
 - **CL-E-015** — **`--session` file fails to load or parse** — setup failure, exit **1** (`Error:` on stderr). Stricter than the TUI, which tolerates a file vanishing mid-startup by falling back to defaults.
-- **CL-E-016** — **A module's device config fails to load** — headless exits **1** (`'<name>': failed to load '<path>': …` under `Error:`). The TUI skips that module with a stderr warning and keeps the rest (CS-E-008). Deliberate asymmetry: headless must not silently run a partial set in CI.
+- **CL-E-016** — **A module's device config fails to load** — headless exits **1** (`'<name>': failed to load '<path>': …` under `Error:`, `<path>` being the resolved path per CS-R-073). The TUI skips that module with a stderr warning and keeps the rest (CS-E-008). Deliberate asymmetry: headless must not silently run a partial set in CI.
 - **CL-E-017** — **Blank `device` path** — for OCPP a legitimate quick-start on the default device config; CS-R-067 governs.
 
 ## `--exit-on-error` detection is level-based

@@ -79,7 +79,7 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 | **OC-E-046** | Dialog TLS selector moved to Off after certificate paths and CA entries entered | resolved policy `None`, no payload; every hidden widget keeps its state; displayed protocol reverts to `ws://` (OC-R-127, OC-R-163) |
 | **OC-E-047** | Dialog Basic Authentication On, TLS selector Off | accepted: Profile 1, credentials over plain `ws://` (OC-R-165) |
 | **OC-E-048** | Hand-written `ws://` instance whose own-role policy is not `None`, reopened in the dialog | selector shows TLS or mTLS, Protocol display shows derived `wss://`; confirming writes `wss://` back, promoting the inert pairing into a live one (OC-R-161). The instance stays inert (OC-R-042/OC-R-097) only while unedited |
-| **OC-E-049** | Configured PEM file cannot be opened, or contains no certificate or no private key | CS dial / CSMS bind fails with a TLS error, before socket work |
+| **OC-E-049** | Configured PEM file cannot be opened, or contains no certificate or no private key | CS dial / CSMS bind fails with a TLS error, before socket work; the error names the resolved path (NF-R-069) |
 | **OC-E-050** | `username` without `password` (or vice versa) | Basic Auth **not** enabled; field inert |
 | **OC-E-051** | `wss://` **server** endpoint, identity `CertSource::Ephemeral` | binds with an ephemeral self-signed certificate, logs the fallback; never silently plain TCP |
 | **OC-E-052** | `ws://` **client** endpoint with TLS material | material inert; connection plain |

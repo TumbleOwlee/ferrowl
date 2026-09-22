@@ -64,7 +64,7 @@ Every `modules` entry is an object with:
 
 - **`"type"`** — `"modbus"` or `"ocpp"`, selects the deserializer. Absent → `"modbus"` (back-compat). Any other value → hard error (CS-R-011, CS-R-012, CS-R-013).
 - **`name`** — tab title and `C_Module` registry key. Duplicates across the whole session (both types) de-duplicated by appending ` (2)`, ` (3)`, … in creation order (CS-R-014, CS-R-058).
-- **`device`** — path to the device-config file (CS-R-015).
+- **`device`** — path to the device-config file (CS-R-015); a relative value is resolved against the session file's own directory (CS-R-073, NF-R-069) and is written back relative to the save target's directory when it lies under it (NF-R-072).
 - **per-instance endpoint** fields, protocol-specific:
 
 | `"type"` | Endpoint / instance fields specified in | Req |
@@ -120,4 +120,4 @@ A reloaded session reproduces the same instance list, scripts, interval; not any
 
 ## TLS configuration shape
 
-A device config's TLS material is a tagged-enum tree (MB-R-105, MB-R-164) in a two-role container (MB-R-104/OC-R-126): Modbus `[tls.server]`/`[tls.client]`, OCPP one level deeper `[security.tls.server]`/`[security.tls.client]`. Each role block carries `mode` (policy tag), an `identity` sub-table with `source` (certificate-source tag) when the mode calls for one, and a `verification` sub-table with `verify` (peer-verification tag) when the mode calls for one. Both container fields default independently to `mode = "none"`, so an absent `tls`/`security.tls` block, an empty one, and one whose two policies are both `none` are the same state.
+A device config's TLS material is a tagged-enum tree (MB-R-105, MB-R-164) in a two-role container (MB-R-104/OC-R-126): Modbus `[tls.server]`/`[tls.client]`, OCPP one level deeper `[security.tls.server]`/`[security.tls.client]`. Each role block carries `mode` (policy tag), an `identity` sub-table with `source` (certificate-source tag) when the mode calls for one, and a `verification` sub-table with `verify` (peer-verification tag) when the mode calls for one. Both container fields default independently to `mode = "none"`, so an absent `tls`/`security.tls` block, an empty one, and one whose two policies are both `none` are the same state. Every PEM path in that tree (`cert_file`, `key_file`, `ca_files`, `extra_ca_files`) is file-relative: a relative value resolves against the device file's own directory (NF-R-069, NF-R-070).

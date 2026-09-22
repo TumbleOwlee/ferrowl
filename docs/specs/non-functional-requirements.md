@@ -54,11 +54,27 @@ IDs stable, append-only (`NF-R-nnn`). See [`README.md`](./README.md).
 
 **NF-R-042** — Any user-supplied filesystem path (CLI flag argument, path-valued config/session/device field, TUI dialog path field) has a leading `~` expanded to the current user's home directory before it is opened, read, written, or checked for existence: bare `~` = home directory, `~/rest` = `<home>/rest`.
 
-**NF-R-052** — In `~` expansion (NF-R-042), a path not starting with `~` (including `~otheruser/...`, unsupported) passes through unchanged, as does any path when the home directory is undeterminable.
+**NF-R-052** — In `~` expansion (NF-R-042), a path not starting with `~` (including `~otheruser/...`, unsupported) leaves the expansion step unchanged, as does any path when the home directory is undeterminable; base-directory resolution (NF-R-069) then applies to the result independently.
 
 **NF-R-053** — `~` expansion (NF-R-042) is performed once by a single shared resolver, applied at every filesystem-touching call site.
 
 **NF-R-054** — The filesystem-touching call sites that apply `~` expansion (NF-R-042) are: config/session/device config files, CLI `--session`/`--device`/`--module`/`--log-file`, per-module log files, Modbus/OCPP TLS cert/key/CA files (including the setup dialogs' path-existence validation).
+
+**NF-R-069** — A path-valued field read from a configuration file and declared file-relative (NF-R-070) is resolved, when its value is relative after `~` expansion (NF-R-042), by joining it onto the directory containing that configuration file; the resolved path is what the program holds and what it opens, reads, writes, or checks for existence.
+
+**NF-R-070** — The file-relative path fields (NF-R-069) are: a session instance's `device` (CS-R-015), and a device config's TLS `cert_file`, `key_file`, `ca_files` and `extra_ca_files` entries, for Modbus (MB-R-107, MB-R-108, MB-R-109) and OCPP (OC-R-034, OC-R-037, OC-R-129, OC-R-130, OC-R-166) alike.
+
+**NF-R-071** — Every path not named by NF-R-070 is CWD-relative: the arguments of `--session`, `--device`, `--module`'s `device=` key, `--log-file`, `migrate`'s `--input`/`--output`, and a per-module log-file path.
+
+**NF-R-072** — When a configuration file is written, each file-relative path field (NF-R-070) whose held path lies under the directory of the file being written is encoded as a path relative to that directory; a held path outside that directory is encoded unchanged, as the absolute path it is.
+
+**NF-R-073** — A TLS PEM path typed into a Modbus or OCPP setup dialog is checked for existence (MB-R-187, OC-R-149) against the directory of the module's device-config file when the module has one, and against the process working directory when it does not.
+
+**NF-R-074** — Path resolution (NF-R-069, NF-R-075, NF-R-076) and relativization (NF-R-072) are lexical: no canonicalization, no symlink resolution, `..` and `.` components preserved as written, and "lies under the directory" is decided by component-wise path prefix, not by filesystem identity.
+
+**NF-R-075** — A TLS PEM path confirmed in a Modbus or OCPP setup dialog is rebased onto the same base directory its existence check used (NF-R-073) before it is held, so the path the module opens at connect time is the path that was validated.
+
+**NF-R-076** — A CWD-relative path (NF-R-071) that the running configuration retains — a module instance's `device` given by `--device`, by a `--module`/`--ocpp` descriptor's `device=` key, or confirmed in a module setup dialog — is held as the path resolved against the process working directory at the moment it is supplied, not as the string given.
 
 ## Versioning & testing
 

@@ -48,6 +48,8 @@ Per [`../README.md`](../README.md)'s ownership rule, this area owns only the *en
 
 **CS-R-059** — A non-finite, zero, or negative session `interval` (CS-R-017) falls back to `1.0`.
 
+**CS-R-073** — A relative `device` path in a session instance (CS-R-015) is resolved against the directory containing the session file (NF-R-069); there is no fallback to the process working directory when the resolved path does not exist.
+
 **CS-R-060** — A valid positive session `interval` (CS-R-017) is used as-is; there is no minimum floor.
 
 **CS-R-018** — The session `version` field is informational only: stamped with the writing build's version on save, never consulted by any load-time or migration branch.
@@ -76,9 +78,13 @@ Per [`../README.md`](../README.md)'s ownership rule, this area owns only the *en
 
 **CS-R-070** — A session file written by `:write` (CS-R-030) is encoded from the target path's extension per CS-R-002.
 
+**CS-R-074** — A session written by `:write` into a directory together with the device files it references, loaded again with any process working directory, yields the same instance list as before the save (CS-R-033).
+
 **CS-R-031** — A save persists **configuration only**: module instance specs, session scripts, session interval, freshly stamped `version`.
 
 **CS-R-061** — A save writes no live runtime state (current register/coil values, in-flight Modbus transactions, the CSMS's observed station topology, runtime mutations to an OCPP config-key/variable store); only the configuration of CS-R-031 is written.
+
+**CS-R-075** — A module's log-file sink path (`:log <file>`, UI-R-085) is runtime state: it is written to neither the session file nor the device-config file, for Modbus and OCPP alike.
 
 **CS-R-032** — A session `:write` writes no device-config file. Device configs are saved through their own command surface ([`../tui/`](../tui/) and the protocol areas).
 
@@ -122,7 +128,7 @@ Per [`../README.md`](../README.md)'s ownership rule, this area owns only the *en
 
 **CS-R-052** — A field present in a file but not in the schema is ignored silently on load, except within a TLS block, governed by CS-R-055.
 
-**CS-R-053** — When a session references a missing or unreadable device-config file, startup does not abort. The instance is skipped with a warning naming it and the failed path, identically for Modbus and OCPP; neither falls back to a default device config.
+**CS-R-053** — When a session references a missing or unreadable device-config file, startup does not abort. The instance is skipped with a warning naming it and the resolved path that failed (CS-R-073), identically for Modbus and OCPP; neither falls back to a default device config.
 
 **CS-R-067** — A **blank** device path in a session instance is not a failure (unlike CS-R-053's missing file): the instance is a quick-start built on the default device config.
 
@@ -135,3 +141,5 @@ Per [`../README.md`](../README.md)'s ownership rule, this area owns only the *en
 **CS-R-072** — CS-R-055 is the sole exception to CS-R-052: no table outside a TLS subtree and its enclosing OCPP `security` table is strict-checked, the exception being made because silently ignoring a retired TLS field can weaken an endpoint's security posture.
 
 **CS-R-068** — A table in the strictly checked TLS subtree or OCPP `security` table (CS-R-055) naming a pre-merge field (`require_client_cert`, `client_ca_files`, `client_ca_file`, `client_cert_skip_verify`, `insecure_skip_verify`, `client_cert_file`, `client_key_file`, `client_self_signed`, `ca_file`, or a bare `self_signed`/`cert_file`/`key_file` outside an `identity` block) fails the load with an error naming the retired fields found and pointing at the current block shape. No value migrated.
+
+**CS-R-076** — A device-config file carrying a `log_file` key written by an earlier build loads without error and without configuring a log sink; the key is ignored like any other unrecognized field (CS-R-052).
