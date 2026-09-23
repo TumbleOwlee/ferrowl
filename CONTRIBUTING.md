@@ -200,7 +200,7 @@ sequenceDiagram
         Orch->>Git: push, re-run checks on the pushed commit
         opt after stage 0 only
             Orch->>Git: open draft PR (issue title, placeholder body)
-            Note over Orch,Git: every later push updates it; gate 4 promotes it
+            Note over Orch,Git: every later push updates it, gate 4 promotes it
         end
     end
     deactivate Impl
