@@ -686,10 +686,11 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
         self.log.clone()
     }
 
-    fn session_spec(&self) -> Option<serde_json::Value> {
+    fn session_spec(&self, base: &std::path::Path) -> Option<serde_json::Value> {
+        let device_path = ferrowl_util::path::relativize_under(base, &self.device_path);
         let module = crate::module::ocpp::config::session::OcppModuleSpec::from_spec(
             &self.spec,
-            &self.device_path,
+            &device_path,
         );
         let mut v = serde_json::to_value(&module).ok()?;
         v.as_object_mut()?.insert("type".into(), "ocpp".into());
@@ -863,6 +864,28 @@ mod tests {
             security: Default::default(),
         };
         ClientView::<V>::new(spec, String::new(), OcppDeviceConfig::default())
+    }
+
+    #[test]
+    /// NF-R-072 — `session_spec` relativizes `device_path` against the `:write` target directory.
+    fn ut_ocpp_session_spec_relativizes_device() {
+        let dir = reserve_temp_dir("ferrowl_ocpp_client_nfr072");
+        let device_path = dir.join("dev.toml").to_string_lossy().into_owned();
+        let spec = OcppSpec {
+            name: "cs".into(),
+            version: OcppVersion::V1_6,
+            role: OcppRole::Client,
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".into(),
+            port: 0,
+            path: String::new(),
+            timeout_ms: None,
+            reconnect: None,
+            security: Default::default(),
+        };
+        let view = ClientView::<V1_6>::new(spec, device_path, OcppDeviceConfig::default());
+        let v = view.session_spec(dir.path()).unwrap();
+        assert_eq!(v["device"], "dev.toml");
     }
 
     /// The Tab focus order visits the Payload pane and wraps; BackTab reverses it. One per version.

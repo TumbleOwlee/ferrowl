@@ -284,3 +284,54 @@ port = 0
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+#[test]
+/// CS-R-074 — a session bundle (session file + its file-relative `device`) loads identically
+/// again with any process working directory, because `device` resolves against the session
+/// file's own directory, not the CWD.
+fn it_session_bundle_round_trips_from_any_cwd() {
+    let bundle_dir = reserve_temp_dir("ferrowl_cs074_bundle");
+    std::fs::copy(evse_device(), bundle_dir.join("evse.toml")).unwrap();
+    let session_path = bundle_dir.join("session.toml");
+    std::fs::write(
+        &session_path,
+        r#"
+[[modules]]
+name = "bundle-instance"
+device = "evse.toml"
+role = "server"
+
+[modules.endpoint]
+transport = "tcp"
+ip = "127.0.0.1"
+port = 0
+"#,
+    )
+    .unwrap();
+
+    let unrelated_cwd = reserve_temp_dir("ferrowl_cs074_unrelated_cwd");
+    for cwd in [bundle_dir.path(), unrelated_cwd.path()] {
+        let out = bin()
+            .current_dir(cwd)
+            .args([
+                "run",
+                "--session",
+                session_path.to_str().unwrap(),
+                "--duration",
+                "1",
+            ])
+            .output()
+            .expect("run ferrowl");
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "the bundle must load from cwd {cwd:?}; stderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            stdout.contains("bundle-instance"),
+            "the session-file-relative device must resolve and start the instance from cwd {cwd:?}, got: {stdout}"
+        );
+    }
+}

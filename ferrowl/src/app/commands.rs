@@ -134,11 +134,12 @@ impl<S: DrawSurface> App<S> {
     fn save_session(&self, path: &str) -> Result<(), String> {
         let ty = FileType::from_path(path)
             .ok_or_else(|| format!("unknown format for '{path}' (use .toml or .json)"))?;
+        let base = ferrowl_util::path::base_dir_of(path);
         let modules: Vec<serde_json::Value> = self
             .tabs
             .titles
             .iter()
-            .filter_map(|t| t.view.session_spec())
+            .filter_map(|t| t.view.session_spec(&base))
             .collect();
         let session = Session {
             version: Some(crate::config::VERSION.to_string()),
@@ -549,5 +550,93 @@ mod tests {
             vec!["only.toml".to_string()],
             "only the session file"
         );
+    }
+
+    #[tokio::test]
+    /// NF-R-072 — `:write` re-relativizes a module's `device` under the save target's directory,
+    /// not the directory it was originally loaded from. Pins `save_session` threading `base`
+    /// through to `session_spec`; the real per-module views' own relativization is pinned by
+    /// `ut_modbus_session_spec_relativizes_device` and `ut_ocpp_session_spec_relativizes_device`.
+    async fn ut_write_relativizes_device_under_target_dir() {
+        let dir = reserve_temp_dir("ferrowl_nfr072_write_relativize");
+        let device_path = dir.join("dev.toml").to_string_lossy().into_owned();
+        let (v, _h) = MockView::pair("m");
+        let mut app = build_app(vec![v.with_device(&device_path).boxed()]);
+        let session_path = dir.join("session.toml");
+        app.run_command(&format!("write {}", session_path.to_str().unwrap()))
+            .await;
+
+        let loaded = crate::config::load_session(session_path.to_str().unwrap()).unwrap();
+        assert_eq!(
+            loaded.modules[0]["device"], "dev.toml",
+            "device is written relative to the session file's own directory"
+        );
+    }
+
+    #[tokio::test]
+    /// CS-E-028 — a device file outside the save target's directory is written as the unchanged
+    /// absolute path, never a `..`-relative one.
+    async fn ut_write_leaves_device_outside_target_dir_absolute() {
+        let device_dir = reserve_temp_dir("ferrowl_cse028_device");
+        let session_dir = reserve_temp_dir("ferrowl_cse028_session");
+        let device_path = device_dir.join("dev.toml").to_string_lossy().into_owned();
+        let (v, _h) = MockView::pair("m");
+        let mut app = build_app(vec![v.with_device(&device_path).boxed()]);
+        let session_path = session_dir.join("session.toml");
+        app.run_command(&format!("write {}", session_path.to_str().unwrap()))
+            .await;
+
+        let loaded = crate::config::load_session(session_path.to_str().unwrap()).unwrap();
+        let written_device = loaded.modules[0]["device"].as_str().unwrap();
+        assert_eq!(
+            written_device, device_path,
+            "device outside the target directory stays the unchanged absolute path"
+        );
+        assert!(
+            !written_device.contains(".."),
+            "no '..'-relative path is produced across unrelated directories"
+        );
+    }
+
+    #[tokio::test]
+    /// CS-E-029 — a blank `device` stays blank across a `:write`.
+    async fn ut_write_blank_device_stays_blank() {
+        let dir = reserve_temp_dir("ferrowl_cse029_blank_device");
+        let (v, _h) = MockView::pair("m");
+        let mut app = build_app(vec![v.with_device("").boxed()]);
+        let session_path = dir.join("session.toml");
+        app.run_command(&format!("write {}", session_path.to_str().unwrap()))
+            .await;
+
+        let loaded = crate::config::load_session(session_path.to_str().unwrap()).unwrap();
+        assert_eq!(loaded.modules[0]["device"], "", "blank device stays blank");
+    }
+
+    #[test]
+    /// CS-E-009 — `:write` with no path defaults to `session.toml` in the working directory: its
+    /// base directory is the process cwd, read but never changed (the true end-to-end write is a
+    /// documented gap in `docs/specs/README.md`, since `:write` is reachable only through the
+    /// interactive TUI, whose raw-mode entry point a subprocess drive risks leaving engaged).
+    ///
+    /// `base_dir_of` reads `std::env::current_dir()` itself, a second live read another test in
+    /// this binary can mutate between this test's own read and that one; sandwiching the call
+    /// between two reads and only asserting once they agree narrows the window a mutation has to
+    /// land in, but does not close it fully — a mutate-then-restore entirely inside the window
+    /// would still pass both reads while skewing `base`. Accepted: that window is a handful of
+    /// synchronous `Path`/`fs` calls wide, not a sleep or an I/O wait.
+    fn ut_write_default_target_base_is_process_cwd() {
+        for _ in 0..50 {
+            let before = std::env::current_dir().unwrap();
+            let base = ferrowl_util::path::base_dir_of("session.toml");
+            let after = std::env::current_dir().unwrap();
+            if before == after {
+                assert_eq!(
+                    base, before,
+                    "the default :write target's base is the process cwd"
+                );
+                return;
+            }
+        }
+        panic!("process cwd never stabilized long enough to observe base_dir_of's read");
     }
 }

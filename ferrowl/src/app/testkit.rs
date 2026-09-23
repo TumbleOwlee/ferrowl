@@ -155,6 +155,7 @@ pub(crate) struct MockView {
     focused: bool,
     overlay_active: bool,
     session_spec: Option<serde_json::Value>,
+    device_for_spec: Option<String>,
     replacement: Option<Box<dyn ModuleView>>,
     host_kind: Option<&'static str>,
     refreshes: Arc<AtomicUsize>,
@@ -200,6 +201,7 @@ impl MockView {
             focused: false,
             overlay_active: false,
             session_spec: None,
+            device_for_spec: None,
             replacement: None,
             host_kind: None,
             refreshes,
@@ -271,6 +273,13 @@ impl MockView {
     /// Give this view a session spec so `:write` serializes something for its tab.
     pub(super) fn with_session_spec(mut self, spec: serde_json::Value) -> Self {
         self.session_spec = Some(spec);
+        self
+    }
+
+    /// Give this view a `device` path whose `session_spec` is relativized against the
+    /// `:write` target directory, mirroring a real view's `device` field.
+    pub(super) fn with_device(mut self, device: &str) -> Self {
+        self.device_for_spec = Some(device.to_string());
         self
     }
 
@@ -373,7 +382,11 @@ impl ModuleView for MockView {
         self.log.clone()
     }
 
-    fn session_spec(&self) -> Option<serde_json::Value> {
+    fn session_spec(&self, base: &std::path::Path) -> Option<serde_json::Value> {
+        if let Some(device) = &self.device_for_spec {
+            let relative = ferrowl_util::path::relativize_under(base, device);
+            return Some(serde_json::json!({"type": "mock", "device": relative}));
+        }
         self.session_spec.clone()
     }
 

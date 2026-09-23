@@ -1649,8 +1649,10 @@ impl ModuleView for ModbusMonitorModuleView {
         self.last_stop_outcome.take()
     }
 
-    fn session_spec(&self) -> Option<serde_json::Value> {
-        let mut v = serde_json::to_value(&self.spec).ok()?;
+    fn session_spec(&self, base: &std::path::Path) -> Option<serde_json::Value> {
+        let mut spec = self.spec.clone();
+        spec.device = ferrowl_util::path::relativize_under(base, &spec.device);
+        let mut v = serde_json::to_value(&spec).ok()?;
         v.as_object_mut()?.insert("type".into(), "modbus".into());
         Some(v)
     }

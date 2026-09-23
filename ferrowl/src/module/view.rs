@@ -145,8 +145,11 @@ pub trait ModuleView: SetFocus + IsFocus {
 
     /// Serialize this module's config for session persistence, or `None` if unsupported.
     /// The returned value should include a `"type"` field so the loader can dispatch to
-    /// the right deserializer (e.g. `"modbus"`, `"ocpp"`).
-    fn session_spec(&self) -> Option<serde_json::Value> {
+    /// the right deserializer (e.g. `"modbus"`, `"ocpp"`). `base` is the directory the
+    /// session file is being written into; a `device` path under it is encoded relative
+    /// to it.
+    fn session_spec(&self, base: &std::path::Path) -> Option<serde_json::Value> {
+        let _ = base;
         None
     }
 
