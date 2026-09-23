@@ -643,7 +643,7 @@ mod tests {
         assert_eq!(dialog.focus, MonitorSetupDialogFocus::StopBits);
     }
 
-    /// UI-R-067, UI-R-330 — the name field is focused, and so shows a cursor, as soon as the dialog opens,
+    /// UI-R-067, UI-R-351 — the name field is focused, and so shows a cursor, as soon as the dialog opens,
     /// same as `module/modbus/setup_dialog.rs::SetupDialog`; every other field opens
     /// unfocused.
     #[test]
@@ -712,7 +712,7 @@ mod tests {
         );
     }
 
-    /// UI-R-331 — a freshly created dialog paints exactly one text cursor, in the one focused
+    /// UI-R-352 — a freshly created dialog paints exactly one text cursor, in the one focused
     /// field. The cursor rather than the border, because `name` opens empty against `NonEmpty` and
     /// so paints its error border, not its focused one.
     #[test]

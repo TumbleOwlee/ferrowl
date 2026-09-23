@@ -2,7 +2,7 @@
 
 Embedded Lua simulation model, per-context runtime and sandbox, `C_*` host API surface, sim thread execution model, script storage and lifecycle, error/logging semantics.
 
-IDs stable, append-only (`SC-R-nnn`). See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contract.md) (exhaustive `C_*` API), [`edge-cases.md`](./edge-cases.md).
+See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contract.md) (exhaustive `C_*` API), [`edge-cases.md`](./edge-cases.md).
 
 **Area boundaries.** Lua API surface and semantics owned here. The in-TUI code editor (vim-modal editing, syntax highlighting, `:script` dialog) is `tui/`. The device/session file *envelope* carrying scripts is `config-session/`; the script-bearing fields (`scripts`, `script_interval`, session `interval`) are specified here because they control scripting behavior. `C_Test`'s Lua-side assertion semantics owned here; the `ferrowl run` **exit-code** contract keyed off logged assertion failures is `cli-headless/`.
 
@@ -144,7 +144,7 @@ IDs stable, append-only (`SC-R-nnn`). See [`../README.md`](../README.md). Compan
 
 ## State access semantics
 
-**SC-R-027** — A value read from a register or OCPP state field returns to Lua as its natural type (number, string, boolean). A value written from Lua applies to host state per the API contract, type/range mismatches failing rather than coercing ([`edge-cases.md`](./edge-cases.md) `## State access and type coercion`).
+**SC-R-027** — A value read from a register or OCPP state field returns to Lua as its natural type (number, string, boolean). A value written from Lua applies to host state per the API contract, type/range mismatches failing rather than coercing ([`edge-cases.md`](./edge-cases.md) `## State access semantics`).
 
 **SC-R-028** — A register or OCPP state write from Lua applies to the module's in-memory/observed state only. A Modbus Lua write never emits a Modbus write command (unlike interactive `:set`); a written value on a client is transient and may be overwritten by the next poll (SC-E-033).
 

@@ -9,12 +9,12 @@ Ferrowl — Rust TUI simulator for Modbus (client/server, TCP/RTU) and OCPP (Cha
 ## Spec-driven
 
 - `docs/specs/` authoritative. Code conforms to spec, never reverse.
-- Before editing an area: `sh .claude/scripts/list-sections.sh` its `requirements.md` + `edge-cases.md`, then `extract-section.sh` the headings the task touches (plus their `edge-cases.md` counterparts); the whole file only for a cross-cutting change. `edge-cases.md` = deliberate ugliness; check before "fixing".
+- Before editing an area: pull the headings the task touches from its `requirements.md` and their `edge-cases.md` counterparts (`## Conventions — reading`); the whole file only for a cross-cutting change. `edge-cases.md` = deliberate ugliness; check before "fixing".
 - Behavior change with no spec change = incomplete.
 - `main` never holds unfinished spec: a requirement on `main` describes code that exists and is tested. A branch may hold a spec commit ahead of its code; squash merge keeps it off `main`.
 - Pre-existing spec/code disagreement outside your task: stop, raise separately. Folding it in widens approved work and skips its own review.
 - Specs carry no `file:line`. Locate code with search tools.
-- Requirement and edge-case IDs (`-R-`, `-E-`) stable, append-only (the sole exception, one ID that already defines two different entries, is spelled out in `docs/specs/README.md` rule 2). Cite in commits and PRs.
+- Requirement and edge-case IDs (`-R-`, `-E-`) stable, append-only (sole exception: `docs/specs/README.md` rule 2). Cite in commits and PRs.
 
 ## TDD — fixed order, every stage
 
@@ -63,7 +63,7 @@ Narrow the loop while iterating. `cargo test --workspace <name>` still builds an
 
 ```sh
 cargo test -p ferrowl-modbus              # one crate
-cargo test -p ferrowl-modbus <name>       # one test in one crate — not `cargo test --workspace <name>`
+cargo test -p ferrowl-modbus <name>       # one test in one crate
 cargo test -p ferrowl-codec ut_decode     # one test (unit tests are named ut_*)
 cargo check -p ferrowl-ocpp               # typecheck one crate
 cargo llvm-cov --workspace --html         # browsable per-line coverage
@@ -75,10 +75,10 @@ Dev loop: `cargo run --release -- --demo` (built-in demo tabs, no config) or `ca
 
 ## Conventions — reading
 
-- **Never read a whole file when only part is needed.** Any `.md` (specs, `SKILL.md`s, other repos' docs): `sh .claude/scripts/extract-section.sh '<heading>' ['<heading>' ...] <file>` (unknown heading: `sh .claude/scripts/list-sections.sh <file>` first). Other large files: `sed -n '<start>,<end>p' <file>`. Applies to Read tool and Bash `cat` alike — same context cost. **Enforced:** `PreToolUse` hook (`.claude/scripts/hook-guard-shell.sh`) denies an unpiped Bash `cat` of a `.md` file or any file over 80 lines, pointing at `extract-section.sh`/`sed -n`/Read. A denial = convention about to be bypassed; follow the redirect, don't retry the `cat` differently.
+- **Never read a whole file when only part is needed.** Any `.md` (specs, `SKILL.md`s, other repos' docs): `sh .claude/scripts/extract-section.sh '<heading>' ['<heading>' ...] <file>` (unknown heading: `sh .claude/scripts/list-sections.sh <file>` first). Other large files: `sed -n '<start>,<end>p' <file>`. **Enforced:** `PreToolUse` hook (`.claude/scripts/hook-guard-shell.sh`) denies an unpiped Bash `cat` of a `.md` file or any file over 80 lines, pointing at `extract-section.sh`/`sed -n`/Read. On denial, follow the redirect, never retry the `cat` differently.
 - **Filter shell output before it lands in context.** `find -name`/`-path`, `git show --stat` or a path filter before full content, `grep`/`tail -N`/`head -N` on `cargo test`/`cargo llvm-cov` output.
 - **Don't re-run a read-only command whose output is already in context** (`git diff`, `git log`, `git show` on the same refs/paths). Scroll back.
-- Read an existing PR's body/comments with `bash .claude/scripts/pr-view.sh <number>`, never raw `gh pr view` — same GitHub Projects-Classic GraphQL bug as `gh issue view` (`repository.pullRequest.projectCards`), reproduces with or without `--comments`. Inline review threads go through `bash .claude/scripts/pr-feedback.sh fetch|reply` (`.claude/AGENTS.workflow.md` *PR feedback*) — into a file, one status line in context.
+- Read an existing issue with `bash .claude/scripts/issue-view.sh <number|key>` and an existing PR's body/comments with `bash .claude/scripts/pr-view.sh <number>`, never raw `gh issue view`/`gh pr view` — both hit the GitHub Projects-Classic GraphQL bug (`projectCards`), with or without `--comments`. Inline review threads go through `bash .claude/scripts/pr-feedback.sh fetch|reply` (`.claude/AGENTS.workflow.md` *PR feedback*) — into a file, one status line in context.
 
 ## Conventions — code
 
@@ -87,8 +87,8 @@ Dev loop: `cargo run --release -- --demo` (built-in demo tabs, no config) or `ca
 - All 14 crates versioned in lockstep; never bump one alone.
 - Config files TOML or JSON only (extension-driven), never YAML.
 - Rust edition 2024, stable toolchain (`rust-toolchain.toml`).
-- **Never split a source file just because it is large.** A split must separate distinct responsibilities, improve navigability, or cut coupling. One cohesive concern or flat generated data (spec table) stays whole. Line count = prompt to review, not mandate to divide; arbitrary boundaries make code harder to follow.
-- **A comment says what the code cannot.** No restating the adjacent statement/field/function name; no step narration (`// Create app state`); no banners or import-group headers; no paragraph where a sentence does. **Never cite this workflow** — plan, stage id (`s7`), gate (`Gate3#2`), task item, `(Shared)`, "sanctioned change": rots when the plan is deleted, meaningless to a later reader. Keep the technical content, drop the citation. Requirement IDs are the only sanctioned cross-reference. An `#[allow(...)]` justification names the condition that lifts it, never the stage that will. Applies to `//` and `///`.
+- **Never split a source file just because it is large.** A split must separate distinct responsibilities, improve navigability, or cut coupling. One cohesive concern or flat generated data (spec table) stays whole.
+- **A comment says what the code cannot.** No restating the adjacent statement/field/function name; no step narration (`// Create app state`); no banners or import-group headers; no paragraph where a sentence does. **Never cite this workflow** — plan, stage id (`s7`), gate (`Gate3#2`), task item, `(Shared)`, "sanctioned change", "review fix", "manual-exercise fix": rots when the plan is deleted, meaningless to a later reader. Keep the technical content, drop the citation. Requirement IDs are the only sanctioned cross-reference. An `#[allow(...)]` justification names the condition that lifts it, never the stage that will. Applies to `//` and `///`.
 - **Typed handling over generic JSON.** Read request fields and build responses from the typed `rust_ocpp` structs/enums (`req.evse_id`, `Response201::Reset(...)`), never by indexing or hand-crafting `serde_json::Value` where a typed path exists — compiler catches a wrong field/missing field/bad enum, not the wire. Holds **even when it forces duplication**: distinct-but-similar types across 1.6/2.0.1/2.1 get duplicated typed code per version, never a shared untyped `Value`. **Only** sanctioned untyped JSON: the manual payload a user types into the action dialog, and version-independent plumbing that must inspect an arbitrary encoded action (e.g. a scope/EVSE guard spanning all actions) where no typed accessor exists.
 - **Model states as enums, never a flag plus dependent optionals.** Fields meaningful only under some combination of booleans push validation into a resolve function and let the wire carry states the code must reject. One variant per state, holding exactly that state's fields, so invalid combinations cannot be constructed or deserialized. A tagged enum (`#[serde(tag = "…")]`) extends this to the wire and replaces hand-written `Serialize`/`Deserialize` shadow structs. A check no type can express (non-empty `Vec`) stays one condition on one variant, never a rule spanning fields. Applies to config/session schemas as much as in-memory types; a wire-shape change is a breaking configuration change and needs its own CS-R spec change.
 

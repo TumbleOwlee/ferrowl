@@ -1,10 +1,10 @@
 # Scripting — Edge Cases and Known Limitations
 
-Boundary behavior, error semantics, intentional or known constraints. The known-limitations section below (`## Known limitations and findings`) is working as implemented; recorded so it is not "fixed".
+Boundary behavior, error semantics, intentional or known constraints.
 
 ---
 
-## Load-time vs run-time errors
+## Logging & error handling
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -14,7 +14,9 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **SC-E-004** | Script raises every cycle | logged every cycle; never disabled automatically |
 | **SC-E-005** | Script references a `C_*` module not registered in its context (e.g. `C_Register` from an OCPP sim) | run-time error: indexing a nil global. Logged, cycle continues |
 
-## State access and type coercion
+---
+
+## State access semantics
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -35,7 +37,11 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **SC-E-020** | `C_Module:Get` for an unknown/removed module | raises `unknown module '<name>'` |
 | **SC-E-021** | `ModuleHandle:Register()` on a non-modbus module / `:OCPP()` on a non-ocpp module | raises `is not a modbus module` / `is not an ocpp module` |
 
-## Concurrency with the network task
+---
+
+## Execution model
+
+### Concurrency with the network task
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -45,7 +51,7 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **SC-E-025** | Lua write to a register on a Modbus **server** | updates the served store; a remote master reads the new value |
 | **SC-E-026** | Script runs while its network instance is stopped/disconnected | sim keeps running; writes land in the store (nothing on the wire) |
 
-## Sim lifecycle
+### Sim lifecycle
 
 | ID | Condition | Behavior |
 |---|---|---|

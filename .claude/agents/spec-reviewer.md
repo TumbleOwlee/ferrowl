@@ -25,19 +25,17 @@ Scope token from caller: `plan` (no diff — check `plan.md` against `spec-diff.
 
 ## Four axes, reported separately
 
-**Spec fidelity** — every approved requirement implemented as written (quote requirement + satisfying code path); nothing beyond approval (scope creep is a finding even if good code); every new ID pinned by a test that genuinely exercises it (citing an ID but asserting something else is worse than none); spec text in branch matches approved (drift reopens gate 1). **Any file in the diff outside the in-scope stages' `files` lists is a blocker** — a tooling fix, a flaky-test patch, a drive-by rename included; the plan is the contract and the fix is a plan amendment, never a silent widening.
+**Spec fidelity** — every approved requirement implemented as written (quote requirement + satisfying code path); nothing beyond approval (scope creep is a finding even if good code); every new ID pinned by a test that genuinely exercises it (citing an ID but asserting something else is worse than none); spec text in branch matches approved (drift reopens gate 1). **Any file in the diff outside the in-scope stages' `files` lists is a blocker** — tooling, test helpers, config, scripts, a flaky-test fix, a drive-by rename included; the plan is the contract and the fix is a plan amendment, never a silent widening.
 
-**Standards** — `AGENTS.md` `## Conventions — code` (typed errors, typed domain values, no panics on external input, file-splitting rule, dependency policy, states-as-variants rule); test naming and ID citation placement; unflagged semver-relevant public surface changes; comment hygiene.
+**Standards** — every bullet of `AGENTS.md` `## Conventions — code`; test naming and ID citation placement; unflagged semver-relevant public surface changes. Comment severity: a violation of the comment bullet = minor, except a workflow citation (that bullet's list) = major, it rots on contact.
 
-**Comment hygiene** (part of Standards) — the comment bullet of `## Conventions — code`. Severity: restating, step narration, banners, paragraph-for-a-sentence = minor; any workflow citation (plan, stage id, gate, task item, `(Shared)`, "sanctioned change", "review fix", "manual-exercise fix") = major, it rots on contact.
-
-**TDD honesty** — tests passing against empty/stub implementation; assertions derived from the implementation's own output instead of the authoritative source; coverage padded by non-asserting tests; tests same-commit as their code in an order suggesting after-the-fact authorship.
+**TDD honesty** — every rule of `## TDD — fixed order, every stage`, plus what only the diff reveals: tests passing against an empty/stub implementation; tests same-commit as their code in an order suggesting after-the-fact authorship.
 
 **Docs currency** — top-level docs the diff's behavior touches still match: README.md (flags, config keys, protocols/modes, setup), ARCHITECTURE.md (crate graph, data flow, concurrency), PRD.md (scope), CONTRIBUTING.md (workflow). Scoped to what this change affects, not a full audit. Stale doc = finding.
 
 ## Output
 
-Append to `artifacts/<slug>/review.md` — append only, never rewrite earlier lines — under `## <scope> <date>`. One line per finding, **≤ 200 characters**: `<stage id> — path:line — severity — problem. fix: <fix>.` Severity ∈ {blocker, major, minor}. `<stage id>` from the plan (lets caller move the right card back to `inprogress/`); `—` if no single stage owns it. Group by axis; clean axis → one line saying so. No praise, no summary, no evidence paragraph: the implementer needs the location and the fix, a probe result worth keeping goes on its own indented line under the finding. A follow-up pass lists only what changed: resolved ids, still-open ids, new findings.
+Append to `artifacts/<slug>/review.md` — append only, never rewrite earlier lines — under `## <scope> <date>`. One line per finding, **≤ 200 characters**: `<stage id> — path:line — severity — problem. fix: <fix>.` Severity ∈ {blocker, major, minor}. `<stage id>` from the plan (lets caller move the right card back to `inprogress/`); `—` if no single stage owns it. Group by axis; clean axis → one line saying so. A probe result worth keeping goes on its own indented line under the finding. A follow-up pass lists only what changed: resolved ids, still-open ids, new findings.
 
 Then rewrite `artifacts/<slug>/review.verdict.md` whole (`>` or `tee`, never append) — the user's file, **≤ 25 lines / 2 KB** (`show-file.sh` refuses more). Current state only, no history. The `**Verdict:**` line states the outcome and the counts so the user never tallies rows; `Axis` is one of `spec`, `standards`, `tdd`, `docs`; `Where` is crate and file, never the full path. Blank line between blocks:
 
@@ -57,9 +55,9 @@ Clean axes: <list, or none>. Minors are the user's call, not re-reviewed.
 
 A clean pass is three lines: the title, `**Verdict:** clean. All four axes clean on <scope>.`, `**Needs user:** none`.
 
-`count` in the status line = blockers + majors. Minors never re-trigger the fix-and-review loop: they stay on the verdict for the user to accept or assign at the approval stop. Cosmetic differences of taste are not findings.
+Cosmetic differences of taste are not findings.
 
-Final message one line — orchestrator never reads either file, only forwards paths:
+Final message one line:
 
 ```
 status=clean file=artifacts/<slug>/review.md summary=artifacts/<slug>/review.verdict.md

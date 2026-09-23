@@ -1,10 +1,10 @@
 # TUI — Edge Cases and Known Limitations
 
-Boundary behavior, error semantics, intentional or known constraints. The known-limitations section below (`## Known limitations and stated constraints`) is working as implemented; recorded so it is not "fixed".
+Boundary behavior, error semantics, intentional or known constraints.
 
 ---
 
-## Command line
+## Command line mechanism
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -27,7 +27,9 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-160** | Module configuration edit applied while that module's connection attempt is still in flight (UI-R-350) | the dialog closes and the application keeps processing keys and redrawing; the module reconnects with the new configuration once the abandoned attempt has been torn down (OC-R-175, MB-R-220) |
 | **UI-E-161** | Any module configuration apply, between the dialog closing and the deferred stop settling (UI-R-350) | the view keeps rendering the pre-edit configuration — the charging station's and CSMS's pre-edit spec, the Modbus client's, server's and monitor's pre-edit table, records and status — for one or more redraw ticks with the dialog already closed; the reconfigured or rebuilt module is installed only once the stop settles, the CSMS rebinding on the following auto-bind tick. The swap is deliberately no longer instantaneous, the alternative being the blocking apply UI-R-350 removes |
 
-## Navigation and tab jumps
+---
+
+## Navigation & tab switching
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -39,7 +41,9 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-018** | Jump to out-of-range or already-active index | silent no-op |
 | **UI-E-019** | Tab switch with 0 or 1 tabs | safe no-op |
 
-## Dialogs and overlays
+---
+
+## Dialogs & overlays mechanism
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -63,7 +67,9 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-094** | Frame smaller than the editor dialog's minimum size (UI-R-200) | the box takes the whole frame and is clipped, no minimum is enforced against the terminal (UI-E-047) |
 | **UI-E-095** | `Enter` in `Insert` mode inside the editor dialog (UI-R-205) | the field splits the line; confirming (UI-R-202) is reachable only from `Normal` mode |
 
-## Code editor
+---
+
+## Code editor (vim-modal)
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -86,12 +92,16 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-135** | `h`, `l`, `Left`, `Right`, `0` or `$` on an *enabled* code editor | unchanged cursor motion (UI-R-029); the horizontal viewport scrolling of UI-R-296 through UI-R-299 exists only while the field is disabled |
 | **UI-E-136** | Vertical move onto a line shorter than the horizontal scroll offset (UI-R-300) | that row shows only its gutter and no text until the view is scrolled back; the view never snaps to the shorter line |
 
+---
+
 ## Syntax highlighting
 
 | ID | Condition | Behavior |
 |---|---|---|
 | **UI-E-081** | Diff line `---` or `+++` (UI-R-159) | classified diff meta, not diff removed or diff added, because the meta prefixes are matched first |
 | **UI-E-082** | Diff line consisting of a lone `+` or `-` | yields a one-character span of the diff added or diff removed kind (UI-R-156 spans the whole line, which is one character) |
+
+---
 
 ## Markdown input field
 
@@ -107,42 +117,74 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-138** | Measuring at a width that leaves no columns for text, gutter included (UI-R-188) | the available text width is treated as one column, so every source line wraps one character per display row |
 | **UI-E-146** | Cursor one past the last character (UI-R-313) of a line whose last display row exactly fills the available text width | the free cell falls outside the field, so no text cursor is painted that frame; the field never widens, scrolls horizontally (UI-R-130) or opens an extra display row for it |
 
+---
+
 ## Diff widget
+
+### Diff parsing and layout
 
 | ID | Condition | Behavior |
 |---|---|---|
 | **UI-E-097** | Body line appearing before any hunk header, or a line the parser does not recognize (UI-R-208) | kept as a meta row; nothing is dropped and no parse error is raised |
 | **UI-E-098** | `\ No newline at end of file` marker in the input (UI-R-208) | a meta row of its own, following the line it belongs to |
 | **UI-E-099** | Empty diff text (UI-R-207) | no rows; the panes render empty and the selected-row query (UI-R-226) reports no rows |
+| **UI-E-102** | Gutter-label list longer than the widget's row count (UI-R-218) | the surplus labels are never rendered but still count toward the gutter width, as UI-E-080 |
+| **UI-E-123** | Display rows of one pane past that side's last entry while the other side still has rows (UI-R-211, UI-R-212) | painted in the widget's general background and nothing else: the padding never carries the opposite side's added or removed band (UI-R-278) |
+
+### Diff modes, selection and navigation
+
+| ID | Condition | Behavior |
+|---|---|---|
 | **UI-E-100** | Visual selection spanning rows whose one side is a filler (UI-R-209, UI-R-226) | the filler rows are part of the reported range, and the per-row query (UI-R-227) reports no line number for that side |
 | **UI-E-101** | Layout toggled (UI-R-215) while a Visual selection is active | active row and selection are unchanged: both layouts address the same aligned rows (UI-R-213) |
-| **UI-E-102** | Gutter-label list longer than the widget's row count (UI-R-218) | the surplus labels are never rendered but still count toward the gutter width, as UI-E-080 |
+
+### Diff display mode, hunk-only and wrapping
+
+| ID | Condition | Behavior |
+|---|---|---|
 | **UI-E-111** | Word longer than the available width with wrapping on (UI-R-260) | broken at a character boundary; never truncated, never overflowed, as UI-E-070 |
 | **UI-E-112** | Wrapping on in a pane too narrow for the gutter (UI-R-260) | the available text width is treated as one column, one character per display row, as UI-E-138 |
 | **UI-E-113** | `Ctrl+F` on a widget built without the full new-side text (UI-R-258, UI-R-259) | consumed and ignored; the display stays hunk-only |
 | **UI-E-114** | Full new-side text disagreeing with the patch's context lines (UI-R-253) | the supplied text supplies the new-side content and the patch supplies the row's classification; no error is raised and nothing is dropped |
+| **UI-E-120** | Active logical row occupying more display rows than the viewport height (UI-R-260, UI-R-264, UI-R-265) | `j` and `Down` scroll the viewport one display row at a time within that row until its last display row is visible and only then move to the next logical row, `k` and `Up` do the mirror image toward its first display row; the paging keys of UI-R-231 keep counting display rows throughout |
+
+### Diff marked ranges and annotations
+
+| ID | Condition | Behavior |
+|---|---|---|
 | **UI-E-115** | Annotation or marked range naming a side and file line range no row covers (UI-R-266, UI-R-269) | silently not rendered; the widget raises no error and drops no row |
 | **UI-E-116** | Several annotations anchored to the same row (UI-R-270) | drawn one block after another beneath that row, in the order the consumer supplied them |
 | **UI-E-117** | Marked range covering a row where that side holds a filler (UI-R-267) | that row's gutter cell stays blank and unpainted, so the block is interrupted where the side has no line |
 | **UI-E-118** | Annotations hidden or shown with `Ctrl+A` while the active row is below them (UI-R-275) | the active row is unchanged and the scroll re-settles in display rows (UI-R-265) |
-| **UI-E-120** | Active logical row occupying more display rows than the viewport height (UI-R-260, UI-R-264, UI-R-265) | `j` and `Down` scroll the viewport one display row at a time within that row until its last display row is visible and only then move to the next logical row, `k` and `Up` do the mirror image toward its first display row; the paging keys of UI-R-231 keep counting display rows throughout |
 | **UI-E-121** | Marked range (UI-R-267) covering an added or removed row painted by UI-R-278 | the range's colour wins on that side's gutter cell, so the marked span still reads as one continuous block, and the row style paints the rest of the row |
+| **UI-E-143** | An annotation block inner row whose text does not fill the block's inner width, in any layout (UI-R-270) | the surplus columns are drawn in the widget's general background style |
+| **UI-E-144** | The border cells of an annotation block (UI-R-270) | they are drawn in the block's own border style in every layout, the bordered split included, where they sit strictly inside the pane's inner area and overwrite no pane border cell (UI-R-308) |
+| **UI-E-159** | Several marked ranges covering the same highlighted row, on one side or on both (UI-R-331, UI-R-332) | the first covering range in the supplied list wins and supplies the background; the later ones never blend with it |
+
+### Diff row styling and word diff
+
+| ID | Condition | Behavior |
+|---|---|---|
 | **UI-E-122** | The filler side (UI-R-212) of a row whose other side is added or removed | that side stays unpainted: UI-R-278 paints only the pane holding the entry, so a filler never carries a green or red band |
-| **UI-E-123** | Display rows of one pane past that side's last entry while the other side still has rows (UI-R-211, UI-R-212) | painted in the widget's general background and nothing else: the padding never carries the opposite side's added or removed band (UI-R-278) |
 | **UI-E-124** | Added or removed row left unpaired because the two runs differ in length (UI-R-280) | it carries no word-diff spans and is painted as one plain band (UI-R-278) |
 | **UI-E-125** | Word-diff span on a wrapped row (UI-R-260, UI-R-279) | the span is split at the wrap point and continues on the next display row, which keeps the row band elsewhere |
 | **UI-E-126** | Paired rows sharing no word token, so every token differs (UI-R-281) | the whole text of both rows is emphasised (UI-R-283), leaving the gutter and the cells past the text in the plain band |
 | **UI-E-127** | Added and removed rows on a terminal rendering no background color (UI-R-216) | they read as context rows: with the `+`/`-` marker column removed, the row style is the only kind cue and no textual fallback is drawn |
 | **UI-E-128** | Empty body line inside a hunk against a lone-space context line (UI-R-285) | both are context rows with empty text on both sides and are indistinguishable once rendered; only a line outside any hunk stays meta (UI-E-097) |
 | **UI-E-129** | Paired added and removed rows (UI-R-280) where either side holds more than 512 word tokens (UI-R-281), as a minified or base64 line does | neither row carries any word-diff span and both keep the plain full-width band of UI-R-278, exactly as an unpaired row does (UI-E-124) |
+
+### Diff border, colors and focus
+
+| ID | Condition | Behavior |
+|---|---|---|
 | **UI-E-130** | Borderless split layout on an area whose width leaves an odd column once the separator is taken (UI-R-287) | the separator widens to two columns and the panes stay equal (UI-R-211); no pane is ever one column wider than the other |
 | **UI-E-131** | A full-width meta row (UI-R-210) in the borderless split layout | it spans the separator column too, since it spans the widget's full width; UI-R-288 governs the separator on every other row |
 | **UI-E-132** | Borderless split layout on an area narrower than three columns (UI-R-287) | the separator is dropped to zero columns so both panes keep at least one column; the panes abut, as they do with too little width for any seam |
 | **UI-E-141** | Meta row text wider than a pane's inner width in the bordered split layout (UI-R-304) | the portion visible from the current horizontal offset (UI-R-310) is clipped at that pane's inner width, independently in each pane; no ellipsis, and no character ever spills onto or past a pane border |
 | **UI-E-142** | Focus change (UI-R-305) on a diff widget drawn without a border (UI-R-286, its default) | nothing repaints: with no border there is no focus cue at all, and the focused side (UI-R-228) stays invisible too |
-| **UI-E-143** | An annotation block inner row whose text does not fill the block's inner width, in any layout (UI-R-270) | the surplus columns are drawn in the widget's general background style |
-| **UI-E-144** | The border cells of an annotation block (UI-R-270) | they are drawn in the block's own border style in every layout, the bordered split included, where they sit strictly inside the pane's inner area and overwrite no pane border cell (UI-R-308) |
 | **UI-E-145** | Horizontal offset (UI-R-232) past the last column of a meta row's text (UI-R-310) | that row shows no text, only its meta row style (UI-R-276) across the area it is drawn in; the view never snaps back to the shorter row, as UI-E-136 |
+
+---
 
 ## File tree widget
 
@@ -153,23 +195,39 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-104** | Path with no directory component (UI-R-234) | a file node at depth zero, directly under the root |
 | **UI-E-105** | `h` or `Left` on a top-level node that is not an expanded directory (UI-R-241) | the selection is unchanged; there is no parent to move to |
 | **UI-E-106** | Row wider than the file tree's area (UI-R-238) | the row is clipped at the area width; the file tree never scrolls horizontally |
-| **UI-E-159** | Badge on a file node that carries no status (UI-R-342, UI-R-321) | the name is drawn with no leading status marker and the badge still follows it one space later; the name keeps the normal text style, and the badge takes the style its type reports (UI-R-343) or that same normal text style when its type reports none (UI-R-322) |
+| **UI-E-162** | Badge on a file node that carries no status (UI-R-342, UI-R-321) | the name is drawn with no leading status marker and the badge still follows it one space later; the name keeps the normal text style, and the badge takes the style its type reports (UI-R-343) or that same normal text style when its type reports none (UI-R-322) |
 | **UI-E-148** | Badge set for a path that matches no file node, or that matches a directory node (UI-R-317) | the badge is stored and never drawn; badges do not roll up onto ancestor directories, so a collapsed directory holding badged files carries no badge of its own |
 | **UI-E-149** | Badge text widening a row past the file tree's area (UI-R-342, UI-E-106) | the row is clipped at the area width as any other row is; because the badge follows the name, the badge is what loses cells and can be clipped away entirely, and the file tree still never scrolls horizontally |
 | **UI-E-150** | Badge type reporting an empty text for a node's badge (UI-R-341) | the row renders as an unbadged row (UI-R-318): no cells and no separating space are drawn for it, whatever style that badge reports |
 | **UI-E-151** | Caller status type reporting an empty marker for a status (UI-R-244) | the row draws no leading marker and no separating space, rendering as a row with no status would (UI-R-321), while the styling that status reports still applies to the row |
 | **UI-E-152** | Caller status type reporting a marker of more than one cell (UI-R-244) | the marker is drawn as reported and the row grows by its width; the file tree reserves no fixed-width status column, so rows carrying differently sized markers start their names at different columns, and an over-wide row clips at the area width (UI-E-106) |
 
-## Rendering and terminal size
+---
+
+## App shell, tabs & focus model
 
 | ID | Condition | Behavior |
 |---|---|---|
 | **UI-E-046** | Terminal resize | next tick re-lays out; content, log, command rows reflow |
 | **UI-E-047** | Very small terminal | no app-level minimum-size guard; content area squeezed, content clips. Popups skip drawing when their area is zero-sized |
-| **UI-E-048** | Log line longer than the per-line cap | truncated before storage |
-| **UI-E-049** | Table cell wider than the column | reachable via horizontal scroll tied to the selected column |
 | **UI-E-050** | Tabs overflow the tab bar's width | the bar scrolls horizontally per the tab widget's centering scroll (UI-R-117, UI-R-118), keeping the active tab visible |
 | **UI-E-051** | No input for one redraw interval (~100 ms) | UI redraws anyway |
+
+---
+
+## Tables, live updates & logging
+
+| ID | Condition | Behavior |
+|---|---|---|
+| **UI-E-048** | Log line longer than the per-line cap | truncated before storage |
+| **UI-E-049** | Table cell wider than the column | reachable via horizontal scroll tied to the selected column |
+
+## Widget & focus-derive contract
+
+### Tab widget rendering
+
+| ID | Condition | Behavior |
+|---|---|---|
 | **UI-E-063** | Tab widget drawn into an area of zero width or zero height | skips drawing; because no window is computed the recorded scroll offset (UI-R-175) keeps the value the previous render left, rather than being recomputed (UI-E-047) |
 | **UI-E-064** | Tab widget drawn into an area larger across its layout direction than its rendered extent (UI-R-121) | draws into the first `1 + 2c` lines from the near edge only — leftmost columns under `Vertical`, topmost rows under `Horizontal` — and leaves the rest untouched |
 | **UI-E-065** | Tab widget with an empty tab list | nothing drawn; scroll offset reset to zero |
@@ -185,13 +243,17 @@ Boundary behavior, error semantics, intentional or known constraints. The known-
 | **UI-E-075** | Tab widget tab that gains no cells (UI-R-123) while others do | its own render is identical under all three alignments; only the stretched tabs move |
 | **UI-E-084** | Tab widget under `Horizontal` layout with a double-width title character (CJK, emoji) | counted as one cell when extents are computed (UI-R-174, UI-R-122) and drawn as-is, so the drawn tab covers more terminal cells than its computed extent and the fill is off by one cell per such character; no substitution or fallback glyph. Intentional |
 | **UI-E-085** | Tab widget whose recorded scroll offset (UI-R-175) is past the last cell the current tabs occupy — carried over from a render that computed no window (UI-E-063) or written into the field directly — rendered into an area whose extent along the layout direction is at least the tabs' total extent, so no scrolling is needed | the offset is reset to `0` and the widget draws the tabs from their first cell rather than a blank area; never panics |
+
+### Tab widget state
+
+| ID | Condition | Behavior |
+|---|---|---|
 | **UI-E-153** | Tab widget state advanced to the next or previous tab (UI-R-327, UI-R-328) while its tab list is empty | the active index stays `0`; the selection helpers never panic and the state stays renderable per UI-E-065 |
 | **UI-E-154** | Tab widget state advanced to the next or previous tab (UI-R-327, UI-R-328) while its tab list holds exactly one tab | the wrap lands back on that same tab, so the active index stays `0` |
 | **UI-E-155** | Index selected on a tab widget state (UI-R-326) whose tab list is empty | there is no last index to clamp to, so the active index becomes `0`; never panics and never underflows |
 | **UI-E-156** | Tab list replaced on a tab widget state (UI-R-329) with an empty list | there is no valid index to clamp to, so the active index becomes `0` |
 | **UI-E-157** | Tab widget state whose active index was written out of range directly, the caller owning that field (UI-R-119), read back | the reported active index is `0` (UI-R-325) and the reported active tab value is the first tab (UI-R-324), never the written value and never absent for a non-empty tab list |
 | **UI-E-158** | Tab widget state whose active index is out of range (UI-E-157) advanced to the next or previous tab (UI-R-327, UI-R-328) | the operation starts from the normalized index `0`, so advancing selects index `1` — index `0` again with a single tab (UI-E-154) — and retreating wraps to the last tab; never panics |
-| **UI-E-159** | Several marked ranges covering the same highlighted row, on one side or on both (UI-R-331, UI-R-332) | the first covering range in the supplied list wins and supplies the background; the later ones never blend with it |
 
 ## Known limitations and stated constraints
 

@@ -28,19 +28,25 @@ Also given the **absolute path of your own task card** (main checkout, outside y
 2026-01-02T14:12 stopped: <what and why>
 ```
 
-Move card `open`→`inprogress/` on start. On green, card →`inreview/`, end turn on `status=inreview stage=s<n>`. Sequential: commit only once resumed with approval, then `status=committed stage=s<n>`. Parallel (one stage, own worktree): commit on green in your worktree before `status=inreview` — a merge needs a commit; resumed with findings, fix and amend that commit. Resumed with a `review.md` path: fix exactly its findings for your stage, re-run the gauntlet, `status=inreview` again. Resumed with a `pr-feedback.md` path: the user's inline PR comments, one `## thread` each — findings with the same authority as the approved plan's reviewer. Fix each thread that falls inside your stage's files, then fill that thread's `reply:` line (one line, what changed — never a sha, the orchestrator's push decides it) and leave everything else in the file untouched; log `feedback=<n>` on your card; re-run the gauntlet, `status=inreview`. A thread asking for behavior the approved spec doesn't cover → `status=spec-gap`; a thread that is a question, or ambiguous → `status=blocked reason=<thread id: the question>`; `reply:` stays empty in both cases. Stage `s0` (land spec) is yours: copy the approved text where the plan says, one commit, no code.
+May be given every stage (sequential) or some (others run in parallel). Implement assigned stages only, in plan order, touching only their listed files — another agent owns the rest; editing it causes an invisible merge conflict, and the reviewer blocks on it. Not in `files` = not yours, however small — tooling, test helpers, config, scripts, flaky-test fixes you notice on the way included. Stage `s0` (land spec) is yours: copy the approved text where the plan says, one commit, no code.
 
-May be given every stage (sequential) or some (others run in parallel). Implement assigned stages only, in plan order, touching only their listed files — another agent owns the rest; editing it causes an invisible merge conflict, and the reviewer blocks on it. Not in `files` = not yours, however small — tooling, test helpers, flaky-test fixes and scripts you notice on the way included.
+## Stage flow
+
+- Start: card `open`→`inprogress/`. Green: card →`inreview/`, end turn on `status=inreview stage=s<n>`.
+- Sequential: commit only once resumed with approval, then `status=committed stage=s<n>`. Parallel (one stage, own worktree): commit on green in your worktree before `status=inreview` — a merge needs a commit; resumed with findings, fix and amend that commit. Stage messages cheap, squashed later.
+- Resumed with a `review.md` path: fix exactly its findings for your stage, re-run the gauntlet, `status=inreview` again.
+
+## PR feedback
+
+Resumed with a `pr-feedback.md` path: the user's inline PR comments, one `## thread` each — findings with the same authority as the approved plan's reviewer. Fix each thread that falls inside your stage's files, then fill that thread's `reply:` line (one line, what changed — never a sha, the orchestrator's push decides it) and leave everything else in the file untouched; log `feedback=<n>` on your card; re-run the gauntlet, `status=inreview`. A thread asking for behavior the approved spec doesn't cover → `status=spec-gap`; a thread that is a question, or ambiguous → `status=blocked stage=s<n> reason=<thread id: the question>`; `reply:` stays empty in both cases.
 
 ## Order, per stage, no exceptions
 
-`AGENTS.md`'s `## TDD — fixed order, every stage`, followed verbatim. Addition:
-
-- Step 2 (watch it fail): report the failure text; fix and repeat until the failure is the intended assertion, not just any failure.
+`AGENTS.md`'s `## TDD — fixed order, every stage`, followed verbatim.
 
 ## Stage completion
 
-Done = builds, tests pass, lint clean, coverage floor holds. Run the full gauntlet from `AGENTS.md`'s `## Build / test / lint`; the card gets `gauntlet=pass cov=<n>%` or `gauntlet=fail <one-line reason>` — never an excerpt, never a log. Stage messages cheap (squashed later).
+Run the full gauntlet from `AGENTS.md`'s `## Build / test / lint`; the card gets `gauntlet=pass cov=<n>%` or `gauntlet=fail <one-line reason>` — never an excerpt, never a log.
 
 ## Stop and report — never improvise
 
@@ -49,13 +55,10 @@ Done = builds, tests pass, lint clean, coverage floor holds. Run the full gauntl
 - Implementation forces behavior to diverge from approved spec (reopens gate 1).
 - Requirement ambiguous or conflicting.
 - Want a dependency not in the manifest.
-- Tempted to widen scope beyond the plan, an unrelated pre-existing spec/code disagreement included.
 
 ## Never
 
 - Commit a stub, `unimplemented!()`, `TODO`, skipped test, or weakened assertion as "green". Incomplete stage = report, not commit.
-- Write the test after the implementation to fit it.
-- Pad coverage with non-asserting tests.
 - Claim a verification you didn't run — quote real output.
 - Push, open a PR, merge, reply on or resolve a PR thread — orchestrator's (`pr-feedback.sh reply` posts your `reply:` lines after the push).
 - Move your card to `done/` — orchestrator's, after merge + independent verify.
@@ -73,4 +76,4 @@ status=blocked stage=s<n> reason=<one line>       # any Stop-and-report case
 status=spec-gap stage=s<n> reason=<one line>      # behavior must diverge from approved spec
 ```
 
-Everything else — what was implemented, IDs, tests, commands run + output excerpt, commit SHAs — goes into the card log, terse, append-only. Not verification — orchestrator re-runs the gauntlet and a reviewer reads the diff.
+Everything else goes on your card as the rules above say. Not verification — orchestrator re-runs the gauntlet and a reviewer reads the diff.

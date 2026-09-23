@@ -2,7 +2,7 @@
 
 Version-generic engine, Charging Station (CS) and CSMS roles, OCPP-J framing over WebSocket, call correlation and timeouts, security profiles, simulated CS/CSMS state machines, OCPP module configuration.
 
-IDs stable, append-only (`OC-R-nnn`). See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contract.md) (action tables, config fields), [`data-contract.md`](./data-contract.md) (wire frames, payload shapes, state model), [`edge-cases.md`](./edge-cases.md).
+See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contract.md) (action tables, config fields), [`data-contract.md`](./data-contract.md) (wire frames, payload shapes, state model), [`edge-cases.md`](./edge-cases.md).
 
 ---
 
@@ -88,9 +88,9 @@ IDs stable, append-only (`OC-R-nnn`). See [`../README.md`](../README.md). Compan
 
 ## Security — transport
 
-**OC-R-029** — Three security profiles: Profile 1 (HTTP Basic Auth over plain `ws://`), Profile 2 (TLS, server certificate only), Profile 3 (mutual TLS).
+### Security profiles and Basic Auth
 
-*Coverage note: OC-R-029 is an umbrella; substance covered by per-profile requirements and tests — OC-R-030/OC-R-031 (Profile 1, `ferrowl-ocpp/tests/ws_loopback_security.rs`), OC-R-096 (Profile 2, `ferrowl/src/module/ocpp/config/{session,device}.rs`), OC-R-039/OC-R-040 (Profile 3, `ws_loopback_security.rs`, `ferrowl-ocpp/src/security.rs`). No test cites OC-R-029 itself.*
+**OC-R-029** — Three security profiles: Profile 1 (HTTP Basic Auth over plain `ws://`), Profile 2 (TLS, server certificate only), Profile 3 (mutual TLS).
 
 **OC-R-030** — A CS with Basic Auth configured sends `Authorization: Basic <base64(user:pass)>` on the WebSocket upgrade request.
 
@@ -99,6 +99,8 @@ IDs stable, append-only (`OC-R-nnn`). See [`../README.md`](../README.md). Compan
 **OC-R-032** — A CSMS rejects an upgrade not advertising the version's subprotocol token, answering HTTP 400. On acceptance it echoes the token in `Sec-WebSocket-Protocol`.
 
 **OC-R-033** — A Basic Auth password never appears in a log line, including via debug formatting.
+
+### CS TLS client policy
 
 **OC-R-034** — A CS's trust anchors are exactly those its `verification` names: `CertVerification::RootStore` = webpki root store plus every `extra_ca_files` entry; `CertVerification::CaFiles` = exactly the named `ca_files`; `CertVerification::Skip` = no anchor (OC-R-036).
 
@@ -115,6 +117,8 @@ IDs stable, append-only (`OC-R-nnn`). See [`../README.md`](../README.md). Compan
 **OC-R-129** — A CS with `CertVerification::RootStore` verifies the server certificate against the native root store plus every `extra_ca_files` entry.
 
 **OC-R-130** — A CS with `CertVerification::CaFiles` verifies the server certificate against exactly the named `ca_files`, not the native store; `ca_files` non-empty.
+
+### CSMS TLS identity and mutual TLS
 
 **OC-R-037** — A CSMS TLS server certificate comes from the PEM files of `CertSource::Files` or an ephemeral self-signed certificate (`SelfSigned` or `Ephemeral`).
 
@@ -138,6 +142,8 @@ IDs stable, append-only (`OC-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **OC-R-041** — Failing to open, parse, or find a certificate or private key in a configured PEM file fails the CS connection start or CSMS listener start with a TLS error, before any socket work.
 
+### Endpoint scheme and TLS material
+
 **OC-R-042** — The endpoint scheme is authoritative for a server's transport: `wss://` binds a TLS-terminated listener; `ws://` binds plain TCP even when a `ServerTlsPolicy` other than `None` is configured, the whole policy inert.
 
 **OC-R-097** — The scheme is authoritative for a client's transport the same way: a `ws://` CS endpoint connects in plaintext and ignores any TLS material.
@@ -154,6 +160,8 @@ IDs stable, append-only (`OC-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **OC-R-115** — Under `ClientTlsPolicy::Mutual` with `identity: CertSource::SelfSigned`, a CS presents an ephemeral self-signed certificate/key pair as its mTLS identity, generated and cached per OC-R-037, never written to disk.
 
+### Security config shape
+
 **OC-R-126** — The OCPP device security config carries its TLS material as a `tls` sub-block holding one `ServerTlsPolicy` under `server` and one `ClientTlsPolicy` under `client`, serialized `[security.tls.server]`/`[security.tls.client]`.
 
 **OC-R-156** — `username` and `password` remain flat members of `security` (OC-R-126), shared by both roles.
@@ -163,6 +171,8 @@ IDs stable, append-only (`OC-R-nnn`). See [`../README.md`](../README.md). Compan
 **OC-R-158** — A CS or CSMS decides whether TLS is configured by matching its own role's policy variant in the `tls` sub-block (OC-R-126); the other role's policy is inert, never validated against this role's rules.
 
 **OC-R-159** — The endpoint scheme remains authoritative over the `tls` sub-block's policy (OC-R-126, OC-R-042).
+
+### Extra upgrade headers and connection log lines
 
 **OC-R-117** — A CS device config may declare `extra_headers`, an ordered list of `HeaderDef { name, value }`.
 
@@ -180,25 +190,31 @@ IDs stable, append-only (`OC-R-nnn`). See [`../README.md`](../README.md). Compan
 
 ## Security — setup dialog
 
+### Setup dialog — server role
+
 **OC-R-110** — The OCPP setup dialog offers a server-role Self-Signed toggle, shown whenever the TLS selector (OC-R-127) is TLS or mTLS.
 
 **OC-R-143** — With the server-role Self-Signed toggle (OC-R-110) On, the server `cert_file`/`key_file` inputs are hidden and the resolved identity is `CertSource::SelfSigned` regardless of text; validation does not require those files. The toggle has no effect on the client-CA list or the selector's mTLS position.
 
 **OC-R-144** — The server-role Self-Signed toggle (OC-R-110) leaves the hidden `cert_file`/`key_file` inputs' stored text unmodified, so Off restores the paths and re-requires them.
 
-**OC-R-111** — The dialog's client-side Root Store toggle and server-CA list (OC-R-125) are both hidden whenever Skip-Verify is On. The client-role Skip-Verify toggle itself is shown only when the TLS selector (OC-R-127) is TLS or mTLS, since a connection with TLS off has no certificate to verify.
+**OC-R-150** — Server role: mTLS with a non-empty shared CA list (OC-R-113) and Skip Verify Off → `ServerTlsPolicy::Mutual` with `CertVerification::CaFiles` holding exactly those files; an empty list there is a validation error.
 
-**OC-R-145** — With the client-role Skip-Verify toggle (OC-R-111) On, the resolved verification is `CertVerification::Skip`.
+**OC-R-151** — The dialog also offers a server-role Skip Verify toggle, shown whenever mTLS is selected: On hides the client-CA list (OC-R-113) and resolves verification to `CertVerification::Skip` regardless of entries, list preserved for Off.
 
-**OC-R-146** — The client-role Skip-Verify toggle (OC-R-111) leaves the hidden Root Store toggle's and server-CA list's stored state unmodified, so Off restores what was entered.
+### Setup dialog — shared CA list
 
 **OC-R-113** — The dialog presents CA file paths through one shared list widget (server (CSMS) role: client-CA list, shown whenever mTLS is selected; client (CS) role: server-CA list, OC-R-125), mirroring MB-R-136: zero or more paths added, edited, or removed individually.
 
 **OC-R-149** — An add-entry confirm on the shared CA list widget (OC-R-113) is rejected (sub-dialog stays open with an inline error, nothing appended) unless the path is non-empty, exists on disk, is not a directory, and has extension `pem`/`crt`/`key` (case-insensitive).
 
-**OC-R-150** — Server role: mTLS with a non-empty shared CA list (OC-R-113) and Skip Verify Off → `ServerTlsPolicy::Mutual` with `CertVerification::CaFiles` holding exactly those files; an empty list there is a validation error.
+### Setup dialog — client role
 
-**OC-R-151** — The dialog also offers a server-role Skip Verify toggle, shown whenever mTLS is selected: On hides the client-CA list (OC-R-113) and resolves verification to `CertVerification::Skip` regardless of entries, list preserved for Off.
+**OC-R-111** — The dialog's client-side Root Store toggle and server-CA list (OC-R-125) are both hidden whenever Skip-Verify is On. The client-role Skip-Verify toggle itself is shown only when the TLS selector (OC-R-127) is TLS or mTLS, since a connection with TLS off has no certificate to verify.
+
+**OC-R-145** — With the client-role Skip-Verify toggle (OC-R-111) On, the resolved verification is `CertVerification::Skip`.
+
+**OC-R-146** — The client-role Skip-Verify toggle (OC-R-111) leaves the hidden Root Store toggle's and server-CA list's stored state unmodified, so Off restores what was entered.
 
 **OC-R-116** — The dialog offers a CS (client) role Self Signed toggle, shown whenever mTLS is selected.
 
@@ -215,6 +231,8 @@ IDs stable, append-only (`OC-R-nnn`). See [`../README.md`](../README.md). Compan
 **OC-R-154** — With the client-role Root Store toggle (OC-R-125) Off, an empty shared CA list is a validation error refusing to close the dialog (OC-R-150).
 
 **OC-R-155** — Skip-Verify On hides both the client-role Root Store toggle and the shared CA list (OC-R-125) per OC-R-111.
+
+### Setup dialog — TLS selector and Basic Auth
 
 **OC-R-127** — The dialog presents TLS through a single three-way selector, Off / TLS / mTLS, shown for both roles and applying to the instance's own role, with no "security level" or profile selection. The selector maps one-to-one onto the role's policy variant (Off → `None`, TLS → `Tls`, mTLS → `Mutual`), each variant contributing exactly its payload (OC-R-110, OC-R-111, OC-R-113, OC-R-116, OC-R-125).
 

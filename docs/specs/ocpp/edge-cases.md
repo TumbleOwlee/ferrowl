@@ -1,10 +1,10 @@
 # OCPP — Edge Cases and Known Limitations
 
-Boundary behavior, error semantics, intentional constraints. The known-limitations section below (`## Known limitations — intentional constraints`) is working as implemented; recorded so it is not "fixed".
+Boundary behavior, error semantics, intentional constraints.
 
 ---
 
-## Framing boundaries
+## OCPP-J framing
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -22,7 +22,9 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 
 ---
 
-## Call and reply boundaries
+## Connection engine
+
+### Call and reply
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -42,9 +44,7 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 | **OC-E-025** | Outbound frame channel full (64 pending) | sender waits; never silently dropped |
 | **OC-E-026** | Command channel full (32 pending) | sender waits |
 
----
-
-## Connection-drop boundaries
+### Connection drop
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -60,7 +60,7 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 
 ---
 
-## Security boundaries
+## Security — transport
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -70,15 +70,9 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 | **OC-E-037** | Request lacks the version's subprotocol token | HTTP **400**, handshake refused |
 | **OC-E-038** | TLS handshake fails on an accepted socket | logged with peer address; socket dropped. Listener keeps accepting |
 | **OC-E-039** | CS connects to a TLS CSMS whose certificate is not trusted | dial fails; module reports a connect failure |
-| **OC-E-040** | Dialog client-side Root Store toggle and CA list after Skip-Verify toggled On | both hidden and excluded regardless of state, resolving to `CertVerification::Skip` (OC-R-111, OC-R-145) |
-| **OC-E-041** | Dialog client-role Skip-Verify toggle while TLS selector is Off | hidden entirely; a plain or Basic-Auth-only connection has no certificate to verify (OC-R-111) |
 | **OC-E-042** | CSMS `ServerTlsPolicy::Mutual`, `verification` resolves to `CaFiles` with zero `ca_files` | fails at construction/`resolve()`, never at listener start (OC-R-039) |
 | **OC-E-043** | CSMS `ServerTlsPolicy::Mutual` with `identity: CertSource::SelfSigned` and `verification: CaFiles` with ≥1 file | permitted; self-signed identity and client-cert CAs are independent (OC-R-040) |
 | **OC-E-044** | CSMS `ServerTlsPolicy::Mutual` with self-signed certificate, `CaFiles` with zero files | fails at construction, as any zero-file `CaFiles` (OC-R-039) |
-| **OC-E-045** | Dialog server-role Self-Signed toggle (shown at TLS/mTLS) toggled On after `cert_file`/`key_file` text entered | resolved identity `CertSource::SelfSigned`, both files excluded; stored text preserved for Off (OC-R-143, OC-R-144) |
-| **OC-E-046** | Dialog TLS selector moved to Off after certificate paths and CA entries entered | resolved policy `None`, no payload; every hidden widget keeps its state; displayed protocol reverts to `ws://` (OC-R-127, OC-R-163) |
-| **OC-E-047** | Dialog Basic Authentication On, TLS selector Off | accepted: Profile 1, credentials over plain `ws://` (OC-R-165) |
-| **OC-E-048** | Hand-written `ws://` instance whose own-role policy is not `None`, reopened in the dialog | selector shows TLS or mTLS, Protocol display shows derived `wss://`; confirming writes `wss://` back, promoting the inert pairing into a live one (OC-R-161). The instance stays inert (OC-R-042/OC-R-097) only while unedited |
 | **OC-E-049** | Configured PEM file cannot be opened, or contains no certificate or no private key | CS dial / CSMS bind fails with a TLS error, before socket work |
 | **OC-E-050** | `username` without `password` (or vice versa) | Basic Auth **not** enabled; field inert |
 | **OC-E-051** | `wss://` **server** endpoint, identity `CertSource::Ephemeral` | binds with an ephemeral self-signed certificate, logs the fallback; never silently plain TCP |
@@ -87,18 +81,36 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 | **OC-E-054** | `ws://` **server** endpoint with `ServerTlsPolicy` other than `None` | material inert; listener plain TCP, symmetric with the `ws://` client |
 | **OC-E-055** | `ServerTlsPolicy::Mutual` client certificate signed by any one of several `ca_files` | accepted; `ca_files` is a trust-anchor set, not an ordered chain (OC-R-039) |
 | **OC-E-056** | `ServerTlsPolicy::Mutual` with `CertVerification::Skip`, no client certificate presented | handshake still fails: `Skip` skips the CA/identity check on a *presented* cert, does not make presenting optional (OC-R-134) |
-| **OC-E-057** | Dialog server-role Skip Verify toggled On while mTLS selected | shared CA list hidden, resolved verification `CertVerification::Skip` regardless of entries; list preserved for Off (OC-R-151) |
-| **OC-E-058** | Dialog client-role (CS) Self Signed toggled On while mTLS selected | Client Cert/Key inputs hidden, resolved identity `CertSource::SelfSigned` regardless of text; text preserved for Off (OC-R-147, OC-R-148) |
 | **OC-E-059** | Self-signed pair, once generated for a module instance | cached and reused across every bind/connect/reconnect and `:restart`/`:reload`, including a config edit leaving the source self-signed; regenerated only on a transition *into* self-signed; a fresh instance discards the cache; pair never on disk (OC-R-131/OC-R-132/OC-R-115) |
 | **OC-E-060** | CS `CertVerification::CaFiles` with empty `ca_files` | refused at construction and dialog submit (OC-R-130/OC-R-154), same reasoning as the Modbus client role |
 | **OC-E-061** | `CertVerification::RootStore` on a CSMS's client-certificate verification | rejected at construction, no toggle offered (OC-R-133); reasoning in MB-E-071 |
+
+### Extra upgrade headers and connection log lines
+
+| ID | Condition | Behavior |
+|---|---|---|
 | **OC-E-062** | `extra_headers` entry whose `name` collides (case-insensitively) with a client-controlled header | construction fails, naming the header (OC-R-153) |
 | **OC-E-063** | `extra_headers` entry whose `name` or `value` has a byte outside the allowed grammar (e.g. CR/LF) | construction fails, naming header and field (OC-R-118) |
 | **OC-E-064** | `extra_headers` on a server-role device config | inert; client-only |
 
 ---
 
-## Simulator boundaries
+## Security — setup dialog
+
+| ID | Condition | Behavior |
+|---|---|---|
+| **OC-E-040** | Dialog client-side Root Store toggle and CA list after Skip-Verify toggled On | both hidden and excluded regardless of state, resolving to `CertVerification::Skip` (OC-R-111, OC-R-145) |
+| **OC-E-041** | Dialog client-role Skip-Verify toggle while TLS selector is Off | hidden entirely; a plain or Basic-Auth-only connection has no certificate to verify (OC-R-111) |
+| **OC-E-045** | Dialog server-role Self-Signed toggle (shown at TLS/mTLS) toggled On after `cert_file`/`key_file` text entered | resolved identity `CertSource::SelfSigned`, both files excluded; stored text preserved for Off (OC-R-143, OC-R-144) |
+| **OC-E-046** | Dialog TLS selector moved to Off after certificate paths and CA entries entered | resolved policy `None`, no payload; every hidden widget keeps its state; displayed protocol reverts to `ws://` (OC-R-127, OC-R-163) |
+| **OC-E-047** | Dialog Basic Authentication On, TLS selector Off | accepted: Profile 1, credentials over plain `ws://` (OC-R-165) |
+| **OC-E-048** | Hand-written `ws://` instance whose own-role policy is not `None`, reopened in the dialog | selector shows TLS or mTLS, Protocol display shows derived `wss://`; confirming writes `wss://` back, promoting the inert pairing into a live one (OC-R-161). The instance stays inert (OC-R-042/OC-R-097) only while unedited |
+| **OC-E-057** | Dialog server-role Skip Verify toggled On while mTLS selected | shared CA list hidden, resolved verification `CertVerification::Skip` regardless of entries; list preserved for Off (OC-R-151) |
+| **OC-E-058** | Dialog client-role (CS) Self Signed toggled On while mTLS selected | Client Cert/Key inputs hidden, resolved identity `CertSource::SelfSigned` regardless of text; text preserved for Off (OC-R-147, OC-R-148) |
+
+---
+
+## Simulated Charging Station behavior
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -117,10 +129,24 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 | **OC-E-077** | Configuration read naming unknown keys | known ones returned; unknown listed as unknown |
 | **OC-E-078** | BootNotification response with interval `0` or none | treated as unset: 30 s heartbeat |
 | **OC-E-079** | Heartbeat interval below 1 s | clamped to 1 s |
+| **OC-E-083** | 1.6 ICCID/IMSI/meter serial/meter type left empty | omitted from `BootNotification` entirely, not sent as an empty string (wire field requires length ≥ 1 when present) |
+
+---
+
+## Simulated CSMS behavior
+
+| ID | Condition | Behavior |
+|---|---|---|
 | **OC-E-080** | RFID accept-lists all empty | every tag accepted (open mode) |
 | **OC-E-081** | Tag listed only on connector A, presented at connector B | rejected at B, not inherited sideways; but it **does** authorize a connector-less authorization request, which unions every list |
+
+---
+
+## Module lifecycle and configuration
+
+| ID | Condition | Behavior |
+|---|---|---|
 | **OC-E-082** | Message buffer exceeds 200 messages | oldest evicted. Messages teed to the log file each refresh tick, so an evicted message is still logged if it survived until the next tick (OC-E-093) |
-| **OC-E-083** | 1.6 ICCID/IMSI/meter serial/meter type left empty | omitted from `BootNotification` entirely, not sent as an empty string (wire field requires length ≥ 1 when present) |
 
 ---
 
