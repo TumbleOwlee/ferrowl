@@ -90,7 +90,7 @@ status=<token> file=<path> [summary=<path>] [stage=s<n>] [question=<one line>] [
 
 | Agent | `status` tokens | `file` | `summary` |
 |---|---|---|---|
-| spec-author | `question` · `ready` · `no-diff` · `reuse` · `new` | `artifacts/<slug>/spec-diff.md`, `issue.md`, `issue-comment.md`, `pr.md` | none — normative lines are already the summary |
+| spec-author | `question` · `ready` · `no-diff` · `reuse` · `new` | `artifacts/<slug>/spec-diff.md`, `issue.md`, `issue-comment.md`, `pr.md` | none — each file opens with its own overview block (`## Summary`, `## Goal`, the amendment header, `**At a glance:**`) |
 | spec-planner | `question` · `spec-gap` · `ready` (`count=` stages) | `artifacts/<slug>/plan.md` | `artifacts/<slug>/plan.summary.md` |
 | spec-implementer | `inreview` · `committed` · `blocked` · `spec-gap` | stage card (`stage=`) | none — the card is the summary |
 | spec-reviewer | `clean` · `findings` (`count=` blockers+majors, `stage=` list) | `artifacts/<slug>/review.md` | `artifacts/<slug>/review.verdict.md` |
@@ -116,10 +116,10 @@ Reviewer scope tokens: `plan` (gate 2), `stage s<n>`, `wave w<n>`, `branch` (gat
 
 Orchestrator searches existing issues (`gh issue list --state all`) for the same goal; a candidate's body is read by `spec-author`, never the orchestrator — pass the number, it answers `status=reuse` or `status=new`. Reuse, never duplicate.
 
-`status=new` → same `spec-author` writes `artifacts/<slug>/issue.md`: line 1 title, rest body (content rules in its file). User approves → orchestrator files:
+`status=new` → same `spec-author` writes `artifacts/<slug>/issue.md`: line 1 `# <title>`, rest body (content rules in its file). User approves → orchestrator files, stripping the heading marker from the title:
 
 ```sh
-gh issue create --title "$(head -1 artifacts/<slug>/issue.md)" --body-file <(tail -n +2 artifacts/<slug>/issue.md)
+gh issue create --title "$(head -1 artifacts/<slug>/issue.md | sed 's/^# //')" --body-file <(tail -n +2 artifacts/<slug>/issue.md)
 ```
 
 Record `issue` on the parent card. Planner and implementer never told it exists. **Never edit the issue body after filing** — a later spec change is `spec-author` → `issue-comment.md` → `gh issue comment --body-file`. An edited body destroys the originally-filed vs refined-later record.
@@ -196,7 +196,7 @@ Before proposing a PR, whole-branch pass — cross-stage bugs, spec drift across
 ### Gate 4 — pull request. Stop for approval.
 
 - Gauntlet + gate 3 clean, then **ask whether to open a PR** — user may want a manual run first.
-- `spec-author` writes `artifacts/<slug>/pr.md`: line 1 title, rest body (content rules in its file). User approves; orchestrator appends `Closes #<issue>` as the last line — the one line it writes itself — then pushes and opens: `gh pr create --title "$(head -1 artifacts/<slug>/pr.md)" --body-file <(tail -n +2 artifacts/<slug>/pr.md)`.
+- `spec-author` writes `artifacts/<slug>/pr.md`: line 1 `# <title>`, rest body (content rules in its file). User approves; orchestrator appends `Closes #<issue>` as the last line — the one line it writes itself — then pushes and opens, stripping the heading marker from the title: `gh pr create --title "$(head -1 artifacts/<slug>/pr.md | sed 's/^# //')" --body-file <(tail -n +2 artifacts/<slug>/pr.md)`.
 - CI fails → `bash .claude/scripts/failed-workflow.sh <branch>`, never raw `gh run view`.
 - Reading an existing PR's title/body/comments → `bash .claude/scripts/pr-view.sh <number>`, never raw `gh pr view`.
 

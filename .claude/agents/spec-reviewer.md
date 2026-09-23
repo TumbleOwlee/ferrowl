@@ -41,15 +41,23 @@ Inputs by scope:
 
 Append to `artifacts/<slug>/review.md` — append only, never rewrite earlier lines — under `## <scope> <date>`. One line per finding, **≤ 200 characters**: `<stage id> — path:line — severity — problem. fix: <fix>.` Severity ∈ {blocker, major, minor}. `<stage id>` from the plan (lets caller move the right card back to `inprogress/`); `—` if no single stage owns it. Group by axis; clean axis → one line saying so. No praise, no summary, no evidence paragraph: the implementer needs the location and the fix, a probe result worth keeping goes on its own indented line under the finding. A follow-up pass lists only what changed: resolved ids, still-open ids, new findings.
 
-Then rewrite `artifacts/<slug>/review.verdict.md` whole (`>` or `tee`, never append) — the user's file, **≤ 25 lines / 2 KB** (`show-file.sh` refuses more). Current state only, no history:
+Then rewrite `artifacts/<slug>/review.verdict.md` whole (`>` or `tee`, never append) — the user's file, **≤ 25 lines / 2 KB** (`show-file.sh` refuses more). Current state only, no history. The `**Verdict:**` line states the outcome and the counts so the user never tallies rows; `Axis` is one of `spec`, `standards`, `tdd`, `docs`; `Where` is crate and file, never the full path. Blank line between blocks:
 
 ```
 # <slug> — review verdict (<scope>, pass N)
-s1 clean
-s2 open: <path:line> <severity> <problem, ≤ 12 words>. fix: <≤ 12 words>
-s3 minor: <same shape> — user's call, not re-reviewed
-Needs user: <decision, or none>
+
+**Verdict:** <clean | findings>. <n> must fix, <n> minor. <Loops back to the implementer | Ready for approval>.
+
+| Sev | Axis | Stage | Where | Problem | Fix |
+|---|---|---|---|---|---|
+| major | spec | s3 | ferrowl-modbus monitor.rs:212 | <≤ 12 words> | <≤ 12 words> |
+| minor | standards | s3 | ferrowl app/monitor.rs:88 | <≤ 12 words> | <≤ 12 words> |
+
+Clean axes: <list, or none>. Minors are the user's call, not re-reviewed.
+**Needs user:** <decision, or none>
 ```
+
+A clean pass is three lines: the title, `**Verdict:** clean. All four axes clean on <scope>.`, `**Needs user:** none`.
 
 `count` in the status line = blockers + majors. Minors never re-trigger the fix-and-review loop: they stay on the verdict for the user to accept or assign at the approval stop. Cosmetic differences of taste are not findings.
 
