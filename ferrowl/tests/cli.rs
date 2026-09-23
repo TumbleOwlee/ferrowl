@@ -245,3 +245,42 @@ fn it_fatal_diagnostics_go_to_stderr() {
         "stdout must stay the machine-readable log stream, free of the diagnostic"
     );
 }
+
+#[test]
+/// NF-R-071 — a bare `--session` argument is resolved against the process working directory,
+/// not against anything else: run from a directory containing only the session file, referenced
+/// by its bare filename. Regression guard, not red-first: `--session` was always CWD-relative,
+/// so this passes unchanged before and after s3's change.
+fn it_session_flag_is_cwd_relative() {
+    let dir = reserve_temp_dir("ferrowl_session_flag_cwd");
+    std::fs::write(
+        dir.join("session.toml"),
+        format!(
+            r#"
+[[modules]]
+name = "ok"
+device = "{}"
+role = "server"
+
+[modules.endpoint]
+transport = "tcp"
+ip = "127.0.0.1"
+port = 0
+"#,
+            evse_device()
+        ),
+    )
+    .unwrap();
+
+    let out = bin()
+        .current_dir(dir.path())
+        .args(["run", "--session", "session.toml", "--duration", "1"])
+        .output()
+        .expect("run ferrowl");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "a bare --session filename must resolve against the working directory; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

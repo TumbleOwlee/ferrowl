@@ -337,12 +337,12 @@ captured terminal content to PNG — run it after UI changes to refresh them.
 
 ### Session Configuration
 
-The session configuration can be saved using `:write` and contains the module configuration consisting of the name, path to the device configuration, the role and endpoint information. Timings (`timeout_ms`, `delay_ms`, `interval_ms`) are part of the device configuration, not the session.
+The session configuration can be saved using `:write` and contains the module configuration consisting of the name, path to the device configuration, the role and endpoint information. Timings (`timeout_ms`, `delay_ms`, `interval_ms`) are part of the device configuration, not the session. A relative `device` path is resolved against the session file's own directory, not the working directory — unlike `--session`, `--device` and `--module`'s `device=` key, which are relative to the working directory.
 
 ```toml
 [[modules]]
 name = "evse-1"
-device = "configs/evse.toml"
+device = "evse.toml"
 role = "server"        # "client", "server" or "monitor" (monitor: read-only bus observer, RTU/ASCII only, see below)
 
 [modules.endpoint]
@@ -439,7 +439,7 @@ role, timeout and Lua scripts live in the referenced device file.
 [[modules]]
 type = "ocpp"
 name = "cs-1"
-device = "configs/cs.toml"
+device = "cs.toml"
 protocol = "ws"
 ip = "127.0.0.1"
 port = 9000
