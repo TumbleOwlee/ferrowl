@@ -364,17 +364,15 @@ stop_bits = 1
 ```
 
 Four more transports round out the six supported: `rtu_over_tcp`, `udp` and `ascii_over_tcp`
-reuse the TCP field set above (`udp` minus `tls` — the underlying UDP transport has no handshake
-to secure, so there is nothing for `tls` to configure; `rtu_over_tcp` and `ascii_over_tcp` carry
-`tls` exactly as plain TCP does, see below); `ascii` reuses the RTU field set above. Each only
-changes wire framing versus its TCP/RTU counterpart:
+reuse the TCP field set above; `ascii` reuses the RTU field set above. Each only changes wire
+framing versus its TCP/RTU counterpart:
 
 | `transport` | Carries the fields of | Framing |
 |---|---|---|
 | `tcp` | (its own table above) | Modbus TCP / MBAP header |
 | `rtu` | (its own table above) | RTU binary (unit id + CRC) |
 | `rtu_over_tcp` | `tcp` | RTU binary (unit id + CRC), over a TCP socket |
-| `udp` | `tcp` minus `tls` | Modbus TCP / MBAP header, over a UDP datagram |
+| `udp` | `tcp` | Modbus TCP / MBAP header, over a UDP datagram |
 | `ascii` | `rtu` | ASCII (`:` start, hex PDU, LRC checksum, CR LF end) |
 | `ascii_over_tcp` | `tcp` | ASCII (`:` start, hex PDU, LRC checksum, CR LF end), over a TCP socket |
 
@@ -384,52 +382,6 @@ transport = "rtu_over_tcp"
 ip = "127.0.0.1"
 port = 5020
 ```
-
-`tcp`, `rtu_over_tcp` and `ascii_over_tcp` endpoints additionally accept an optional `tls` table
-holding a `server` policy and a `client` policy, each independently defaulting to `mode = "none"`
-(plain TCP); an absent `tls` table, an empty one, and one with both policies `mode = "none"` are
-the same state. Only the policy matching the endpoint's own role (client or server, chosen per
-instance in the session) is consulted; the other is inert. Setting a role's `mode` to `tls` or
-`mutual` makes that role connect (client) or listen (server) over TLS instead:
-
-```toml
-[modules.endpoint.tls.server]
-mode = "mutual"                     # "none" (default) | "tls" | "mutual"
-
-[modules.endpoint.tls.server.identity]
-source = "files"                    # "ephemeral" | "self-signed" | "files"
-cert_file = "certs/server.pem"      # files: certificate chain (paired with key_file)
-key_file = "certs/server.key"       # files: private key
-
-[modules.endpoint.tls.server.verification]  # required when server mode = "mutual"
-verify = "ca-files"                 # "skip" | "root-store" | "ca-files"
-ca_files = ["certs/ca.pem"]         # ca-files: CA that client certs must chain to
-
-[modules.endpoint.tls.client]
-mode = "mutual"                     # "none" (default) | "tls" | "mutual"
-
-[modules.endpoint.tls.client.verification]
-verify = "root-store"               # "skip" | "root-store" | "ca-files"
-extra_ca_files = ["certs/ca.pem"]   # root-store: extra trust anchors, alongside the native root store
-
-[modules.endpoint.tls.client.identity]      # required when client mode = "mutual"
-source = "files"
-cert_file = "certs/client.pem"      # files: mutual-TLS client certificate (paired with key_file)
-key_file = "certs/client.key"       # files: mutual-TLS client private key
-```
-
-An `identity` (and, under `mode = "mutual"`, a `verification`) is mandatory wherever `mode` is
-`tls` or `mutual` — there is no block-form default for either, and an omitted one fails the load.
-`source = "ephemeral"` makes the server generate an ephemeral self-signed certificate and log the
-fallback; `source = "self-signed"` generates the same kind of certificate but is a deliberate
-choice, not a fallback, and is not logged as one. (The bridge's dotted descriptor keys are the
-exception: there, an unset `tls.identity.source`/`tls.verification.verify` under a set `tls.mode`
-does default to `ephemeral`/`root-store` — see the bridge section above.) `verify = "skip"`
-accepts any peer certificate unauthenticated (testing only). `verify = "root-store"` is rejected
-as a server's own `verification` (there is nothing native to trust client certificates against);
-`source = "ephemeral"` is rejected as a client's `identity`; `verify = "ca-files"` requires a
-non-empty `ca_files`. See [Breaking changes](#breaking-changes) below for the retired flat fields
-this block form replaces.
 
 An **OCPP** module session entry is tagged `type = "ocpp"` and carries only the name, the
 device-config path and the websocket endpoint (`protocol` is `ws` or `wss`); the OCPP version,
@@ -537,6 +489,56 @@ input = "0-10"
 
 Timing precedence is device → built-in defaults (3000/1000/1000 ms).
 
+#### TLS
+
+A `tcp`, `rtu_over_tcp` or `ascii_over_tcp` device file may carry an optional `tls` table holding
+a `server` policy and a `client` policy, each independently defaulting to `mode = "none"` (plain
+TCP); an absent `tls` table, an empty one, and one with both policies `mode = "none"` are the same
+state. Only the policy matching the instance's own role (client or server, chosen per instance in
+the session) is consulted; the other is inert. Setting a role's `mode` to `tls` or `mutual` makes
+that role connect (client) or listen (server) over TLS instead. Every PEM path below (`cert_file`,
+`key_file`, `ca_files`, `extra_ca_files`) is relative to this device file's own directory, not the
+working directory:
+
+```toml
+[tls.server]
+mode = "mutual"                     # "none" (default) | "tls" | "mutual"
+
+[tls.server.identity]
+source = "files"                    # "ephemeral" | "self-signed" | "files"
+cert_file = "certs/server.pem"      # files: certificate chain (paired with key_file)
+key_file = "certs/server.key"       # files: private key
+
+[tls.server.verification]  # required when server mode = "mutual"
+verify = "ca-files"                 # "skip" | "root-store" | "ca-files"
+ca_files = ["certs/ca.pem"]         # ca-files: CA that client certs must chain to
+
+[tls.client]
+mode = "mutual"                     # "none" (default) | "tls" | "mutual"
+
+[tls.client.verification]
+verify = "root-store"               # "skip" | "root-store" | "ca-files"
+extra_ca_files = ["certs/ca.pem"]   # root-store: extra trust anchors, alongside the native root store
+
+[tls.client.identity]      # required when client mode = "mutual"
+source = "files"
+cert_file = "certs/client.pem"      # files: mutual-TLS client certificate (paired with key_file)
+key_file = "certs/client.key"       # files: mutual-TLS client private key
+```
+
+An `identity` (and, under `mode = "mutual"`, a `verification`) is mandatory wherever `mode` is
+`tls` or `mutual` — there is no block-form default for either, and an omitted one fails the load.
+`source = "ephemeral"` makes the server generate an ephemeral self-signed certificate and log the
+fallback; `source = "self-signed"` generates the same kind of certificate but is a deliberate
+choice, not a fallback, and is not logged as one. (The bridge's dotted descriptor keys are the
+exception: there, an unset `tls.identity.source`/`tls.verification.verify` under a set `tls.mode`
+does default to `ephemeral`/`root-store` — see the bridge section above.) `verify = "skip"`
+accepts any peer certificate unauthenticated (testing only). `verify = "root-store"` is rejected
+as a server's own `verification` (there is nothing native to trust client certificates against);
+`source = "ephemeral"` is rejected as a client's `identity`; `verify = "ca-files"` requires a
+non-empty `ca_files`. See [Breaking changes](#breaking-changes) below for the retired flat fields
+this block form replaces.
+
 #### Monitor device configuration
 
 A `role = "monitor"` module (RTU/ASCII transport only — it never writes to the bus, only decodes
@@ -565,7 +567,7 @@ description = "run/stop coil, as observed on the bus"
 
 An **OCPP** device file (saved with `:write-device`) describes the charge point: its OCPP version,
 role, reply timeout and the Lua simulation scripts. Endpoint (ip/port/protocol) is per-instance and
-lives in the session, not here.
+lives in the session, not here. Every PEM path in the `security` block below (`cert_file`, `key_file`, `ca_files`, `extra_ca_files`) is relative to this device file's own directory, not the working directory.
 
 ```toml
 version = "0.4.4"        # ferrowl version, stamped on save
