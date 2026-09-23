@@ -7,7 +7,7 @@ description: Analyze Claude Code session transcripts for repeated full-file read
 
 **Concise, compact, facts only.**
 
-Read-only. Never write a script — recommend, user decides (a script is a maintenance commitment; same "ask before" spirit as AGENTS.md's scope boundaries).
+Read-only. Never write a script — recommend, user decides.
 
 ## 1. Find the transcripts
 

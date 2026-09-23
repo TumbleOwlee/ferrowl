@@ -60,8 +60,6 @@ Per [`../README.md`](../README.md)'s ownership rule, this area owns only the *en
 
 **CS-R-021** — Per-instance wire addressing (name, role, endpoint) lives in the session entry; everything describing the device type (register/variable model, timing, scripts, security) lives in the device-config file. Device-config field sets are specified in the Modbus and OCPP areas.
 
-*Coverage note: CS-R-020 and CS-R-021 are structural — the split is a Rust-type-level fact (`Session` vs `DeviceConfig` are distinct structs with disjoint fields), not an independently testable runtime behavior. Exercised by CS-R-004's cross-encoding device round-trip, CS-R-033's session round-trip, and CS-R-015's instance-vs-device field-split assertions; no dedicated test for the umbrella.*
-
 **CS-R-022** — A device-config file also carries an optional, informational `version` string with CS-R-018's semantics: stamped on save, never branched on.
 
 **CS-R-023** — A device-config file loads even when it predates fields added later: every recognized field has a default.

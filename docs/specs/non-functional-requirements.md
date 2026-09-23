@@ -2,7 +2,7 @@
 
 Cross-cutting properties holding across every area. Per-area behavior: each area's `requirements.md`.
 
-IDs stable, append-only (`NF-R-nnn`). See [`README.md`](./README.md).
+See [`README.md`](./README.md).
 
 ## Platforms
 

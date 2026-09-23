@@ -1,10 +1,10 @@
 # Modbus — Edge Cases and Known Limitations
 
-Boundary behavior, error semantics, intentional constraints. The known-limitations section below (`## Known limitations — intentional constraints`) is working as implemented; recorded so it is not "fixed".
+Boundary behavior, error semantics, intentional constraints.
 
 ---
 
-## Codec boundaries
+## Data formats and codec
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -25,7 +25,7 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 
 ---
 
-## Store boundaries
+## Register store
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -42,7 +42,7 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 
 ---
 
-## Client boundaries
+## Client
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -67,7 +67,7 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 
 ---
 
-## Server boundaries
+## Server
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -89,7 +89,7 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 
 ---
 
-## TLS boundaries
+## TLS policy
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -109,7 +109,7 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 
 ---
 
-## Monitor boundaries
+## Monitor
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -123,7 +123,7 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 
 ---
 
-## Register dialog boundaries
+## Add/edit register dialog
 
 | ID | Condition | Behavior |
 |---|---|---|
