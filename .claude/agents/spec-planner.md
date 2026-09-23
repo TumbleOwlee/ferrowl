@@ -33,16 +33,25 @@ Surface every plan-shaped decision (stage boundaries, extend-vs-reimplement, tes
 
 Anchor every code reference on a name or a quoted unique string (`fn resolved_focusable`, the `KeyCode::Tab if modifiers == KeyModifiers::NONE` arm), **never a line number**: numbers are stale by the time the reviewer reads them and again when the implementer edits, and every stale span is a review pass.
 
-`plan.summary.md` — the user's file, written last, rewritten whole on every revision, **≤ 25 lines / 2 KB** (`show-file.sh` refuses more). Decisions only, never how:
+`plan.summary.md` — the user's file, written last, rewritten whole on every revision, **≤ 25 lines / 2 KB** (`show-file.sh` refuses more). Decisions only, never how. The `**Decide:**` line is what the user is being asked: stage count, whether the tree is a chain or admits waves (they choose the concurrency, you only state what is possible), and the verification method, which cannot be waived without asking. `Touches` names crates and modules, never full paths. Blank line between blocks:
 
 ```
 # <slug> — plan summary (rev N)
-Stages (chain | waves: w1 [s1,s2], w2 [s3]):
-- s0 land spec — docs/specs/<area>/requirements.md
-- s1 <what, ≤ 12 words> — <files>
-Behaviour changes accepted: <one line each, or none>
-Out of scope, raise separately: <one line each, or none>
-Open: <decision the user still owes, or none>
+
+**Decide:** approve <n> stages, <chain | waves possible: w1 [s1,s2], w2 [s3]>. Verification: <unit tests | plus demo TUI | plus real CSMS>, for <stages>.
+
+| Stage | What | Touches |
+|---|---|---|
+| s0 | land spec | docs/specs <areas> |
+| s1 | <≤ 12 words> | <crate module> |
+
+**Accepted behavior changes**
+- <one line each, with ID, or none>
+
+**Out of scope, raise separately**
+- <one line each, or none>
+
+**Open:** <decision the user still owes, or none>
 ```
 
 Existing-code references — the plan is the implementer's *only* codebase knowledge; every implementer is a fresh spawn, sequential runs included:
