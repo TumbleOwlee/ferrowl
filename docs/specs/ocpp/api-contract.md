@@ -196,7 +196,6 @@ Dialed/advertised URL: `{protocol}://{ip}:{port}{path}` (OC-R-043). Charge-point
 | `timeout_ms` | optional u64 | `30000` when unset | awaited-reply timeout, both roles | OC-R-020 |
 | `scripts` | list of script defs | empty | Lua sim scripts — `scripting/`. Client role only | SC-R-022 |
 | `script_interval` | f64 seconds | `1.0` | Lua sim cycle; floored at `0.05`; NaN/∞/≤0 → `1.0` | SC-R-016, SC-R-045 |
-| `log_file` | optional string | unset | persistent log-file base, also set by `:log <file>` | OC-R-087, OC-R-088 |
 | `rfids` | list of string | empty | **server only**: charge-point-wide RFID accept-list | OC-R-074, OC-R-075 |
 | `connector_rfids` | list of `ConnectorRfids` | empty | **server only**: per-connector accept-lists | OC-R-074, OC-R-075 |
 | `connectors` | list of `ConnectorRef` | empty | **client only**: connector-table seed. Empty = CS-level only. Unbounded | OC-R-057, OC-R-081 |
@@ -279,15 +278,15 @@ One section, both roles. Basic Auth role-shared (OC-R-156); TLS held per role in
 |---|---|---|---|
 | `ephemeral` | — | server only: no material configured, bind an ephemeral self-signed certificate and log the fallback (OC-R-095) | OC-R-095 |
 | `self-signed` | — | ephemeral self-signed pair, explicitly chosen, no fallback logged | OC-R-037, OC-R-095 |
-| `files` | `cert_file`, `key_file` — both required | PEM chain and matching private key | OC-R-037, OC-R-112 |
+| `files` | `cert_file`, `key_file` — both required | PEM chain and matching private key; relative to the device file's directory | OC-R-037, OC-R-112, NF-R-069 |
 
 `CertVerification`, tagged `verify`:
 
 | `verify` | Payload | Meaning | Req |
 |---|---|---|---|
 | `skip` | — | accept any peer certificate unauthenticated. Test rigs only | OC-R-036, OC-R-134 |
-| `root-store` | `extra_ca_files` — list, may be empty | client only: webpki root store plus these anchors | OC-R-034, OC-R-129 |
-| `ca-files` | `ca_files` — list, non-empty | exactly these anchors, not the root store | OC-R-034, OC-R-130, OC-R-039 |
+| `root-store` | `extra_ca_files` — list, may be empty | client only: webpki root store plus these anchors; relative to the device file's directory | OC-R-034, OC-R-129, NF-R-069 |
+| `ca-files` | `ca_files` — list, non-empty | exactly these anchors, not the root store; relative to the device file's directory | OC-R-034, OC-R-130, OC-R-039, NF-R-069 |
 
 ### Derivation rules
 

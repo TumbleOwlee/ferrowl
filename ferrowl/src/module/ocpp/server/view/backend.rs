@@ -559,7 +559,6 @@ where
         };
         let mut device = OcppDeviceConfig::from_spec(&self.spec, self.device.scripts.clone());
         device.version = Some(crate::config::VERSION.to_string());
-        device.log_file.clone_from(&self.device.log_file);
         with_rfids(&self.rfids, |store| fill_device_rfids(&mut device, store));
         match Converter::save(&device, path, ty) {
             Ok(()) => CommandResult::Handled(Some((
@@ -935,6 +934,32 @@ mod tests {
             security: Default::default(),
         };
         ServerView::<V1_6>::new(spec, String::new(), OcppDeviceConfig::default())
+    }
+
+    /// CS-E-032 — a live `:log` sink is never written by `:write-device`: the saved file carries
+    /// no `log_file` key, reloading yields `log_file == None`, and the live sink stays configured.
+    #[test]
+    fn ut_save_device_to_omits_log_file() {
+        use crate::convert::{Converter, FileType};
+
+        let mut v = server_view(0);
+        v.device.log_file = Some("/tmp/x.log".into());
+
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_save_device");
+        let path = dir.join("device.toml");
+        let path = path.to_str().unwrap();
+
+        v.save_device_to(path);
+
+        let text = std::fs::read_to_string(path).expect("read saved device file");
+        assert!(
+            !text.contains("log_file"),
+            "saved device file unexpectedly carries log_file: {text}"
+        );
+
+        let back: OcppDeviceConfig = Converter::load(path, FileType::Toml).expect("load");
+        assert_eq!(back.log_file, None);
+        assert_eq!(v.device.log_file, Some("/tmp/x.log".into()));
     }
 
     /// Poll until the CSMS listener has bound (`start` retries the bind in the background).

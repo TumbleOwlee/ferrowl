@@ -194,7 +194,7 @@ IDs stable, append-only (`OC-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **OC-R-113** — The dialog presents CA file paths through one shared list widget (server (CSMS) role: client-CA list, shown whenever mTLS is selected; client (CS) role: server-CA list, OC-R-125), mirroring MB-R-136: zero or more paths added, edited, or removed individually.
 
-**OC-R-149** — An add-entry confirm on the shared CA list widget (OC-R-113) is rejected (sub-dialog stays open with an inline error, nothing appended) unless the path is non-empty, exists on disk, is not a directory, and has extension `pem`/`crt`/`key` (case-insensitive).
+**OC-R-149** — An add-entry confirm on the shared CA list widget (OC-R-113) is rejected (sub-dialog stays open with an inline error, nothing appended) unless the path is non-empty, exists on disk at the base directory NF-R-073 names, is not a directory, and has extension `pem`/`crt`/`key` (case-insensitive).
 
 **OC-R-150** — Server role: mTLS with a non-empty shared CA list (OC-R-113) and Skip Verify Off → `ServerTlsPolicy::Mutual` with `CertVerification::CaFiles` holding exactly those files; an empty list there is a validation error.
 

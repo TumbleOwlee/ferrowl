@@ -17,9 +17,9 @@ Default action (no subcommand): start the TUI with the resolved module set.
 
 | Flag | Value | Default | Repeatable | Purpose | Req |
 |---|---|---|---|---|---|
-| `--module` | `KEY=VAL,...` | — | yes | one ad-hoc Modbus module (``## `--module` descriptor mini-language (Modbus)``) | CL-R-002 |
-| `--session` | `FILE` | — | yes | session file (TOML/JSON) listing module instances. Resolved before `--module` | CL-R-003 |
-| `--device` | `FILE` | — | yes | device-config file → one auto-built TCP **client** named `Device <n>` at `127.0.0.1:5020`. No endpoint/role control | CL-R-004, CL-R-044, CL-R-045 |
+| `--module` | `KEY=VAL,...` | — | yes | one ad-hoc Modbus module (``## `--module` descriptor mini-language (Modbus)``); `device=` relative to the working directory | CL-R-002, NF-R-071 |
+| `--session` | `FILE` | — | yes | session file (TOML/JSON) listing module instances. Resolved before `--module`; relative to the working directory | CL-R-003, NF-R-071 |
+| `--device` | `FILE` | — | yes | device-config file → one auto-built TCP **client** named `Device <n>` at `127.0.0.1:5020`. No endpoint/role control; relative to the working directory | CL-R-004, CL-R-044, CL-R-045, NF-R-071 |
 | `--demo` | (flag) | off | no | eight built-in demo tabs + an example session script; config flags ignored for tab building | CL-R-005, CL-R-006 |
 | `--version` | (flag) | — | no | print version, exit 0 | CL-R-001 |
 | `--help` | (flag) | — | no | print usage, exit 0 | CL-R-001 |
@@ -55,11 +55,11 @@ ferrowl run [--session FILE]... [--module KEY=VAL,...]... [--ocpp KEY=VAL,...]..
 
 | Flag | Value | Default | Repeatable | Purpose | Req |
 |---|---|---|---|---|---|
-| `--session` | `FILE` | — | yes | session file; supplies Modbus and OCPP instances and session scripts | CL-R-013 |
-| `--module` | `KEY=VAL,...` | — | yes | ad-hoc Modbus module (``## `--module` descriptor mini-language (Modbus)``) | CL-R-013 |
+| `--session` | `FILE` | — | yes | session file; supplies Modbus and OCPP instances and session scripts; relative to the working directory | CL-R-013, NF-R-071 |
+| `--module` | `KEY=VAL,...` | — | yes | ad-hoc Modbus module (``## `--module` descriptor mini-language (Modbus)``); `device=` relative to the working directory | CL-R-013, NF-R-071 |
 | `--ocpp` | `KEY=VAL,...` | — | yes | ad-hoc OCPP module (``## `--ocpp` descriptor mini-language (OCPP)``) | CL-R-013, CL-R-014, CL-R-046 |
 | `--duration` | `SECS` (integer) | none | no | run this many seconds then exit 0. Omit → until Ctrl-C | CL-R-024 |
-| `--log-file` | `FILE` | none | no | append every drained line to this file (create-and-append) in addition to stdout | CL-R-041 |
+| `--log-file` | `FILE` | none | no | append every drained line to this file (create-and-append) in addition to stdout; relative to the working directory | CL-R-041, NF-R-071 |
 | `--exit-on-error` | (flag) | off | no | exit 3 (after stopping all modules) when a drained line has level Error | CL-R-015, CL-R-031 |
 
 - `--device` **not** available on `run`; use `--module` (CL-R-047).

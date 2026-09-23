@@ -76,7 +76,7 @@ Shared by client and server roles.
 | `delay_ms` | usize | `0` | ≥ 0 | wait before first operation after connect | MB-R-038 |
 | `interval_ms` | usize | `0` | ≥ 0 (0 ⇒ ~1 ms tick) | interval between operations | MB-R-039 |
 | `reconnect` | bool | `true` | — | client: auto-reconnect with backoff (MB-R-050–055); server: retry bind, serial-open, or mid-serve failure with the same backoff (MB-R-130–134) | MB-R-050, MB-R-071, MB-R-130 |
-| `tls` | `ModbusTlsConfig` | both policies `None` | client+server | two-role container, `[tls.server]`/`[tls.client]`; requirements.md MB-R-104ff | MB-R-104, MB-R-105 |
+| `tls` | `ModbusTlsConfig` | both policies `None` | client+server | two-role container, `[tls.server]`/`[tls.client]`; requirements.md MB-R-104ff; every PEM path in the subtree (`cert_file`, `key_file`, `ca_files`, `extra_ca_files`) is relative to the device file's directory | MB-R-104, MB-R-105, NF-R-069 |
 
 Absent from a serialized config: `reconnect` defaults `true`; the rest have no serde defaults and must be present.
 

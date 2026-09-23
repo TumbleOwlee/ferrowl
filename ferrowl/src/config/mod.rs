@@ -226,11 +226,18 @@ fn load<T: serde::de::DeserializeOwned>(path: &str) -> Result<T, ConfigError> {
 pub fn load_device(path: &str) -> Result<DeviceConfig, ConfigError> {
     let mut device: DeviceConfig = load(path)?;
     device.migrate_update_scripts();
+    let base = ferrowl_util::path::base_dir_of(path);
+    device.tls.server.resolve_paths(&base);
+    device.tls.client.resolve_paths(&base);
     Ok(device)
 }
 
 pub fn load_ocpp_device(path: &str) -> Result<OcppDeviceConfig, ConfigError> {
-    load(path)
+    let mut device: OcppDeviceConfig = load(path)?;
+    let base = ferrowl_util::path::base_dir_of(path);
+    device.security.tls.server.resolve_paths(&base);
+    device.security.tls.client.resolve_paths(&base);
+    Ok(device)
 }
 
 /// Load a monitor device-type config file. No `migrate_update_scripts`-equivalent needed —
@@ -299,6 +306,245 @@ mod tests {
         assert_eq!(device.scripts[0].name, "reg");
         assert_eq!(device.scripts[0].code, "C_Time:Sleep(1)");
         assert!(device.scripts[0].enabled);
+    }
+
+    #[test]
+    /// NF-R-069, NF-R-070 — `load_device` resolves `[tls.server.identity]`'s `cert_file`/
+    /// `key_file` against the device file's own directory.
+    fn ut_load_device_resolves_server_cert_and_key() {
+        let dir = reserve_temp_dir("ferrowl_cfgmod_tls");
+        let path = dir.join("device.toml").to_string_lossy().into_owned();
+        std::fs::write(
+            &path,
+            "[definitions.reg]\ntype = \"U16\"\n\n[tls.server]\nmode = \"tls\"\n[tls.server.identity]\nsource = \"files\"\ncert_file = \"cert.pem\"\nkey_file = \"key.pem\"\n",
+        )
+        .unwrap();
+        let device = load_device(&path).unwrap();
+        assert_eq!(
+            device.tls.server,
+            ferrowl_util::tls::ServerTlsPolicy::Tls {
+                identity: ferrowl_util::tls::CertSource::Files {
+                    cert_file: dir.join("cert.pem").to_string_lossy().into_owned(),
+                    key_file: dir.join("key.pem").to_string_lossy().into_owned(),
+                },
+            }
+        );
+    }
+
+    #[test]
+    /// NF-R-070 — `load_device` resolves every entry of `[tls.server.verification]`'s `ca_files`.
+    fn ut_load_device_resolves_ca_files_entries() {
+        let dir = reserve_temp_dir("ferrowl_cfgmod_tls");
+        let path = dir.join("device.toml").to_string_lossy().into_owned();
+        std::fs::write(
+            &path,
+            "[definitions.reg]\ntype = \"U16\"\n\n[tls.server]\nmode = \"mutual\"\n[tls.server.identity]\nsource = \"self-signed\"\n[tls.server.verification]\nverify = \"ca-files\"\nca_files = [\"ca1.pem\", \"sub/ca2.pem\"]\n",
+        )
+        .unwrap();
+        let device = load_device(&path).unwrap();
+        assert_eq!(
+            device.tls.server,
+            ferrowl_util::tls::ServerTlsPolicy::Mutual {
+                identity: ferrowl_util::tls::CertSource::SelfSigned {},
+                verification: ferrowl_util::tls::CertVerification::CaFiles {
+                    ca_files: vec![
+                        dir.join("ca1.pem").to_string_lossy().into_owned(),
+                        dir.join("sub/ca2.pem").to_string_lossy().into_owned(),
+                    ],
+                },
+            }
+        );
+    }
+
+    #[test]
+    /// NF-R-070 — `load_device` resolves every entry of `[tls.client.verification]`'s
+    /// `extra_ca_files`.
+    fn ut_load_device_resolves_extra_ca_files_entries() {
+        let dir = reserve_temp_dir("ferrowl_cfgmod_tls");
+        let path = dir.join("device.toml").to_string_lossy().into_owned();
+        std::fs::write(
+            &path,
+            "[definitions.reg]\ntype = \"U16\"\n\n[tls.client]\nmode = \"tls\"\n[tls.client.verification]\nverify = \"root-store\"\nextra_ca_files = [\"extra.pem\"]\n",
+        )
+        .unwrap();
+        let device = load_device(&path).unwrap();
+        assert_eq!(
+            device.tls.client,
+            ferrowl_util::tls::ClientTlsPolicy::Tls {
+                verification: ferrowl_util::tls::CertVerification::RootStore {
+                    extra_ca_files: vec![dir.join("extra.pem").to_string_lossy().into_owned()],
+                },
+            }
+        );
+    }
+
+    #[test]
+    /// NF-R-069 — regression guard: an already-absolute PEM path survives `load_device`
+    /// unchanged, as it did before base-directory resolution existed.
+    fn ut_load_device_leaves_absolute_pem_unchanged() {
+        let dir = reserve_temp_dir("ferrowl_cfgmod_tls");
+        let path = dir.join("device.toml").to_string_lossy().into_owned();
+        std::fs::write(
+            &path,
+            "[definitions.reg]\ntype = \"U16\"\n\n[tls.server]\nmode = \"tls\"\n[tls.server.identity]\nsource = \"files\"\ncert_file = \"/abs/cert.pem\"\nkey_file = \"/abs/key.pem\"\n",
+        )
+        .unwrap();
+        let device = load_device(&path).unwrap();
+        assert_eq!(
+            device.tls.server,
+            ferrowl_util::tls::ServerTlsPolicy::Tls {
+                identity: ferrowl_util::tls::CertSource::Files {
+                    cert_file: "/abs/cert.pem".into(),
+                    key_file: "/abs/key.pem".into(),
+                },
+            }
+        );
+    }
+
+    #[test]
+    /// NF-R-074 — a `..` component in a PEM path survives `load_device` unresolved (no
+    /// canonicalization).
+    fn ut_load_device_preserves_dot_dot_in_pem_path() {
+        let dir = reserve_temp_dir("ferrowl_cfgmod_tls");
+        let path = dir.join("device.toml").to_string_lossy().into_owned();
+        std::fs::write(
+            &path,
+            "[definitions.reg]\ntype = \"U16\"\n\n[tls.server]\nmode = \"tls\"\n[tls.server.identity]\nsource = \"files\"\ncert_file = \"../cert.pem\"\nkey_file = \"key.pem\"\n",
+        )
+        .unwrap();
+        let device = load_device(&path).unwrap();
+        assert_eq!(
+            device.tls.server,
+            ferrowl_util::tls::ServerTlsPolicy::Tls {
+                identity: ferrowl_util::tls::CertSource::Files {
+                    cert_file: dir.join("../cert.pem").to_string_lossy().into_owned(),
+                    key_file: dir.join("key.pem").to_string_lossy().into_owned(),
+                },
+            }
+        );
+    }
+
+    #[test]
+    /// NF-R-070 — `load_ocpp_device` resolves `[security.tls.server]`/`[security.tls.client]`
+    /// PEM paths the same way `load_device` does for Modbus.
+    fn ut_load_ocpp_device_resolves_security_tls_paths() {
+        let dir = reserve_temp_dir("ferrowl_cfgmod_tls");
+        let path = dir.join("device.toml").to_string_lossy().into_owned();
+        std::fs::write(
+            &path,
+            "ocpp_version = \"1.6\"\nrole = \"client\"\n\n[security]\n[security.tls.server]\nmode = \"tls\"\n[security.tls.server.identity]\nsource = \"files\"\ncert_file = \"server.pem\"\nkey_file = \"server.key\"\n\n[security.tls.client]\nmode = \"tls\"\n[security.tls.client.verification]\nverify = \"ca-files\"\nca_files = [\"ca.pem\"]\n",
+        )
+        .unwrap();
+        let device = load_ocpp_device(&path).unwrap();
+        assert_eq!(
+            device.security.tls.server,
+            ferrowl_util::tls::ServerTlsPolicy::Tls {
+                identity: ferrowl_util::tls::CertSource::Files {
+                    cert_file: dir.join("server.pem").to_string_lossy().into_owned(),
+                    key_file: dir.join("server.key").to_string_lossy().into_owned(),
+                },
+            }
+        );
+        assert_eq!(
+            device.security.tls.client,
+            ferrowl_util::tls::ClientTlsPolicy::Tls {
+                verification: ferrowl_util::tls::CertVerification::CaFiles {
+                    ca_files: vec![dir.join("ca.pem").to_string_lossy().into_owned()],
+                },
+            }
+        );
+    }
+
+    #[tokio::test]
+    /// MB-E-063 — a Modbus client's TLS build fails on a `load_device`-resolved `ca_files` entry
+    /// that does not exist, and the error names the resolved path, not the raw relative string.
+    async fn ut_modbus_tls_failure_names_resolved_pem_path() {
+        let dir = reserve_temp_dir("ferrowl_cfgmod_tls_fail");
+        let path = dir.join("device.toml").to_string_lossy().into_owned();
+        std::fs::write(
+            &path,
+            "[definitions.reg]\ntype = \"U16\"\n\n[tls.client]\nmode = \"tls\"\n[tls.client.verification]\nverify = \"ca-files\"\nca_files = [\"missing.pem\"]\n",
+        )
+        .unwrap();
+        let device = load_device(&path).unwrap();
+        let resolved = dir.join("missing.pem").to_string_lossy().into_owned();
+
+        let dead_port_guard = ferrowl_test_support::reserve_tcp_port();
+        let config = ferrowl_modbus::tcp::Config {
+            ip: "127.0.0.1".into(),
+            port: dead_port_guard.port(),
+            tls: device.tls,
+            ..Default::default()
+        };
+        let err = match ferrowl_modbus::tcp::Client::connect(
+            &config,
+            &ferrowl_modbus::tcp::new_self_signed_cache(),
+        )
+        .await
+        {
+            Ok(_) => {
+                panic!("a missing ca_files entry must fail the TLS build before any socket connect")
+            }
+            Err(e) => e,
+        };
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains(&resolved),
+            "expected the resolved path {resolved:?} in the error, got: {msg}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    /// OC-E-049 — an OCPP CS's TLS build fails on a `load_ocpp_device`-resolved `ca_files` entry
+    /// that does not exist, and the error names the resolved path, not the raw relative string.
+    async fn ut_ocpp_tls_failure_names_resolved_pem_path() {
+        use ferrowl_ocpp::cs::{self, CsActionHandler};
+        use ferrowl_ocpp::{Action16, CallError, CallErrorCode, Response16, V1_6};
+        use std::sync::Arc;
+
+        struct NoopCs;
+        impl CsActionHandler<V1_6> for NoopCs {
+            async fn handle_call(&self, _action: Action16) -> Result<Response16, CallError> {
+                Err(CallError::new(CallErrorCode::NotImplemented, "unsupported"))
+            }
+        }
+        fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
+            |_s: String| async move {}
+        }
+
+        let dir = reserve_temp_dir("ferrowl_cfgmod_tls_fail");
+        let path = dir.join("device.toml").to_string_lossy().into_owned();
+        std::fs::write(
+            &path,
+            "ocpp_version = \"1.6\"\nrole = \"client\"\n\n[security]\n[security.tls.client]\nmode = \"tls\"\n[security.tls.client.verification]\nverify = \"ca-files\"\nca_files = [\"missing.pem\"]\n",
+        )
+        .unwrap();
+        let device = load_ocpp_device(&path).unwrap();
+        let resolved = dir.join("missing.pem").to_string_lossy().into_owned();
+
+        let dead_port_guard = ferrowl_test_support::reserve_tcp_port();
+        let config = Arc::new(tokio::sync::RwLock::new(cs::Config {
+            url: format!("wss://127.0.0.1:{}/ocpp/CS001", dead_port_guard.port()),
+            timeout_ms: 1000,
+            basic_auth: None,
+            tls: device.security.tls.client,
+            extra_headers: Vec::new(),
+            reconnect: false,
+        }));
+        let mut client =
+            cs::ClientBuilder::<V1_6>::new(config, ferrowl_ocpp::new_self_signed_cache())
+                .spawn(NoopCs, sink(), sink())
+                .await
+                .expect("spawn always returns Ok; the dial/TLS error surfaces from the task");
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), client.join())
+            .await
+            .expect("with reconnect disabled the task must end promptly");
+        let err = result.expect_err("a missing ca_files entry must fail the TLS build");
+        let msg = format!("{err:?}");
+        assert!(
+            msg.contains(&resolved),
+            "expected the resolved path {resolved:?} in the error, got: {msg}"
+        );
     }
 
     #[test]

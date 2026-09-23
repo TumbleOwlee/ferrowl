@@ -33,7 +33,7 @@ Boundary and error behavior of the process command line and headless runner, plu
 ## Session / device load failures in headless
 
 - **CL-E-015** — **`--session` file fails to load or parse** — setup failure, exit **1** (`Error:` on stderr). Stricter than the TUI, which tolerates a file vanishing mid-startup by falling back to defaults.
-- **CL-E-016** — **A module's device config fails to load** — headless exits **1** (`'<name>': failed to load '<path>': …` under `Error:`). The TUI skips that module with a stderr warning and keeps the rest (CS-E-008). Deliberate asymmetry: headless must not silently run a partial set in CI.
+- **CL-E-016** — **A module's device config fails to load** — headless exits **1** (`'<name>': failed to load '<path>': …` under `Error:`, `<path>` being the resolved path per CS-R-073). The TUI skips that module with a stderr warning and keeps the rest (CS-E-008). Deliberate asymmetry: headless must not silently run a partial set in CI.
 - **CL-E-017** — **Blank `device` path** — for OCPP a legitimate quick-start on the default device config; CS-R-067 governs.
 
 ## `--exit-on-error` detection is level-based
@@ -64,3 +64,4 @@ Boundary and error behavior of the process command line and headless runner, plu
 - **CL-E-027** — **`--exit-on-error` only catches logged Error-level lines.** A level match, not a structured result channel (``## `--exit-on-error` detection is level-based``). Errors never reaching the log, or logged below Error, are invisible.
 - **CL-E-028** — **Headless has no per-module error isolation.** Any one module's startup failure fails the whole `run` with exit 1 (`## Session / device load failures in headless`); no "start the good ones, report the bad" mode.
 - **CL-E-029** — **Teardown lines are stderr, not the drained log stream.** CL-R-056's `Stopped '<name>'` lines never reach stdout and are therefore never mirrored into `--log-file` (CL-R-041): a `--log-file` capture shows the run's logs but no teardown record. Deliberate — stdout stays a pure drained-log stream (CL-R-042), and the setup-failure teardown happens before any drain has run at all.
+- **CL-E-030** — **A `--module` descriptor's `device=` is CWD-relative** (NF-R-071), unlike the same key inside a session file (CS-R-073): a command-line argument is not inside a file and has no base directory but the working directory. Paths *inside* the device file it names are still file-relative (NF-R-069), so `--device ./test/dev.toml` picks up `./test/`'s PEM files.

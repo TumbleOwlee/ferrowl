@@ -29,7 +29,7 @@ published independently.
 | `ferrowl-templates` | The bundled Lua script-template library. A build script walks `templates/<context>/…` and generates the `TEMPLATES` array at compile time; carries its own `TemplateContext`, which the binary maps to its `ScriptContext`. |
 | `ferrowl-syntax` | Syntax highlighting for the in-TUI code editor (Lua, JSON, Markdown and Diff). |
 | `ferrowl-ring` | Fixed-capacity ring buffer generic over the element type; backs each module's log pane. |
-| `ferrowl-util` | Shared helpers with two or more consumers: the exponential-backoff retry driver (`backoff`) consumed by `ferrowl-modbus`'s client and all six server transports and by `ferrowl-ocpp`'s CS and CSMS reconnect loops, `~` path expansion (`path`), and the shared TLS policy enums (`tls`). A helper with a single consumer lives in that consumer instead. |
+| `ferrowl-util` | Shared helpers with two or more consumers: the exponential-backoff retry driver (`backoff`) consumed by `ferrowl-modbus`'s client and all six server transports and by `ferrowl-ocpp`'s CS and CSMS reconnect loops, `~` expansion plus base-directory resolution and relativization for file-relative path fields (`path`), and the shared TLS policy enums (`tls`), which resolve and relativize their own PEM paths through `path`. A helper with a single consumer lives in that consumer instead. |
 | `ferrowl-test-support` | Dev-only test fixtures: held-port guards (`reserve_tcp_port`/`reserve_udp_port`) and per-run temp directories (`reserve_temp_dir`). `publish = false`, a dev-dependency of the crates that test against sockets or the filesystem; no production code depends on it. |
 
 Grouped by concern: **Modbus** (`ferrowl-codec`, `ferrowl-store`, `ferrowl-modbus`),

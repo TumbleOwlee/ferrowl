@@ -142,8 +142,11 @@ impl RunArgs {
     /// [`CliArgs::ocpp_specs`]), plus any ad-hoc `--ocpp key=val,...` flags.
     pub fn ocpp_specs(&self) -> Result<Vec<OcppModuleSpec>, String> {
         let mut specs = self.as_cli_args().ocpp_specs()?;
+        let cwd_base = ferrowl_util::path::base_dir_of("");
         for spec in &self.ocpp {
-            specs.push(parse_ocpp_spec(spec)?);
+            let mut spec = parse_ocpp_spec(spec)?;
+            spec.device = ferrowl_util::path::resolve_against(&cwd_base, &spec.device);
+            specs.push(spec);
         }
         Ok(specs)
     }
@@ -165,7 +168,12 @@ impl CliArgs {
     /// (defaulting to `"modbus"`) to deserialize the right spec type.
     pub fn module_specs(&self) -> Result<Vec<ModuleSpec>, String> {
         let mut specs = Vec::new();
+        // A session instance's `device` resolves against that session file's own directory
+        // (CS-R-073); a `--module`/`--device` flag's `device` resolves against the working
+        // directory instead (NF-R-071), and the resolved value — not the string given — is what
+        // gets held (NF-R-076).
         for path in &self.sessions {
+            let base = ferrowl_util::path::base_dir_of(path);
             let session = config::load_session(path).map_err(|e| e.to_string())?;
             for module_val in session.modules {
                 let ty = module_val
@@ -174,8 +182,9 @@ impl CliArgs {
                     .unwrap_or("modbus");
                 match ty {
                     "modbus" => {
-                        let spec: ModuleSpec = serde_json::from_value(module_val)
+                        let mut spec: ModuleSpec = serde_json::from_value(module_val)
                             .map_err(|e| format!("invalid modbus module spec: {e}"))?;
+                        spec.device = ferrowl_util::path::resolve_against(&base, &spec.device);
                         specs.push(spec);
                     }
                     // OCPP modules are resolved separately by `ocpp_specs`.
@@ -186,13 +195,17 @@ impl CliArgs {
                 }
             }
         }
+        let cwd_base = ferrowl_util::path::base_dir_of("");
         for spec in &self.modules {
-            specs.push(parse_module_spec(spec)?);
+            let mut spec = parse_module_spec(spec)?;
+            spec.device = ferrowl_util::path::resolve_against(&cwd_base, &spec.device);
+            specs.push(spec);
         }
         for (num, device) in self.devices.iter().enumerate() {
+            let device = ferrowl_util::path::resolve_against(&cwd_base, device);
             specs.push(create_module_spec_by_device(
                 format!("Device {num}"),
-                device.clone(),
+                device,
             ));
         }
         Ok(specs)
@@ -204,12 +217,14 @@ impl CliArgs {
     pub fn ocpp_specs(&self) -> Result<Vec<OcppModuleSpec>, String> {
         let mut specs = Vec::new();
         for path in &self.sessions {
+            let base = ferrowl_util::path::base_dir_of(path);
             let session = config::load_session(path).map_err(|e| e.to_string())?;
             for module_val in session.modules {
                 let ty = module_val.get("type").and_then(|v| v.as_str());
                 if ty == Some("ocpp") {
-                    let spec: OcppModuleSpec = serde_json::from_value(module_val)
+                    let mut spec: OcppModuleSpec = serde_json::from_value(module_val)
                         .map_err(|e| format!("invalid ocpp module spec: {e}"))?;
+                    spec.device = ferrowl_util::path::resolve_against(&base, &spec.device);
                     specs.push(spec);
                 }
             }
@@ -985,8 +1000,291 @@ mod tests {
         let ocpp = args.ocpp_specs().unwrap();
         assert_eq!(ocpp.len(), 1);
         assert_eq!(ocpp[0].name, "cs");
-        assert_eq!(ocpp[0].device, "cs.toml");
+        assert_eq!(ocpp[0].device, dir.join("cs.toml").to_string_lossy());
         assert_eq!(ocpp[0].port, 9000);
+    }
+
+    #[test]
+    /// CS-R-073 — a session instance's relative `device` resolves against the session file's
+    /// own directory, not the process working directory.
+    fn ut_session_device_resolves_against_session_dir() {
+        use crate::convert::{Converter, FileType};
+        let session = config::Session {
+            version: None,
+            modules: vec![
+                serde_json::to_value(create_module_spec_by_device("mb".into(), "dev.toml".into()))
+                    .unwrap(),
+            ],
+            scripts: vec![],
+            interval: 1.0,
+        };
+        let dir = reserve_temp_dir("ferrowl_cli_device_base");
+        let path = dir.join("session.toml");
+        let path = path.to_str().unwrap().to_string();
+        Converter::save(&session, &path, FileType::Toml).unwrap();
+
+        let args = CliArgs {
+            command: None,
+            modules: vec![],
+            sessions: vec![path],
+            devices: vec![],
+            demo: false,
+        };
+        let specs = args.module_specs().unwrap();
+        assert_eq!(specs[0].device, dir.join("dev.toml").to_string_lossy());
+    }
+
+    #[test]
+    /// CS-R-073 — same resolution for an OCPP session instance's `device`.
+    fn ut_session_ocpp_device_resolves_against_session_dir() {
+        use crate::convert::{Converter, FileType};
+        let mut ocpp = serde_json::to_value(OcppModuleSpec {
+            name: "cs".into(),
+            device: "dev.toml".into(),
+            protocol: config::ocpp::OcppProtocol::Ws,
+            ip: "127.0.0.1".into(),
+            port: 9000,
+            path: String::new(),
+        })
+        .unwrap();
+        ocpp.as_object_mut()
+            .unwrap()
+            .insert("type".into(), "ocpp".into());
+        let session = config::Session {
+            version: None,
+            modules: vec![ocpp],
+            scripts: vec![],
+            interval: 1.0,
+        };
+        let dir = reserve_temp_dir("ferrowl_cli_ocpp_device_base");
+        let path = dir.join("session.toml");
+        let path = path.to_str().unwrap().to_string();
+        Converter::save(&session, &path, FileType::Toml).unwrap();
+
+        let args = CliArgs {
+            command: None,
+            modules: vec![],
+            sessions: vec![path],
+            devices: vec![],
+            demo: false,
+        };
+        let specs = args.ocpp_specs().unwrap();
+        assert_eq!(specs[0].device, dir.join("dev.toml").to_string_lossy());
+    }
+
+    #[test]
+    /// CS-R-073 — regression guard: an absolute `device` is unaffected by the new resolution.
+    fn ut_session_absolute_device_unchanged() {
+        use crate::convert::{Converter, FileType};
+        let session = config::Session {
+            version: None,
+            modules: vec![
+                serde_json::to_value(create_module_spec_by_device(
+                    "mb".into(),
+                    "/abs/dev.toml".into(),
+                ))
+                .unwrap(),
+            ],
+            scripts: vec![],
+            interval: 1.0,
+        };
+        let dir = reserve_temp_dir("ferrowl_cli_abs_device");
+        let path = dir.join("session.toml");
+        let path = path.to_str().unwrap().to_string();
+        Converter::save(&session, &path, FileType::Toml).unwrap();
+
+        let args = CliArgs {
+            command: None,
+            modules: vec![],
+            sessions: vec![path],
+            devices: vec![],
+            demo: false,
+        };
+        let specs = args.module_specs().unwrap();
+        assert_eq!(specs[0].device, "/abs/dev.toml");
+    }
+
+    #[test]
+    /// CS-R-067 — regression guard: a blank `device` (quick-start) stays blank.
+    fn ut_session_blank_device_stays_blank() {
+        use crate::convert::{Converter, FileType};
+        let session = config::Session {
+            version: None,
+            modules: vec![
+                serde_json::to_value(create_module_spec_by_device("mb".into(), "".into())).unwrap(),
+            ],
+            scripts: vec![],
+            interval: 1.0,
+        };
+        let dir = reserve_temp_dir("ferrowl_cli_blank_device");
+        let path = dir.join("session.toml");
+        let path = path.to_str().unwrap().to_string();
+        Converter::save(&session, &path, FileType::Toml).unwrap();
+
+        let args = CliArgs {
+            command: None,
+            modules: vec![],
+            sessions: vec![path],
+            devices: vec![],
+            demo: false,
+        };
+        let specs = args.module_specs().unwrap();
+        assert_eq!(specs[0].device, "");
+    }
+
+    #[test]
+    /// CS-E-030 — two sessions in different directories holding the same relative `device`
+    /// string resolve to two different files; base directories are per session file.
+    fn ut_two_sessions_in_different_dirs_resolve_independently() {
+        use crate::convert::{Converter, FileType};
+        let make_session = |dir: &std::path::Path| {
+            let session = config::Session {
+                version: None,
+                modules: vec![
+                    serde_json::to_value(create_module_spec_by_device(
+                        "mb".into(),
+                        "dev.toml".into(),
+                    ))
+                    .unwrap(),
+                ],
+                scripts: vec![],
+                interval: 1.0,
+            };
+            let path = dir.join("session.toml");
+            let path = path.to_str().unwrap().to_string();
+            Converter::save(&session, &path, FileType::Toml).unwrap();
+            path
+        };
+        let dir_a = reserve_temp_dir("ferrowl_cli_dir_a");
+        let dir_b = reserve_temp_dir("ferrowl_cli_dir_b");
+        let path_a = make_session(dir_a.path());
+        let path_b = make_session(dir_b.path());
+
+        let specs_a = CliArgs {
+            command: None,
+            modules: vec![],
+            sessions: vec![path_a],
+            devices: vec![],
+            demo: false,
+        }
+        .module_specs()
+        .unwrap();
+        let specs_b = CliArgs {
+            command: None,
+            modules: vec![],
+            sessions: vec![path_b],
+            devices: vec![],
+            demo: false,
+        }
+        .module_specs()
+        .unwrap();
+        assert_eq!(specs_a[0].device, dir_a.join("dev.toml").to_string_lossy());
+        assert_eq!(specs_b[0].device, dir_b.join("dev.toml").to_string_lossy());
+        assert_ne!(specs_a[0].device, specs_b[0].device);
+    }
+
+    #[test]
+    /// NF-R-076, CL-E-030, NF-R-071 — a `--module` descriptor's `device=` resolves against the
+    /// process working directory, not against a session file's directory or the raw string.
+    fn ut_module_flag_device_resolves_against_cwd() {
+        let args = CliArgs {
+            command: None,
+            modules: vec!["name=m,device=dev.toml,port=1".into()],
+            sessions: vec![],
+            devices: vec![],
+            demo: false,
+        };
+        let specs = args.module_specs().unwrap();
+        let expected = std::env::current_dir().unwrap().join("dev.toml");
+        assert_eq!(specs[0].device, expected.to_string_lossy());
+    }
+
+    #[test]
+    /// NF-R-076, NF-R-071 — same resolution for `--device`.
+    fn ut_device_flag_resolves_against_cwd() {
+        let args = CliArgs {
+            command: None,
+            modules: vec![],
+            sessions: vec![],
+            devices: vec!["dev.toml".into()],
+            demo: false,
+        };
+        let specs = args.module_specs().unwrap();
+        let expected = std::env::current_dir().unwrap().join("dev.toml");
+        assert_eq!(specs[0].device, expected.to_string_lossy());
+    }
+
+    #[test]
+    /// NF-R-076 — `RunArgs::ocpp_specs`'s ad-hoc `--ocpp` entries resolve `device=` against the
+    /// process working directory.
+    fn ut_ocpp_flag_device_resolves_against_cwd() {
+        let run = RunArgs {
+            sessions: vec![],
+            modules: vec![],
+            ocpp: vec!["name=cs-1,device=cs.toml,port=9000".into()],
+            duration: None,
+            log_file: None,
+            exit_on_error: false,
+        };
+        let specs = run.ocpp_specs().unwrap();
+        let expected = std::env::current_dir().unwrap().join("cs.toml");
+        assert_eq!(specs[0].device, expected.to_string_lossy());
+    }
+
+    #[test]
+    /// CS-E-027, NF-R-074 — a `..` component in a session `device` survives resolution
+    /// unresolved (no canonicalization).
+    fn ut_session_dot_dot_device_is_not_canonicalized() {
+        use crate::convert::{Converter, FileType};
+        let session = config::Session {
+            version: None,
+            modules: vec![
+                serde_json::to_value(create_module_spec_by_device(
+                    "mb".into(),
+                    "../dev.toml".into(),
+                ))
+                .unwrap(),
+            ],
+            scripts: vec![],
+            interval: 1.0,
+        };
+        let dir = reserve_temp_dir("ferrowl_cli_dotdot_device");
+        let path = dir.join("session.toml");
+        let path = path.to_str().unwrap().to_string();
+        Converter::save(&session, &path, FileType::Toml).unwrap();
+
+        let args = CliArgs {
+            command: None,
+            modules: vec![],
+            sessions: vec![path],
+            devices: vec![],
+            demo: false,
+        };
+        let specs = args.module_specs().unwrap();
+        assert_eq!(specs[0].device, dir.join("../dev.toml").to_string_lossy());
+    }
+
+    #[test]
+    /// CS-R-073 — the shipped `configs/session.toml` resolves both instances' `device` to files
+    /// that actually exist, from any process working directory.
+    fn ut_shipped_configs_session_resolves_to_existing_device_files() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../configs/session.toml");
+        let args = CliArgs {
+            command: None,
+            modules: vec![],
+            sessions: vec![path.into()],
+            devices: vec![],
+            demo: false,
+        };
+        let specs = args.module_specs().unwrap();
+        assert_eq!(specs.len(), 2);
+        for spec in &specs {
+            assert!(
+                std::path::Path::new(&spec.device).exists(),
+                "resolved device path does not exist: {}",
+                spec.device
+            );
+        }
     }
 
     #[test]
@@ -1833,7 +2131,9 @@ mod tests {
             .module_specs()
             .expect("a --device value is a path, never parsed as a descriptor");
         assert_eq!(specs.len(), 1);
-        assert_eq!(specs[0].device, "name=x,port=1");
+        // NF-R-076 — a --device path is CWD-relative and held resolved, not as the raw string.
+        let expected = std::env::current_dir().unwrap().join("name=x,port=1");
+        assert_eq!(specs[0].device, expected.to_string_lossy());
         assert_eq!(specs[0].name, "Device 0");
         assert_eq!(specs[0].role, Role::Client);
         assert_eq!(

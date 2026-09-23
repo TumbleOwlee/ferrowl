@@ -308,7 +308,7 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-136** — The Modbus TCP setup dialog presents CA file paths through one shared list widget (server role: client-CA list, shown whenever mTLS is selected; client role: server-CA list, MB-R-156) allowing zero or more paths added, edited, or removed individually, mirroring a register's predefined named-values list.
 
-**MB-R-187** — An add-entry confirm on the shared CA list widget (MB-R-136) is rejected (sub-dialog stays open with an inline error, nothing appended) unless the path is non-empty, exists on disk, is not a directory, and has extension `pem`/`crt`/`key` (case-insensitive).
+**MB-R-187** — An add-entry confirm on the shared CA list widget (MB-R-136) is rejected (sub-dialog stays open with an inline error, nothing appended) unless the path is non-empty, exists on disk at the base directory NF-R-073 names, is not a directory, and has extension `pem`/`crt`/`key` (case-insensitive).
 
 **MB-R-188** — Server role of the Modbus TCP setup dialog: mTLS with a non-empty client-CA list (MB-R-136) and Skip Verify Off → `ServerTlsPolicy::Mutual` with `CertVerification::CaFiles` holding exactly those files; an empty list there is a validation error (mirroring MB-R-108), never a silent fallback to `Tls`.
 

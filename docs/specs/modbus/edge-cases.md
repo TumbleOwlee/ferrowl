@@ -96,7 +96,7 @@ Boundary behavior, error semantics, intentional constraints. The known-limitatio
 | **MB-E-060** | Dialog Self-Signed toggled On after `cert_file`/`key_file` text entered | resolved config excludes both files; stored text preserved for Off (MB-R-135/MB-R-186) |
 | **MB-E-061** | Dialog client-role Skip-Verify toggled On after Root Store/CA list state entered | resolved verification excludes both, becoming `CertVerification::Skip` (MB-R-135) |
 | **MB-E-062** | `tls` set in an RTU device config | ignored; RTU `Config` has no `tls` field (MB-R-112) |
-| **MB-E-063** | `cert_file`/`key_file`/`ca_files`/`extra_ca_files`/client-identity path malformed PEM or unreadable | server or client start fails with a TLS configuration error (MB-R-107/MB-R-108 tier), surfaced to the caller with its typed cause intact (MB-R-250/MB-R-251) |
+| **MB-E-063** | `cert_file`/`key_file`/`ca_files`/`extra_ca_files`/client-identity path malformed PEM or unreadable | server or client start fails with a TLS configuration error (MB-R-107/MB-R-108 tier), surfaced to the caller with its typed cause intact (MB-R-250/MB-R-251); the error names the resolved path (NF-R-069) |
 | **MB-E-064** | `ServerTlsPolicy::Mutual` client certificate signed by any one of several `ca_files` | accepted: `ca_files` is a trust-anchor set, not an ordered chain (MB-R-108) |
 | **MB-E-065** | `CertVerification::CaFiles` with empty `ca_files` | rejected at construction, never at handshake (MB-R-108/MB-R-109) |
 | **MB-E-066** | `ServerTlsPolicy::Mutual` with `CertVerification::Skip`, connection presents no client certificate | handshake still fails: `Skip` skips the CA/identity check on a *presented* cert, does not make presenting optional (MB-R-173) |
