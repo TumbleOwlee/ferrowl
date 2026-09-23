@@ -1,6 +1,6 @@
 ---
 name: context-audit
-description: Analyze Claude Code session transcripts for repeated full-file reads, large re-derived tool output, and other context-cost waste; recommend small scripts (like .claude/scripts/extract-section.sh) and, where a waste pattern is a repeated bypass of an existing convention, propose a list of concrete fixes (a hook, a convention edit) rather than a script alone. Use when the user asks to "audit context cost", "reduce context bloat", "what scripts should we add", "analyze tool usage", or invokes /context-audit.
+description: Analyze Claude Code session transcripts for repeated full-file reads, large re-derived tool output, and other context-cost waste; recommend small scripts (like .claude/scripts/extract-section.sh) that would cut it, and where a waste pattern is a repeated bypass of an existing convention, propose a concrete fix (a PreToolUse guard hook, a convention edit) rather than a script alone. Use when the user asks to "audit context cost", "reduce context bloat", "what scripts should we add", "analyze tool usage", or invokes /context-audit.
 ---
 
 # Context cost audit
@@ -60,4 +60,6 @@ A recurring waste pattern that `AGENTS.md` Conventions already forbid (e.g. raw 
 - **A `PreToolUse` hook** detecting the exact bypass shape at the tool-call boundary and denying with a message pointing at the intended path — shape of `.claude/scripts/hook-guard-shell.sh` if present (`ls .claude/scripts/hook-guard-*.sh`; extend an existing guard covering an overlapping shape before adding one). State matcher (tool name), detection condition, redirect message.
 - **A convention-wording gap**, if the bypass happened because the bullet didn't cover the observed shape (wrong tool, file type, ambiguous wording) — quote current bullet and proposed edit.
 
-One line each: pattern → proposed fix → which file changes (`.claude/settings.json` + new/edited `.claude/scripts/hook-guard-*.sh`, or the Conventions bullet). Create or edit nothing; list, let the user approve.
+One line each: pattern → proposed fix → which file changes (`.claude/settings.json` + new/edited `.claude/scripts/hook-guard-*.sh`, or the Conventions bullet).
+
+If the user approves a specific recommendation, draft that one script the same way `extract-section.sh` was built: POSIX `sh`, single file, one clear job, tested against a real sample before reporting done.

@@ -60,4 +60,4 @@ One line each, no praise, no summary. A proposed split under ~10 lines: say so, 
 
 Report only improvements found. Empty table → "none" — never a reason, never "already good".
 
-Create or edit nothing here. If the user approves a split, make the new file's headings match exactly what the citing instructions name (or update those instructions in the same change).
+If the user approves a split, make the new file's headings match exactly what the citing instructions name (or update those instructions in the same change).

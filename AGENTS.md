@@ -78,6 +78,7 @@ Dev loop: `cargo run --release -- --demo` (built-in demo tabs, no config) or `ca
 - **Never read a whole file when only part is needed.** Any `.md` (specs, `SKILL.md`s, other repos' docs): `sh .claude/scripts/extract-section.sh '<heading>' ['<heading>' ...] <file>` (unknown heading: `sh .claude/scripts/list-sections.sh <file>` first). Other large files: `sed -n '<start>,<end>p' <file>`. Applies to Read tool and Bash `cat` alike — same context cost. **Enforced:** `PreToolUse` hook (`.claude/scripts/hook-guard-shell.sh`) denies an unpiped Bash `cat` of a `.md` file or any file over 80 lines, pointing at `extract-section.sh`/`sed -n`/Read. A denial = convention about to be bypassed; follow the redirect, don't retry the `cat` differently.
 - **Filter shell output before it lands in context.** `find -name`/`-path`, `git show --stat` or a path filter before full content, `grep`/`tail -N`/`head -N` on `cargo test`/`cargo llvm-cov` output.
 - **Don't re-run a read-only command whose output is already in context** (`git diff`, `git log`, `git show` on the same refs/paths). Scroll back.
+- Read an existing PR's body/comments with `bash .claude/scripts/pr-view.sh <number>`, never raw `gh pr view` — same GitHub Projects-Classic GraphQL bug as `gh issue view` (`repository.pullRequest.projectCards`), reproduces with or without `--comments`. Inline review threads go through `bash .claude/scripts/pr-feedback.sh fetch|reply` (`.claude/AGENTS.workflow.md` *PR feedback*) — into a file, one status line in context.
 
 ## Conventions — code
 
