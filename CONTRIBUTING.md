@@ -198,9 +198,13 @@ sequenceDiagram
         Impl->>Git: commit stage in worktree
         Impl-->>Orch: committed
         Orch->>Git: push, re-run checks on the pushed commit
+        opt after stage 0 only
+            Orch->>Git: open draft PR (issue title, placeholder body)
+            Note over Orch,Git: every later push updates it; gate 4 promotes it
+        end
     end
     deactivate Impl
-    Note over Orch,Git: parallel: per-stage worktrees branch off the feature branch, clean stages merge into it, then a fresh review of the wave and an approval stop
+    Note over Orch,Git: parallel: per-stage worktrees branch off the feature branch, clean stages merge into it and the feature branch is pushed, then a fresh review of the wave and an approval stop
     end
 
     rect rgba(29,78,216,0.10)
@@ -219,7 +223,7 @@ sequenceDiagram
 
     rect rgba(47,111,78,0.10)
     Note over User,Git: Gate 4 - pull request
-    Orch->>User: approval stop: open a PR, or manual run first?
+    Orch->>User: approval stop: mark the draft PR ready, or manual run first?
     User->>Orch: approved
     Orch->>Author: spawn: spec diff, plan, review, check log, branch commit log
     activate Author
@@ -227,7 +231,7 @@ sequenceDiagram
     deactivate Author
     Orch->>User: approval stop: PR draft
     User->>Orch: approved
-    Orch->>Git: push, create PR from draft, link the issue
+    Orch->>Git: push, replace the draft PR's title and body, link the issue, mark ready
     end
 
     rect rgba(75,85,99,0.12)
