@@ -183,6 +183,9 @@ impl<V: ClientVersion> ClientView<V> {
         device.imsi = self.with_state(|s| cs_string_field(s, "Imsi"));
         device.meter_serial_number = self.with_state(|s| cs_string_field(s, "MeterSerialNumber"));
         device.meter_type = self.with_state(|s| cs_string_field(s, "MeterType"));
+        let base = ferrowl_util::path::base_dir_of(path);
+        device.security.tls.server.relativize_paths(&base);
+        device.security.tls.client.relativize_paths(&base);
         match Converter::save(&device, path, ty) {
             Ok(()) => CommandResult::Handled(Some((
                 Level::Info,
@@ -750,6 +753,60 @@ mod tests {
         let back: OcppDeviceConfig = Converter::load(path, FileType::Toml).expect("load");
         assert_eq!(back.log_file, None);
         assert_eq!(v.device.log_file, Some("/tmp/x.log".into()));
+    }
+
+    /// NF-R-072 — `:write-device` re-relativises `security.tls` PEM paths under the target dir.
+    #[test]
+    fn ut_write_device_relativizes_security_tls_paths_client() {
+        use crate::convert::{Converter, FileType};
+        use ferrowl_util::tls::{CertSource, ServerTlsPolicy};
+
+        let mut v = client_view::<ferrowl_ocpp::V1_6>(OcppVersion::V1_6, 0);
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_client_relativize");
+        let cert = dir.join("cert.pem");
+        let key = dir.join("key.pem");
+        v.spec.security.tls.server = ServerTlsPolicy::Tls {
+            identity: CertSource::Files {
+                cert_file: cert.to_str().unwrap().to_string(),
+                key_file: key.to_str().unwrap().to_string(),
+            },
+        };
+
+        let path = dir.join("device.toml");
+        let path = path.to_str().unwrap();
+        v.save_device_to(path);
+
+        let text = std::fs::read_to_string(path).expect("read saved device file");
+        assert!(text.contains("cert_file = \"cert.pem\""));
+        assert!(text.contains("key_file = \"key.pem\""));
+
+        let _: OcppDeviceConfig = Converter::load(path, FileType::Toml).expect("load");
+    }
+
+    /// NF-R-072 — a client `verify = "ca-files"` list under the save target's directory is
+    /// re-encoded relative to it.
+    #[test]
+    fn ut_write_device_relativizes_client_ca_files_under_target_dir() {
+        use crate::convert::{Converter, FileType};
+        use ferrowl_util::tls::{CertVerification, ClientTlsPolicy};
+
+        let mut v = client_view::<ferrowl_ocpp::V1_6>(OcppVersion::V1_6, 0);
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_ocpp_client_ca_files");
+        let ca = dir.join("ca.pem");
+        v.spec.security.tls.client = ClientTlsPolicy::Tls {
+            verification: CertVerification::CaFiles {
+                ca_files: vec![ca.to_str().unwrap().to_string()],
+            },
+        };
+
+        let path = dir.join("device.toml");
+        let path = path.to_str().unwrap();
+        v.save_device_to(path);
+
+        let text = std::fs::read_to_string(path).expect("read saved device file");
+        assert!(text.contains("ca_files = [\"ca.pem\"]"));
+
+        let _: OcppDeviceConfig = Converter::load(path, FileType::Toml).expect("load");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

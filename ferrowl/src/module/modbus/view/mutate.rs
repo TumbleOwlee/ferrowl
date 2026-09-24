@@ -43,6 +43,9 @@ impl ModbusModuleView {
         };
         let mut device = self.device.clone();
         device.version = Some(crate::config::VERSION.to_string());
+        let base = ferrowl_util::path::base_dir_of(path);
+        device.tls.server.relativize_paths(&base);
+        device.tls.client.relativize_paths(&base);
         match Converter::save(&device, path, ty) {
             Ok(()) => CommandResult::Handled(Some((
                 Level::Info,
@@ -465,6 +468,7 @@ impl ModbusModuleView {
 mod tests {
     use super::*;
     use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
+    use crate::convert::{Converter, FileType};
     use crate::module::modbus::dialog::EditedRegister;
     use ferrowl_codec::format::{BitField, Endian, Format, Resolution, WordOrder};
     use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder};
@@ -748,6 +752,140 @@ mod tests {
         let p = path.to_str().unwrap();
         assert!(msg(&v.save_device_to(p)).contains("Saved device config"));
         assert!(path.exists());
+    }
+
+    fn view_with_device(role: Role, device: DeviceConfig) -> ModbusModuleView {
+        let spec = spec(role);
+        let module = ModbusModule::new(&spec, &device);
+        ModbusModuleView::new(module, spec, device)
+    }
+
+    fn device_with_tls_files(cert_file: String, key_file: String) -> DeviceConfig {
+        use ferrowl_util::tls::{CertSource, ServerTlsPolicy};
+
+        let mut device = DeviceConfig::default();
+        device.tls.server = ServerTlsPolicy::Tls {
+            identity: CertSource::Files {
+                cert_file,
+                key_file,
+            },
+        };
+        device
+    }
+
+    /// NF-R-072 — a PEM path under the save target's directory is re-encoded relative to it.
+    #[test]
+    fn ut_write_device_relativizes_pem_under_target_dir() {
+        let dir = reserve_temp_dir("ferrowl_modbus_mutate_relativize");
+        let cert = dir.join("cert.pem");
+        let key = dir.join("key.pem");
+        let device = device_with_tls_files(
+            cert.to_str().unwrap().to_string(),
+            key.to_str().unwrap().to_string(),
+        );
+        let v = view_with_device(Role::Server, device);
+        let path = dir.join("mutate.toml");
+        let p = path.to_str().unwrap();
+        assert!(msg(&v.save_device_to(p)).contains("Saved device config"));
+
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains("cert_file = \"cert.pem\""));
+        assert!(written.contains("key_file = \"key.pem\""));
+    }
+
+    /// CS-E-028 — a PEM path outside the save target's directory stays absolute. Regression
+    /// guard: `relativize_under` already leaves a path unchanged when it isn't under `base`, so
+    /// this passes before the NF-R-072 `relativize_paths` calls land too; it pins that adding
+    /// them didn't turn this no-op case into a mutation.
+    #[test]
+    fn ut_write_device_leaves_pem_outside_target_absolute() {
+        let target_dir = reserve_temp_dir("ferrowl_modbus_mutate_target");
+        let pem_dir = reserve_temp_dir("ferrowl_modbus_mutate_pem");
+        let cert = pem_dir.join("cert.pem");
+        let key = pem_dir.join("key.pem");
+        let cert_str = cert.to_str().unwrap().to_string();
+        let key_str = key.to_str().unwrap().to_string();
+        let device = device_with_tls_files(cert_str.clone(), key_str.clone());
+        let v = view_with_device(Role::Server, device);
+        let path = target_dir.join("mutate.toml");
+        let p = path.to_str().unwrap();
+        assert!(msg(&v.save_device_to(p)).contains("Saved device config"));
+
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains(&format!("cert_file = \"{cert_str}\"")));
+        assert!(written.contains(&format!("key_file = \"{key_str}\"")));
+    }
+
+    /// NF-R-072, CS-R-033 — saving a device file in place round-trips a relative PEM path
+    /// unchanged: the file's own directory is the base, so a relative PEM resolved on load
+    /// comes back out relative on save.
+    #[test]
+    fn ut_write_device_in_place_round_trips_relative_pem() {
+        let dir = reserve_temp_dir("ferrowl_modbus_mutate_in_place");
+        let path = dir.join("device.toml");
+        let device = device_with_tls_files("cert.pem".to_string(), "key.pem".to_string());
+        Converter::save(&device, path.to_str().unwrap(), FileType::Toml).unwrap();
+
+        let resolved = crate::config::load_device(path.to_str().unwrap()).unwrap();
+
+        let v = view_with_device(Role::Server, resolved);
+        let p = path.to_str().unwrap();
+        assert!(msg(&v.save_device_to(p)).contains("Saved device config"));
+
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains("cert_file = \"cert.pem\""));
+        assert!(written.contains("key_file = \"key.pem\""));
+    }
+
+    /// NF-R-070 — TLS variants carrying no path (`source = "self-signed"`, `verify = "skip"`)
+    /// survive a save unchanged; `relativize_paths` is a no-op on them. Regression guard: these
+    /// variants hold no path already today, so this passes before the NF-R-072
+    /// `relativize_paths` calls land too — it pins that adding them didn't turn this no-op case
+    /// into a mutation.
+    #[test]
+    fn ut_write_device_pathless_tls_variants_unchanged() {
+        use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy, ServerTlsPolicy};
+
+        let mut device = DeviceConfig::default();
+        device.tls.server = ServerTlsPolicy::Tls {
+            identity: CertSource::SelfSigned {},
+        };
+        device.tls.client = ClientTlsPolicy::Tls {
+            verification: CertVerification::Skip {},
+        };
+        let before = device.clone();
+        let v = view_with_device(Role::Server, device);
+        let dir = reserve_temp_dir("ferrowl_modbus_mutate_pathless");
+        let path = dir.join("mutate.toml");
+        let p = path.to_str().unwrap();
+        assert!(msg(&v.save_device_to(p)).contains("Saved device config"));
+
+        let written: DeviceConfig = Converter::load(p, FileType::Toml).unwrap();
+        assert_eq!(written.tls.server, before.tls.server);
+        assert_eq!(written.tls.client, before.tls.client);
+    }
+
+    /// NF-R-072 — a client `verify = "ca-files"` list under the save target's directory is
+    /// re-encoded relative to it.
+    #[test]
+    fn ut_write_device_relativizes_client_ca_files_under_target_dir() {
+        use ferrowl_util::tls::{CertVerification, ClientTlsPolicy};
+
+        let dir = reserve_temp_dir("ferrowl_modbus_mutate_ca_files");
+        let ca = dir.join("ca.pem");
+        let mut device = DeviceConfig::default();
+        device.tls.client = ClientTlsPolicy::Tls {
+            verification: CertVerification::CaFiles {
+                ca_files: vec![ca.to_str().unwrap().to_string()],
+            },
+        };
+        let v = view_with_device(Role::Server, device);
+        let path = dir.join("mutate.toml");
+        let p = path.to_str().unwrap();
+        assert!(msg(&v.save_device_to(p)).contains("Saved device config"));
+
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains("ca_files = [\"ca.pem\"]"));
     }
 
     fn device_with_gap() -> DeviceConfig {
