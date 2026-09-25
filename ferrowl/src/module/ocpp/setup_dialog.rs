@@ -223,7 +223,7 @@ impl OcppSetupDialog {
             ))
             .username(input("Username", "cp001", &input_style, false))
             .password(input("Password", "", &input_style, false))
-            .tls(TlsSection::new())
+            .tls(TlsSection::new(None))
             .preserved_security(OcppSecurityConfig::default())
             .fs_cache(Default::default())
             .error(text(TextStyle {
@@ -247,6 +247,12 @@ impl OcppSetupDialog {
         extra_headers: &[ferrowl_ocpp::HeaderDef],
     ) -> Self {
         let mut d = Self::new();
+        let base = if device_path.trim().is_empty() {
+            None
+        } else {
+            Some(ferrowl_util::path::base_dir_of(device_path))
+        };
+        d.tls = TlsSection::new(base);
         d.extra_headers = extra_headers.to_vec();
         d.headers_table = header_table(headers::rows(&d.extra_headers));
         set_input(&mut d.name, &spec.name);
@@ -388,9 +394,12 @@ impl OcppSetupDialog {
         })
     }
 
-    /// The entered device-config path (trimmed; empty when none).
+    /// The entered device-config path, resolved against the working directory (NF-R-076); see
+    /// the Modbus dialog's own `config_path` doc comment for why a typed config path resolves
+    /// against CWD rather than any existing device-config's own directory.
     pub fn config_path(&self) -> String {
-        self.config_path.state.input().trim().to_string()
+        let cwd_base = ferrowl_util::path::base_dir_of("");
+        ferrowl_util::path::resolve_against(&cwd_base, self.config_path.state.input().trim())
     }
 
     /// The working extra-headers list edited via `headers_table` (OC-R-117/118/119, UI-R-059).
@@ -590,15 +599,17 @@ impl OcppSetupDialog {
     /// imperceptible next to typing latency.
     fn path_exists(&self, path: &str) -> bool {
         const TTL: std::time::Duration = std::time::Duration::from_secs(1);
+        let base = self.tls.base().unwrap_or(std::path::Path::new(""));
+        let resolved = ferrowl_util::path::resolve_against(base, path);
         let now = std::time::Instant::now();
         let mut cache = self.fs_cache.borrow_mut();
-        if let Some((hit, at)) = cache.get(path)
+        if let Some((hit, at)) = cache.get(&resolved)
             && now.duration_since(*at) < TTL
         {
             return *hit;
         }
-        let exists = ferrowl_util::path::expand(path).exists();
-        cache.insert(path.to_string(), (exists, now));
+        let exists = std::path::Path::new(&resolved).exists();
+        cache.insert(resolved, (exists, now));
         exists
     }
 
@@ -948,6 +959,62 @@ mod tests {
         let _ = std::fs::remove_file(home.join(&key_name));
 
         outcome.expect("a valid ~/-prefixed cert/key path must validate");
+    }
+
+    /// OC-R-149, NF-R-073 — `path_exists` checks a relative cert path against the dialog's own
+    /// device-config directory (via `edit`'s `device_path`), not the process working directory.
+    #[test]
+    fn ut_ocpp_dialog_path_exists_uses_device_dir() {
+        let dir = reserve_temp_dir("ferrowl_ocpp_setup_path_exists");
+        tmp_file(&dir, "cert.crt");
+        let device_path = dir.join("device.toml");
+        std::fs::write(&device_path, b"").unwrap();
+
+        let spec = OcppSpec {
+            name: "cs-1".into(),
+            version: OcppVersion::V1_6,
+            role: OcppRole::Client,
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".into(),
+            port: 9000,
+            path: String::new(),
+            timeout_ms: None,
+            reconnect: None,
+            security: Default::default(),
+        };
+        let d = OcppSetupDialog::edit(&spec, device_path.to_str().unwrap(), &[]);
+        assert!(d.path_exists("cert.crt"));
+        assert!(!d.path_exists("does-not-exist.crt"));
+    }
+
+    /// OC-R-149 — the existence cache is keyed on the *resolved* path, so two dialogs with
+    /// different bases checking the same typed filename don't share a stale hit.
+    #[test]
+    fn ut_ocpp_dialog_path_exists_cache_keyed_on_resolved_path() {
+        let dir_a = reserve_temp_dir("ferrowl_ocpp_setup_cache_a");
+        let dir_b = reserve_temp_dir("ferrowl_ocpp_setup_cache_b");
+        tmp_file(&dir_a, "cert.crt");
+        let device_a = dir_a.join("device.toml");
+        let device_b = dir_b.join("device.toml");
+        std::fs::write(&device_a, b"").unwrap();
+        std::fs::write(&device_b, b"").unwrap();
+
+        let spec = OcppSpec {
+            name: "cs-1".into(),
+            version: OcppVersion::V1_6,
+            role: OcppRole::Client,
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".into(),
+            port: 9000,
+            path: String::new(),
+            timeout_ms: None,
+            reconnect: None,
+            security: Default::default(),
+        };
+        let d_a = OcppSetupDialog::edit(&spec, device_a.to_str().unwrap(), &[]);
+        let d_b = OcppSetupDialog::edit(&spec, device_b.to_str().unwrap(), &[]);
+        assert!(d_a.path_exists("cert.crt"));
+        assert!(!d_b.path_exists("cert.crt"));
     }
 
     #[test]
@@ -2631,5 +2698,58 @@ mod tests {
             "expected exactly one focused field cursor, found {cursors:?}:\n{}",
             buffer_text(&buf)
         );
+    }
+
+    /// `config_path()` reads `std::env::current_dir()` itself, a second live read another test
+    /// in this binary can mutate between this test's own read and that one; sandwiching the call
+    /// between two reads and only asserting once they agree narrows the window a mutation has to
+    /// land in (see `app::commands::ut_write_default_target_base_is_process_cwd`'s doc comment
+    /// for the accepted residual gap).
+    fn assert_resolves_against_stable_cwd(rel: &str, action: impl Fn() -> String) {
+        for _ in 0..50 {
+            let before = std::env::current_dir().unwrap();
+            let actual = action();
+            let after = std::env::current_dir().unwrap();
+            if before == after {
+                assert_eq!(actual, before.join(rel).to_str().unwrap());
+                return;
+            }
+        }
+        panic!("process cwd never stabilized long enough to observe the resolved config path");
+    }
+
+    /// NF-R-076 — `config_path()` holds the CWD-resolved path, not the bare text typed into the
+    /// field.
+    #[test]
+    fn ut_config_path_accessor_resolves() {
+        let mut d = OcppSetupDialog::new();
+        set_suggest_input(&mut d.config_path, "device.toml");
+        assert_resolves_against_stable_cwd("device.toml", || d.config_path());
+    }
+
+    /// NF-R-076 — the `:edit` route holds the same CWD-resolved config path as a fresh dialog.
+    #[test]
+    fn ut_edit_confirm_holds_resolved_config_path() {
+        let spec = OcppSpec {
+            name: "cs-1".into(),
+            version: OcppVersion::V1_6,
+            role: OcppRole::Client,
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".into(),
+            port: 9000,
+            path: String::new(),
+            timeout_ms: None,
+            reconnect: None,
+            security: Default::default(),
+        };
+        let d = OcppSetupDialog::edit(&spec, "device.toml", &[]);
+        assert_resolves_against_stable_cwd("device.toml", || d.config_path());
+    }
+
+    /// CS-R-067 — a blank config path stays blank; it never becomes the working directory.
+    #[test]
+    fn ut_blank_config_path_stays_blank() {
+        let d = OcppSetupDialog::new();
+        assert_eq!(d.config_path(), "");
     }
 }
