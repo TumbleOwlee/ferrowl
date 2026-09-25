@@ -285,6 +285,12 @@ impl SetupDialog {
         );
         set_suggest_input(&mut config_path_field, config_path);
 
+        let base = if config_path.trim().is_empty() {
+            None
+        } else {
+            Some(ferrowl_util::path::base_dir_of(config_path))
+        };
+
         let mut dialog = SetupDialogBuilder::default()
             .name(name_field)
             .config_path(config_path_field)
@@ -347,7 +353,7 @@ impl SetupDialog {
                 vec![TlsLevel::Off, TlsLevel::Tls, TlsLevel::MutualTls],
                 &selection_style,
             ))
-            .tls(TlsSection::new())
+            .tls(TlsSection::new(base))
             .timeout(input("Timeout ms", "", &input_style, false))
             .delay(input("Delay ms", "", &input_style, false))
             .interval(input("Interval ms", "", &input_style, false))
@@ -494,12 +500,21 @@ impl SetupDialog {
         std::mem::take(&mut self.close_requested)
     }
 
+    /// The entered device-config path, resolved against the working directory (NF-R-076): a
+    /// typed config path is not itself a value read from a file, so it resolves against the
+    /// process CWD rather than any existing device-config's own directory. Blank stays blank
+    /// (CS-R-067) — a blank path is the quick-start case, not "use the working directory".
+    fn config_path(&self) -> String {
+        let cwd_base = ferrowl_util::path::base_dir_of("");
+        ferrowl_util::path::resolve_against(&cwd_base, self.config_path.state.input().trim())
+    }
+
     /// Validate everything and produce the outcome. In New mode the (optional) config path is
     /// loaded/validated here, so an invalid path is reported as an error.
     pub fn resolve(&self) -> Result<SetupOutcome, String> {
         let values = self.values()?;
         let device = if self.mode == DialogMode::New {
-            let path = self.config_path.state.input().trim().to_string();
+            let path = self.config_path();
             if path.is_empty() || !ferrowl_util::path::expand(&path).exists() {
                 Some((path, DeviceConfig::default()))
             } else {
@@ -518,7 +533,7 @@ impl SetupDialog {
         if name.is_empty() {
             return Err("Name is required.".into());
         }
-        let config_path = self.config_path.state.input().trim().to_string();
+        let config_path = self.config_path();
         if !config_path.is_empty() && FileType::from_path(&config_path).is_none() {
             return Err(format!(
                 "Unknown format for '{config_path}' (use .toml or .json)"
@@ -707,8 +722,13 @@ impl SetupDialog {
                 }
             }
             if level != TlsLevel::Off {
+                let base = self
+                    .tls
+                    .base()
+                    .map(std::path::Path::to_path_buf)
+                    .unwrap_or_default();
                 validate_tls(&cfg, role, level, &|p| {
-                    ferrowl_util::path::expand(p).exists()
+                    std::path::PathBuf::from(ferrowl_util::path::resolve_against(&base, p)).exists()
                 })?;
             }
             Some(cfg)
@@ -1751,6 +1771,42 @@ mod tests {
         assert_eq!(cfg.server, ferrowl_util::tls::ServerTlsPolicy::None {});
     }
 
+    /// NF-R-073 — `validate_tls`'s existence check (wired via `resolve()`) checks a relative
+    /// cert/key path against the dialog's own device-config directory, not the process working
+    /// directory.
+    #[test]
+    fn ut_modbus_dialog_validate_tls_uses_device_dir() {
+        let dir = reserve_temp_dir("ferrowl_modbus_setup_device_dir");
+        std::fs::write(dir.join("s.crt"), b"").unwrap();
+        std::fs::write(dir.join("s.key"), b"").unwrap();
+        let device_path = dir.join("device.toml");
+
+        let mut dialog = SetupDialog::edit(
+            "dev",
+            device_path.to_str().unwrap(),
+            ClientOrServer::Server,
+            &Endpoint::Tcp {
+                ip: "127.0.0.1".to_string(),
+                port: 0,
+            },
+            Timing {
+                timeout_ms: 0,
+                delay_ms: 0,
+                interval_ms: 0,
+                reconnect: true,
+            },
+            &ReadRanges::default(),
+            None,
+        );
+        dialog.tls_level.state.set_selection(TlsLevel::Tls.index());
+        set_suggest_input(&mut dialog.tls.cert_file, "s.crt");
+        set_suggest_input(&mut dialog.tls.key_file, "s.key");
+
+        dialog
+            .resolve()
+            .expect("a relative cert/key present under the device dir must validate");
+    }
+
     #[test]
     /// Resolving a TCP dialog at TLS level Tls (server, self-signed) builds a config
     /// with `self_signed` set and drops the mTLS-only client-CA field.
@@ -2320,5 +2376,77 @@ mod tests {
             edit_buf[corner].fg, focused,
             "edit dialog: prefilled, valid name paints the focused border"
         );
+    }
+
+    /// `config_path()`/`resolve()` read `std::env::current_dir()` themselves, a second live read
+    /// another test in this binary can mutate between this test's own read and that one;
+    /// sandwiching the call between two reads and only asserting once they agree narrows the
+    /// window a mutation has to land in (see `app::commands::
+    /// ut_write_default_target_base_is_process_cwd`'s doc comment for the accepted residual gap).
+    fn assert_resolves_against_stable_cwd(rel: &str, action: impl Fn() -> String) {
+        for _ in 0..50 {
+            let before = std::env::current_dir().unwrap();
+            let actual = action();
+            let after = std::env::current_dir().unwrap();
+            if before == after {
+                assert_eq!(actual, before.join(rel).to_str().unwrap());
+                return;
+            }
+        }
+        panic!("process cwd never stabilized long enough to observe the resolved config path");
+    }
+
+    /// NF-R-076 — `values()`'s `config_path` holds the CWD-resolved path, not the bare text
+    /// typed into the field.
+    #[test]
+    fn ut_values_holds_resolved_config_path() {
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        set_input(&mut dialog.name, "dev");
+        set_suggest_input(&mut dialog.config_path, "dev.toml");
+        assert_resolves_against_stable_cwd("dev.toml", || {
+            dialog.resolve().unwrap().values.config_path
+        });
+    }
+
+    /// NF-R-076 — the `:edit` route (`resolve()` in `DialogMode::Edit`) holds the same
+    /// CWD-resolved config path, not just the New-mode path above.
+    #[test]
+    fn ut_edit_confirm_holds_resolved_config_path() {
+        let endpoint = Endpoint::Tcp {
+            ip: "127.0.0.1".to_string(),
+            port: 502,
+        };
+        let mut dialog = SetupDialog::edit(
+            "dev",
+            "dev.toml",
+            ClientOrServer::Client,
+            &endpoint,
+            default_timing(),
+            &ReadRanges::default(),
+            None,
+        );
+        set_input(&mut dialog.name, "dev");
+        assert_resolves_against_stable_cwd("dev.toml", || {
+            dialog.resolve().unwrap().values.config_path
+        });
+    }
+
+    /// CS-R-067 — a blank config path stays blank; it never becomes the working directory.
+    #[test]
+    fn ut_blank_config_path_stays_blank() {
+        let mut dialog = SetupDialog::create(Timing {
+            timeout_ms: 0,
+            delay_ms: 0,
+            interval_ms: 0,
+            reconnect: true,
+        });
+        set_input(&mut dialog.name, "dev");
+        let outcome = dialog.resolve().unwrap();
+        assert_eq!(outcome.values.config_path, "");
     }
 }

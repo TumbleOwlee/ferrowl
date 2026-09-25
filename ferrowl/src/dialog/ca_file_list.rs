@@ -24,6 +24,7 @@ use ratatui::{
     widgets::{Block, StatefulWidget, Widget as UiWidget},
 };
 use std::fmt::Debug;
+use std::path::{Path, PathBuf};
 
 /// Extensions accepted for a client-CA file, shared between the path field's completion
 /// suggestions and `AddCaFileDialog::validate`'s own check.
@@ -34,10 +35,15 @@ pub struct AddCaFileDialog {
     pub path: Widget<SuggestInputState<FsPathProvider>, SuggestInput<NonEmpty, FsPathProvider>>,
     pub error: Widget<String, Text>,
     pub keybinds: Widget<String, Text>,
+    /// The directory a typed path is checked and stored against (NF-R-073): the owning module's
+    /// device-config file directory, or `None` to fall back to the working directory (a module
+    /// with no device file yet).
+    #[builder(default)]
+    pub base: Option<PathBuf>,
 }
 
 impl AddCaFileDialog {
-    pub fn new() -> Self {
+    pub fn new(base: Option<PathBuf>) -> Self {
         let input_style = InputFieldStyle::default();
         let error_style = TextStyle {
             general: ratatui::prelude::Style::default()
@@ -101,6 +107,7 @@ impl AddCaFileDialog {
                     .build()
                     .expect("all required builder fields are set"),
             })
+            .base(base)
             .build()
             .expect("all required builder fields are set")
     }
@@ -110,7 +117,8 @@ impl AddCaFileDialog {
             return Err(format!("Path: {e}"));
         }
         let path = self.path.state.input().trim();
-        let resolved = ferrowl_util::path::expand(path);
+        let base = self.base.as_deref().unwrap_or_else(|| Path::new(""));
+        let resolved = PathBuf::from(ferrowl_util::path::resolve_against(base, path));
         if !resolved.exists() {
             return Err(format!("Path: file not found: {path}"));
         }
@@ -134,10 +142,12 @@ impl AddCaFileDialog {
         Ok(())
     }
 
-    /// Validate and return the trimmed path, or the validation error.
+    /// Validate and return the resolved path (NF-R-075), or the validation error.
     pub fn apply(&self) -> Result<String, String> {
         self.validate()?;
-        Ok(self.path.state.input().trim().to_string())
+        let path = self.path.state.input().trim();
+        let base = self.base.as_deref().unwrap_or_else(|| Path::new(""));
+        Ok(ferrowl_util::path::resolve_against(base, path))
     }
 
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
@@ -214,7 +224,7 @@ impl AddCaFileDialog {
 
 impl Default for AddCaFileDialog {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 
@@ -245,7 +255,7 @@ mod tests {
         let name = format!("ferrowl_ca_file_list_test_tilde_{}.pem", std::process::id());
         std::fs::write(home.join(&name), b"").unwrap();
 
-        let mut d = AddCaFileDialog::new();
+        let mut d = AddCaFileDialog::new(None);
         type_into(&mut d.path.state, &format!("~/{name}"));
         let result = d.validate();
 
@@ -257,10 +267,10 @@ mod tests {
     /// and returned.
     #[test]
     fn ut_apply_requires_non_empty_path() {
-        assert!(AddCaFileDialog::new().apply().is_err());
+        assert!(AddCaFileDialog::new(None).apply().is_err());
         let dir = reserve_temp_dir("ferrowl_ca_file_list");
         let ca = tmp_file(&dir, "nonempty.pem");
-        let mut d = AddCaFileDialog::new();
+        let mut d = AddCaFileDialog::new(None);
         type_into(&mut d.path.state, &format!("  {ca}  "));
         // The input field itself doesn't trim as typed; `apply` trims on read.
         assert_eq!(d.apply().unwrap(), ca.trim());
@@ -270,7 +280,7 @@ mod tests {
     /// confirmed into the client-CA list.
     #[test]
     fn ut_apply_rejects_nonexistent_path() {
-        let mut d = AddCaFileDialog::new();
+        let mut d = AddCaFileDialog::new(None);
         type_into(&mut d.path.state, "/nonexistent/ca-does-not-exist.pem");
         let err = d.apply().expect_err("nonexistent path must not apply");
         assert!(err.contains("not found"), "unexpected error: {err}");
@@ -280,7 +290,7 @@ mod tests {
     /// exists on disk.
     #[test]
     fn ut_apply_rejects_directory() {
-        let mut d = AddCaFileDialog::new();
+        let mut d = AddCaFileDialog::new(None);
         let dir = reserve_temp_dir("ferrowl_ca_file_list_dir");
         type_into(&mut d.path.state, &dir.path().to_string_lossy());
         let err = d.apply().expect_err("a directory must not apply");
@@ -291,7 +301,7 @@ mod tests {
     /// it exists on disk and isn't a directory.
     #[test]
     fn ut_apply_rejects_wrong_extension() {
-        let mut d = AddCaFileDialog::new();
+        let mut d = AddCaFileDialog::new(None);
         let dir = reserve_temp_dir("ferrowl_ca_file_list");
         let bad = tmp_file(&dir, "ca.txt");
         type_into(&mut d.path.state, &bad);
@@ -303,18 +313,81 @@ mod tests {
     /// own completion-suggestion matching.
     #[test]
     fn ut_apply_accepts_uppercase_extension() {
-        let mut d = AddCaFileDialog::new();
+        let mut d = AddCaFileDialog::new(None);
         let dir = reserve_temp_dir("ferrowl_ca_file_list");
         let ca = tmp_file(&dir, "uppercase.PEM");
         type_into(&mut d.path.state, &ca);
         assert_eq!(d.apply().unwrap(), ca);
     }
 
+    /// MB-R-187, NF-R-073 — a relative path that exists under the dialog's `base` (the owning
+    /// module's device-config directory) validates and is accepted.
+    #[test]
+    fn ut_ca_add_accepts_relative_path_under_device_dir() {
+        let dir = reserve_temp_dir("ferrowl_ca_file_list_base");
+        tmp_file(&dir, "ca.pem");
+        let mut d = AddCaFileDialog::new(Some(dir.path().to_path_buf()));
+        type_into(&mut d.path.state, "ca.pem");
+        assert!(d.apply().is_ok());
+    }
+
+    /// MB-R-187, NF-R-073 — a bare filename that exists in the working directory (not under
+    /// `base`) is rejected: the dialog checks against the device dir, not the CWD. `Cargo.toml`
+    /// is real in the test binary's CWD, so a buggy implementation that fell back to checking
+    /// the CWD instead of `base` would find it and fail on the extension check instead — a
+    /// different error than the "not found" this test asserts.
+    #[test]
+    fn ut_ca_add_rejects_relative_path_absent_from_device_dir() {
+        let dir = reserve_temp_dir("ferrowl_ca_file_list_base_absent");
+        let mut d = AddCaFileDialog::new(Some(dir.path().to_path_buf()));
+        type_into(&mut d.path.state, "Cargo.toml");
+        let err = d.apply().expect_err("path absent from base must not apply");
+        assert!(err.contains("not found"), "unexpected error: {err}");
+    }
+
+    /// NF-R-073 — `base: None` falls back to checking the working directory, the process's own
+    /// CWD. A read-only probe: `Cargo.toml` is real in the test binary's CWD, so finding it (and
+    /// failing only on its extension, not "not found") proves the check ran against the CWD.
+    /// `type_into`/`apply` read `std::env::current_dir()` via `expand`, a second live read
+    /// another test in this binary can mutate between this test's own read and that one;
+    /// sandwiching the call between two reads and only asserting once they agree narrows the
+    /// window a mutation has to land in (see `app::commands::
+    /// ut_write_default_target_base_is_process_cwd`'s doc comment for the accepted residual gap).
+    #[test]
+    fn ut_ca_add_with_no_base_checks_cwd() {
+        for _ in 0..50 {
+            let before = std::env::current_dir().unwrap();
+            let mut d = AddCaFileDialog::new(None);
+            type_into(&mut d.path.state, "Cargo.toml");
+            let result = d.apply();
+            let after = std::env::current_dir().unwrap();
+            if before != after {
+                continue;
+            }
+            let err = result.expect_err("Cargo.toml has no CA extension");
+            assert!(err.contains("extension"), "unexpected error: {err}");
+            return;
+        }
+        panic!("process cwd never stabilized long enough to observe the CWD fallback");
+    }
+
+    /// NF-R-075 — the confirmed entry is the resolved path (base-joined), not the bare filename
+    /// the user typed.
+    #[test]
+    fn ut_ca_add_stores_resolved_path() {
+        let dir = reserve_temp_dir("ferrowl_ca_file_list_resolved");
+        tmp_file(&dir, "ca.pem");
+        let mut d = AddCaFileDialog::new(Some(dir.path().to_path_buf()));
+        type_into(&mut d.path.state, "ca.pem");
+        let resolved = d.apply().unwrap();
+        assert_eq!(resolved, dir.join("ca.pem").to_str().unwrap());
+    }
+
     /// MB-R-136, OC-R-149 — the add-CA sub-dialog renders its title and an inline error while
     /// empty.
     #[test]
     fn ut_render_shows_title_and_inline_error() {
-        let mut d = AddCaFileDialog::new();
+        let mut d = AddCaFileDialog::new(None);
         let area = Rect::new(0, 0, 80, 24);
         let mut buf = Buffer::empty(area);
         d.render(area, &mut buf);

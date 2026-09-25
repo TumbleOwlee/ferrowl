@@ -328,13 +328,20 @@ impl MonitorSetupDialog {
         std::mem::take(&mut self.close_requested)
     }
 
+    /// The entered device-config path, resolved against the working directory (NF-R-076); see
+    /// `crate::module::modbus::setup_dialog::SetupDialog::config_path`'s doc comment for why.
+    fn config_path(&self) -> String {
+        let cwd_base = ferrowl_util::path::base_dir_of("");
+        ferrowl_util::path::resolve_against(&cwd_base, self.config_path.state.input().trim())
+    }
+
     /// Resolve the dialog's current field values, validating the transport (MB-R-140,
     /// belt-and-suspenders — the picker already structurally excludes every non-Rtu/Ascii
     /// transport).
     pub fn resolve(&self) -> Result<MonitorSetupOutcome, String> {
         let values = self.values()?;
         let device = if self.mode == DialogMode::New {
-            let path = self.config_path.state.input().trim().to_string();
+            let path = self.config_path();
             if path.is_empty() || !ferrowl_util::path::expand(&path).exists() {
                 Some((path, MonitorDeviceConfig::default()))
             } else {
@@ -353,7 +360,7 @@ impl MonitorSetupDialog {
         if name.is_empty() {
             return Err("Name is required.".into());
         }
-        let config_path = self.config_path.state.input().trim().to_string();
+        let config_path = self.config_path();
         if !config_path.is_empty() && FileType::from_path(&config_path).is_none() {
             return Err(format!(
                 "Unknown format for '{config_path}' (use .toml or .json)"
@@ -886,5 +893,68 @@ mod tests {
         let device = MonitorDeviceConfig::default();
         let dialog = MonitorSetupDialog::edit("mon1", &spec, &device);
         assert_eq!(dialog.transport.state.get_value(), Transport::Rtu);
+    }
+
+    /// `config_path()`/`resolve()` read `std::env::current_dir()` themselves, a second live read
+    /// another test in this binary can mutate between this test's own read and that one;
+    /// sandwiching the call between two reads and only asserting once they agree narrows the
+    /// window a mutation has to land in (see `app::commands::
+    /// ut_write_default_target_base_is_process_cwd`'s doc comment for the accepted residual gap).
+    fn assert_resolves_against_stable_cwd(rel: &str, action: impl Fn() -> String) {
+        for _ in 0..50 {
+            let before = std::env::current_dir().unwrap();
+            let actual = action();
+            let after = std::env::current_dir().unwrap();
+            if before == after {
+                assert_eq!(actual, before.join(rel).to_str().unwrap());
+                return;
+            }
+        }
+        panic!("process cwd never stabilized long enough to observe the resolved config path");
+    }
+
+    /// NF-R-076 — `values()`'s `config_path` holds the CWD-resolved path, not the bare text
+    /// typed into the field.
+    #[test]
+    fn ut_values_holds_resolved_config_path() {
+        let mut dialog = MonitorSetupDialog::create();
+        set_input(&mut dialog.name, "mon1");
+        set_suggest_input(&mut dialog.path, "/dev/ttyS0");
+        set_suggest_input(&mut dialog.config_path, "dev.toml");
+        assert_resolves_against_stable_cwd("dev.toml", || {
+            dialog.resolve().unwrap().values.config_path
+        });
+    }
+
+    /// NF-R-076 — the `:edit` route holds the same CWD-resolved config path.
+    #[test]
+    fn ut_edit_confirm_holds_resolved_config_path() {
+        let spec = ModuleSpec {
+            name: "mon1".to_string(),
+            device: "dev.toml".to_string(),
+            role: crate::config::Role::Monitor,
+            endpoint: Endpoint::Ascii {
+                path: "/dev/ttyS0".to_string(),
+                baud_rate: 9600,
+                parity: None,
+                data_bits: Some(8),
+                stop_bits: Some(1),
+            },
+        };
+        let device = MonitorDeviceConfig::default();
+        let dialog = MonitorSetupDialog::edit("mon1", &spec, &device);
+        assert_resolves_against_stable_cwd("dev.toml", || {
+            dialog.resolve().unwrap().values.config_path
+        });
+    }
+
+    /// CS-R-067 — a blank config path stays blank; it never becomes the working directory.
+    #[test]
+    fn ut_blank_config_path_stays_blank() {
+        let mut dialog = MonitorSetupDialog::create();
+        set_input(&mut dialog.name, "mon1");
+        set_suggest_input(&mut dialog.path, "/dev/ttyS0");
+        let outcome = dialog.resolve().unwrap();
+        assert_eq!(outcome.values.config_path, "");
     }
 }

@@ -35,6 +35,7 @@ use crate::dialog::ca_file_list::AddCaFileDialog;
 use crate::dialog::path_suggest::FsPathProvider;
 use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy, ServerTlsPolicy};
 use std::fmt::Debug;
+use std::path::PathBuf;
 
 /// TLS/mTLS level, collapsed from either dialog's own richer level type (Modbus's and OCPP's
 /// `TlsLevel` enums are both distinct types of the same name, one per dialog's private `tls`/
@@ -204,12 +205,18 @@ pub struct TlsSection {
     /// The effective TLS/mTLS level this section is currently gating for, set fresh by `sync`.
     #[builder(default)]
     level: EffectiveTlsLevel,
+    /// The directory this section's cert/key/CA paths are checked and stored against
+    /// (NF-R-073): the owning module's device-config file directory, or `None` to fall back to
+    /// the working directory (a module with no device file yet). Forwarded to `ca_add_dialog`
+    /// and used to rebase every path field in [`TlsSection::extract`] (NF-R-075).
+    #[builder(default)]
+    base: Option<PathBuf>,
 }
 
 impl TlsSection {
     /// Fully-baked constructor: every shared field's title/placeholder/provider is identical
     /// between Modbus's and OCPP's dialogs, so no per-caller parameterization is needed.
-    pub fn new() -> Self {
+    pub fn new(base: Option<PathBuf>) -> Self {
         let selection_style = SelectionStyle::default();
         let input_style = InputFieldStyle::default();
 
@@ -271,6 +278,7 @@ impl TlsSection {
             ))
             .focus(TlsSectionFocus::SelfSigned)
             .view_focused(false)
+            .base(base)
             .build()
             .expect("all required builder fields are set")
     }
@@ -290,6 +298,13 @@ impl TlsSection {
     /// client-CA ADD/DEL buttons and to guard against leaving focus on a hidden DEL button.
     pub fn focus(&self) -> TlsSectionFocus {
         self.focus
+    }
+
+    /// The directory this section's cert/key/CA paths are checked and stored against
+    /// (NF-R-073), for an embedding dialog's own path-existence checks that don't go through
+    /// `extract`/`ca_add_dialog` (e.g. `validate_tls`'s file-existence pass).
+    pub fn base(&self) -> Option<&std::path::Path> {
+        self.base.as_deref()
     }
 
     /// Server: self-signed server-certificate toggle (TLS level or above). Client, at mTLS
@@ -482,11 +497,21 @@ impl TlsSection {
     /// Read every TLS-proper field's raw text/toggle state, uniformly regardless of role — the
     /// caller (each outer dialog's own `build_config`) selects the right half.
     pub fn extract(&self) -> TlsSectionInputs {
+        let base = self.base.as_deref().unwrap_or(std::path::Path::new(""));
         TlsSectionInputs {
-            cert_file: self.cert_file.state.input().to_string(),
-            key_file: self.key_file.state.input().to_string(),
-            client_cert_file: self.client_cert_file.state.input().to_string(),
-            client_key_file: self.client_key_file.state.input().to_string(),
+            cert_file: ferrowl_util::path::resolve_against(
+                base,
+                self.cert_file.state.input().trim(),
+            ),
+            key_file: ferrowl_util::path::resolve_against(base, self.key_file.state.input().trim()),
+            client_cert_file: ferrowl_util::path::resolve_against(
+                base,
+                self.client_cert_file.state.input().trim(),
+            ),
+            client_key_file: ferrowl_util::path::resolve_against(
+                base,
+                self.client_key_file.state.input().trim(),
+            ),
             ca_files: self.ca_files.state.values().to_vec(),
             self_signed: self.self_signed.state.get_value() == SelfSignedChoice::On,
             skip_verify: self.skip_verify.state.get_value() == SkipVerifyChoice::On,
@@ -560,7 +585,7 @@ impl TlsSection {
         if modifiers == KeyModifiers::NONE && matches!(code, KeyCode::Enter | KeyCode::Char(' ')) {
             match self.focus {
                 TlsSectionFocus::CaAddButton => {
-                    self.ca_add_dialog = Some(AddCaFileDialog::new());
+                    self.ca_add_dialog = Some(AddCaFileDialog::new(self.base.clone()));
                     return EventResult::Consumed;
                 }
                 TlsSectionFocus::CaDeleteButton => {
@@ -577,7 +602,7 @@ impl TlsSection {
 
 impl Default for TlsSection {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 
@@ -762,7 +787,7 @@ mod tests {
     /// UI-R-049 — `sync` updates the fresh role/level `TlsSection`'s own gates read, rather than
     /// caching a stale copy from construction time.
     fn ut_sync_updates_role_and_level_predicates() {
-        let mut section = TlsSection::new();
+        let mut section = TlsSection::new(None);
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::Off);
         assert!(!section.show_server_cert());
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::Tls);
@@ -773,7 +798,7 @@ mod tests {
     /// MB-R-139 — the client-role Self-Signed toggle row is shown only at `MutualTls`, hidden at
     /// `Tls` and `Off`.
     fn ut_client_self_signed_row_shown_only_at_mutual_tls() {
-        let mut section = TlsSection::new();
+        let mut section = TlsSection::new(None);
         section.sync(ClientOrServer::Client, EffectiveTlsLevel::Off);
         assert!(!section.show_self_signed_row());
         section.sync(ClientOrServer::Client, EffectiveTlsLevel::Tls);
@@ -789,7 +814,7 @@ mod tests {
     /// is each dialog's own `TlsLevel::build_config`'s job (see their own tests);
     /// this layer only extracts the raw toggle state uniformly.
     fn ut_extract_self_signed_flag_set_regardless_of_client_ca_list() {
-        let mut section = TlsSection::new();
+        let mut section = TlsSection::new(None);
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::Tls);
         section.self_signed.state.set_selection(1); // On
         *section.ca_files.state.values_mut() = vec!["client_ca.pem".to_string()];
@@ -801,7 +826,7 @@ mod tests {
     /// MB-R-135, OC-R-111, OC-R-144 — toggling Self-Signed On excludes stale cert_file/key_file text from
     /// the extracted inputs, even though the widgets' stored text is untouched.
     fn ut_extract_self_signed_excludes_stale_cert_key_text() {
-        let mut section = TlsSection::new();
+        let mut section = TlsSection::new(None);
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::Tls);
         set_suggest_input(&mut section.cert_file, "s.crt");
         set_suggest_input(&mut section.key_file, "s.key");
@@ -822,7 +847,7 @@ mod tests {
     /// list/toggle state is preserved on the widgets (only excluded downstream, by
     /// each dialog's own `TlsLevel::build_config`).
     fn ut_client_skip_verify_hides_root_store_and_list() {
-        let mut section = TlsSection::new();
+        let mut section = TlsSection::new(None);
         section.sync(ClientOrServer::Client, EffectiveTlsLevel::Tls);
         assert!(section.show_root_store_row());
         assert!(section.show_peer_verify_row());
@@ -843,7 +868,7 @@ mod tests {
     /// MB-R-186, OC-R-146 — toggling Skip-Verify back Off restores the previously entered Root Store
     /// selection and CA list, since hiding never clears them.
     fn ut_toggle_skip_verify_back_off_restores_list_and_toggle() {
-        let mut section = TlsSection::new();
+        let mut section = TlsSection::new(None);
         section.sync(ClientOrServer::Client, EffectiveTlsLevel::Tls);
         *section.ca_files.state.values_mut() = vec!["ca1.pem".to_string(), "ca2.pem".to_string()];
         section.root_store.state.set_selection(1); // Off
@@ -867,7 +892,7 @@ mod tests {
         let cert = tmp_file(&dir, "s.crt");
         let key = tmp_file(&dir, "s.key");
 
-        let mut section = TlsSection::new();
+        let mut section = TlsSection::new(None);
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::Tls);
         set_suggest_input(&mut section.cert_file, &cert);
         set_suggest_input(&mut section.key_file, &key);
@@ -880,6 +905,59 @@ mod tests {
         assert_eq!(extracted.key_file, key);
     }
 
+    /// NF-R-075 — `extract` rebases a relative server `cert_file`/`key_file` against the
+    /// section's `base`.
+    #[test]
+    fn ut_tls_section_extract_resolves_server_cert_and_key() {
+        let dir = reserve_temp_dir("ferrowl_tls_section_resolve_server");
+        let mut section = TlsSection::new(Some(dir.path().to_path_buf()));
+        section.sync(ClientOrServer::Server, EffectiveTlsLevel::Tls);
+        set_suggest_input(&mut section.cert_file, "s.crt");
+        set_suggest_input(&mut section.key_file, "s.key");
+
+        let extracted = section.extract();
+        assert_eq!(extracted.cert_file, dir.join("s.crt").to_str().unwrap());
+        assert_eq!(extracted.key_file, dir.join("s.key").to_str().unwrap());
+    }
+
+    /// NF-R-075 — `extract` rebases a relative client mTLS identity pair
+    /// (`client_cert_file`/`client_key_file`) against the section's `base` too, not just the
+    /// server pair.
+    #[test]
+    fn ut_tls_section_extract_resolves_client_cert_and_key() {
+        let dir = reserve_temp_dir("ferrowl_tls_section_resolve_client");
+        let mut section = TlsSection::new(Some(dir.path().to_path_buf()));
+        section.sync(ClientOrServer::Client, EffectiveTlsLevel::MutualTls);
+        set_suggest_input(&mut section.client_cert_file, "c.crt");
+        set_suggest_input(&mut section.client_key_file, "c.key");
+
+        let extracted = section.extract();
+        assert_eq!(
+            extracted.client_cert_file,
+            dir.join("c.crt").to_str().unwrap()
+        );
+        assert_eq!(
+            extracted.client_key_file,
+            dir.join("c.key").to_str().unwrap()
+        );
+    }
+
+    /// NF-R-075 — `extract` trims surrounding whitespace before resolving, so a leading/trailing
+    /// space typed into the field doesn't get baked into the resolved path as a literal
+    /// character.
+    #[test]
+    fn ut_tls_section_extract_trims_before_resolving() {
+        let dir = reserve_temp_dir("ferrowl_tls_section_resolve_trim");
+        let mut section = TlsSection::new(Some(dir.path().to_path_buf()));
+        section.sync(ClientOrServer::Server, EffectiveTlsLevel::Tls);
+        set_suggest_input(&mut section.cert_file, " s.crt ");
+        set_suggest_input(&mut section.key_file, " s.key ");
+
+        let extracted = section.extract();
+        assert_eq!(extracted.cert_file, dir.join("s.crt").to_str().unwrap());
+        assert_eq!(extracted.key_file, dir.join("s.key").to_str().unwrap());
+    }
+
     #[test]
     /// MB-R-104..112 — a `~/...` path validates the same way TLS material loading will.
     fn ut_extract_tls_cert_key_tilde_paths_validate() {
@@ -889,7 +967,7 @@ mod tests {
         std::fs::write(home.join(&cert_name), b"").unwrap();
         std::fs::write(home.join(&key_name), b"").unwrap();
 
-        let mut section = TlsSection::new();
+        let mut section = TlsSection::new(None);
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::Tls);
         set_suggest_input(&mut section.cert_file, &format!("~/{cert_name}"));
         set_suggest_input(&mut section.key_file, &format!("~/{key_name}"));
@@ -920,7 +998,7 @@ mod tests {
                 ca_files: vec!["ca1.pem".to_string(), "ca2.pem".to_string()],
             },
         };
-        let mut section = TlsSection::new();
+        let mut section = TlsSection::new(None);
         section.prefill(ClientOrServer::Server, Some(&server), None);
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::MutualTls);
 
@@ -944,7 +1022,7 @@ mod tests {
             },
             identity: CertSource::SelfSigned {},
         };
-        let mut section = TlsSection::new();
+        let mut section = TlsSection::new(None);
         section.prefill(ClientOrServer::Client, None, Some(&client));
         section.sync(ClientOrServer::Client, EffectiveTlsLevel::MutualTls);
 
@@ -958,7 +1036,7 @@ mod tests {
     /// UI-R-024 — mTLS row order, server role: Self-Signed first, then the server's own
     /// cert/key pair, then Skip Verify, then the client-CA list.
     fn ut_mtls_row_order_server() {
-        let mut section = TlsSection::new();
+        let mut section = TlsSection::new(None);
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::MutualTls);
         let area = Rect::new(0, 0, 80, 24);
         let mut buf = Buffer::empty(area);
@@ -976,7 +1054,7 @@ mod tests {
     /// UI-R-024 — mTLS row order, client role: Self-Signed first, then the client's own
     /// cert/key pair, then Skip Verify (folded with Root Store), then the shared CA list.
     fn ut_mtls_row_order_client() {
-        let mut section = TlsSection::new();
+        let mut section = TlsSection::new(None);
         section.sync(ClientOrServer::Client, EffectiveTlsLevel::MutualTls);
         let area = Rect::new(0, 0, 80, 24);
         let mut buf = Buffer::empty(area);
@@ -1003,7 +1081,7 @@ mod tests {
         let dir = reserve_temp_dir("ferrowl_tls_section");
         let ca1 = tmp_file(&dir, "mca1.pem");
         let ca2 = tmp_file(&dir, "mca2.pem");
-        let mut section = TlsSection::new();
+        let mut section = TlsSection::new(None);
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::MutualTls);
         section.self_signed.state.set_selection(1); // server cert self-signed, no file needed
 
@@ -1092,7 +1170,7 @@ mod tests {
     fn ut_ca_list_shared_by_both_roles_add_remove_edit() {
         let dir = reserve_temp_dir("ferrowl_tls_section");
         let ca = tmp_file(&dir, "cca1.pem");
-        let mut section = TlsSection::new();
+        let mut section = TlsSection::new(None);
         section.sync(ClientOrServer::Client, EffectiveTlsLevel::Tls);
         section.root_store.state.set_selection(1); // Off, so the list is required/shown
 
@@ -1113,7 +1191,7 @@ mod tests {
     /// appended to the list.
     #[test]
     fn ut_ca_add_rejects_missing_or_wrong_extension() {
-        let mut section = TlsSection::new();
+        let mut section = TlsSection::new(None);
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::MutualTls);
         section.self_signed.state.set_selection(1);
 
@@ -1164,7 +1242,7 @@ mod tests {
     /// a second Esc (popup now closed) closes the sub-dialog itself.
     #[test]
     fn ut_ca_add_dialog_esc_dismisses_popup_before_sub_dialog() {
-        let mut section = TlsSection::new();
+        let mut section = TlsSection::new(None);
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::MutualTls);
         section.self_signed.state.set_selection(1);
 
@@ -1208,7 +1286,7 @@ mod tests {
     /// unfocusable DEL button and onto ADD, so a subsequent Tab still traverses correctly.
     #[test]
     fn ut_delete_last_client_ca_falls_back_focus_to_add_button() {
-        let mut section = TlsSection::new();
+        let mut section = TlsSection::new(None);
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::MutualTls);
         section
             .ca_files
@@ -1231,7 +1309,7 @@ mod tests {
     /// rendered at all (nothing eligible to delete), so ADD gets the row's full width.
     #[test]
     fn ut_client_ca_empty_hides_delete_button() {
-        let mut section = TlsSection::new();
+        let mut section = TlsSection::new(None);
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::MutualTls);
         assert!(section.ca_files.state.values().is_empty());
         let area = Rect::new(0, 0, 80, 24);
@@ -1259,7 +1337,7 @@ mod tests {
     /// 2-row box.
     #[test]
     fn ut_client_ca_empty_list_box_keeps_full_row_height() {
-        let mut section = TlsSection::new();
+        let mut section = TlsSection::new(None);
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::MutualTls);
         assert!(section.ca_files.state.values().is_empty());
         let area = Rect::new(0, 0, 80, 3);
@@ -1283,7 +1361,7 @@ mod tests {
     /// regardless of how many entries it holds; more entries scroll/clip, never grow the box.
     #[test]
     fn ut_client_ca_row_height_fixed_regardless_of_entry_count() {
-        let mut section = TlsSection::new();
+        let mut section = TlsSection::new(None);
         section.sync(ClientOrServer::Server, EffectiveTlsLevel::MutualTls);
         section
             .ca_files

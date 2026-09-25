@@ -3449,25 +3449,47 @@ mod tests {
         assert_eq!(v.spec.name, "renamed");
     }
 
-    /// `confirm_edit` carries the typed device-config path through to `spec.device`.
+    /// NF-R-076 — `confirm_edit` holds the device-config path resolved against the working
+    /// directory, not the typed string.
     #[tokio::test]
     async fn ut_edit_confirm_applies_device_path_field() {
-        let mut v = view();
-        v.handle_command("edit").await;
-        let MonitorOverlay::EditSetup(dialog) = &mut v.overlay else {
-            panic!(":edit did not open the setup dialog");
-        };
-        crate::dialog::widgets::set_suggest_input(&mut dialog.config_path, "new-device.toml");
-        v.confirm_edit();
-
-        for _ in 0..200 {
-            if v.pending_setup.is_none() && !v.lifecycle_pending() {
-                break;
+        // `confirm_edit` reads `std::env::current_dir()` itself, a second live read another test
+        // in this binary can mutate between this test's own read and that one; sandwiching the
+        // call between two reads and retrying the whole attempt unless they agree narrows the
+        // window a mutation has to land in (see `app::commands::
+        // ut_write_default_target_base_is_process_cwd`'s doc comment for the accepted residual
+        // gap).
+        for _ in 0..50 {
+            let mut v = view();
+            v.handle_command("edit").await;
+            let MonitorOverlay::EditSetup(dialog) = &mut v.overlay else {
+                panic!(":edit did not open the setup dialog");
+            };
+            crate::dialog::widgets::set_suggest_input(&mut dialog.config_path, "new-device.toml");
+            let before = std::env::current_dir().unwrap();
+            v.confirm_edit();
+            let after = std::env::current_dir().unwrap();
+            if before != after {
+                continue;
             }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+
+            for _ in 0..200 {
+                if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                    break;
+                }
+                v.refresh().await;
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+            assert_eq!(
+                v.spec.device,
+                before
+                    .join("new-device.toml")
+                    .to_string_lossy()
+                    .into_owned()
+            );
+            return;
         }
-        assert_eq!(v.spec.device, "new-device.toml");
+        panic!("process cwd never stabilized long enough to observe the resolved device path");
     }
 
     /// UI-R-026, UI-R-080 — `Enter` while the config-path field's completion popup is open must
