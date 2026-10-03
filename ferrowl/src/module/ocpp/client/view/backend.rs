@@ -1497,4 +1497,178 @@ mod tests {
             ],
         );
     }
+
+    fn scripted_client_view<V: ClientVersion>(
+        version: OcppVersion,
+        port: u16,
+        code: &str,
+    ) -> ClientView<V> {
+        let mut v = client_view::<V>(version, port);
+        v.device.scripts = vec![crate::config::script::ScriptDef {
+            name: "count".into(),
+            code: code.into(),
+            enabled: true,
+        }];
+        v.device.script_interval = 0.05;
+        v.start_sim();
+        v
+    }
+
+    fn model_of<V: ClientVersion>(v: &ClientView<V>) -> Option<u32> {
+        match with_state(&v.state, |s| ClientFields::cs_get(s, "Model")) {
+            Some(ferrowl_lua::module::ValueType::String(s)) => s.parse().ok(),
+            _ => None,
+        }
+    }
+
+    async fn script_lines(log: &crate::module::view::SharedLog) -> Vec<String> {
+        log.read()
+            .await
+            .peek_n(crate::app::LOG_SIZE)
+            .into_iter()
+            .map(|(_, _, l)| l)
+            .collect()
+    }
+
+    /// SC-R-072, SC-R-073, SC-R-075 — an in-place edit leaves the running client sim, its globals
+    /// and its `C_OCPP` field access untouched.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_in_place_edit_keeps_client_sim_and_fields() {
+        let guard = reserve_tcp_port();
+        let port = guard.port();
+        let _listener = guard.into_listener();
+        let mut v = scripted_client_view::<ferrowl_ocpp::V1_6>(
+            OcppVersion::V1_6,
+            port,
+            r#"n = (n or 0) + 1; C_OCPP:Set("Model", tostring(n)); C_OCPP:Get("Vendor")"#,
+        );
+        for _ in 0..300 {
+            if model_of(&v).is_some_and(|m| m >= 3) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let before = model_of(&v).unwrap_or(0);
+        assert!(before >= 3, "counter never reached 3");
+
+        let mut edited = v.spec.clone();
+        edited.timeout_ms = Some(12_345);
+        v.deferred.setup = Some((edited, String::new(), Vec::new()));
+        v.refresh().await;
+        assert_eq!(v.spec.timeout_ms, Some(12_345), "edit applied in place");
+
+        let mut max = before;
+        for _ in 0..30 {
+            let m = model_of(&v).unwrap_or(0);
+            assert!(
+                m >= before,
+                "counter dropped to {m} (before {before}): sim restarted"
+            );
+            max = max.max(m);
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(max > before, "counter stopped advancing");
+        assert!(
+            !script_lines(&v.script_log)
+                .await
+                .iter()
+                .any(|l| l.contains("[lua]")),
+            "field access errored after the edit"
+        );
+    }
+
+    /// SC-R-074, SC-R-072 — a connector added through the client view's input is listed and
+    /// reachable by the already-running sim on its next call.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_connector_added_live_reaches_running_sim() {
+        use crate::module::ocpp::client::lua_sim::ClientFields;
+        let guard = reserve_tcp_port();
+        let port = guard.port();
+        let _listener = guard.into_listener();
+        let probe = client_view::<ferrowl_ocpp::V1_6>(OcppVersion::V1_6, port);
+        let k = with_state(&probe.state, |s| s.conns().len());
+        let mut v = scripted_client_view::<ferrowl_ocpp::V1_6>(
+            OcppVersion::V1_6,
+            port,
+            &format!(
+                r#"if #C_OCPP:GetConnectors() > {k} then C_OCPP:Connector(5):Set("Power", 11) end"#
+            ),
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        v.conn_input.state.set_input("5".into());
+        v.add_connector();
+        let mut got = None;
+        for _ in 0..300 {
+            got = with_state(&v.state, |s| s.conn_get(5, "Power"));
+            if matches!(got, Some(ferrowl_lua::module::ValueType::Float(f)) if f == 11.0) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(matches!(got, Some(ferrowl_lua::module::ValueType::Float(f)) if f == 11.0));
+    }
+
+    /// SC-R-076, SC-E-044 — a version change stops the old sim and starts a fresh one (globals
+    /// reset) on the replacement view.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_version_change_restarts_client_sim_fresh() {
+        let guard = reserve_tcp_port();
+        let port = guard.port();
+        let _listener = guard.into_listener();
+        let mut v = scripted_client_view::<ferrowl_ocpp::V1_6>(
+            OcppVersion::V1_6,
+            port,
+            r#"n = (n or 0) + 1; C_OCPP:Set("Model", tostring(n)); print(n)"#,
+        );
+        for _ in 0..300 {
+            if model_of(&v).is_some_and(|m| m >= 5) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(
+            model_of(&v).is_some_and(|m| m >= 5),
+            "counter never reached 5"
+        );
+        let old_log = v.script_log.clone();
+
+        let mut edited = v.spec.clone();
+        edited.version = OcppVersion::V2_0_1;
+        v.deferred.setup = Some((edited, String::new(), Vec::new()));
+        v.refresh().await;
+        let replacement = v
+            .take_replacement()
+            .expect("version change replaces the view");
+        drop(v);
+
+        let n = script_lines(&old_log).await.len();
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert_eq!(
+            script_lines(&old_log).await.len(),
+            n,
+            "old sim still running"
+        );
+
+        let host = replacement.module_host().expect("host");
+        let lua = mlua::Lua::new();
+        let ud = host
+            .ocpp_accessor(&lua, ferrowl_lua::module::OcppGuard::default())
+            .expect("accessor")
+            .expect("ocpp module");
+        lua.globals().set("o", ud).expect("set");
+        let mut first = None;
+        for _ in 0..300 {
+            let m: String = lua.load("return o:Get('Model')").eval().expect("get");
+            if let Ok(v) = m.parse::<u32>() {
+                first = Some(v);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+        let first = first.expect("fresh sim never wrote Model");
+        assert!(
+            first < 5,
+            "globals survived the version change: first value {first}"
+        );
+    }
 }

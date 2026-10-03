@@ -1462,4 +1462,56 @@ mod tests {
         let payload = default_action_payload::<V1_6>("Reset");
         assert!(payload.is_object());
     }
+
+    /// SC-R-075 — an in-place edit leaves the running CSMS sim and its globals untouched.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_in_place_edit_keeps_server_sim_running() {
+        let guard = ferrowl_test_support::reserve_tcp_port();
+        let port = guard.port();
+        let _listener = guard.into_listener();
+        let mut v = server_view(port);
+        v.device.scripts = vec![crate::config::script::ScriptDef {
+            name: "count".into(),
+            code: "n = (n or 0) + 1; print(n)".into(),
+            enabled: true,
+        }];
+        v.device.script_interval = 0.05;
+        v.start_sim();
+        async fn last(v: &ServerView<V1_6>) -> u32 {
+            v.script_log
+                .read()
+                .await
+                .peek_n(crate::app::LOG_SIZE)
+                .into_iter()
+                .filter_map(|(_, _, l)| l.trim().parse::<u32>().ok())
+                .next_back()
+                .unwrap_or(0)
+        }
+        for _ in 0..300 {
+            if last(&v).await >= 3 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let before = last(&v).await;
+        assert!(before >= 3, "counter never reached 3");
+
+        let mut edited = v.spec.clone();
+        edited.timeout_ms = Some(12_345);
+        v.deferred.setup = Some((edited, String::new(), Vec::new()));
+        v.refresh().await;
+        assert_eq!(v.spec.timeout_ms, Some(12_345), "edit applied in place");
+
+        let mut max = before;
+        for _ in 0..30 {
+            let m = last(&v).await;
+            assert!(
+                m >= before,
+                "counter dropped to {m} (before {before}): sim restarted"
+            );
+            max = max.max(m);
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(max > before, "counter stopped advancing");
+    }
 }

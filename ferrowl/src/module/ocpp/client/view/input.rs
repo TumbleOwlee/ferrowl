@@ -283,7 +283,7 @@ impl<V: ClientVersion> ClientView<V> {
     }
 
     /// Add a connector from the input field, then clear it and select the new row.
-    fn add_connector(&mut self) {
+    pub(super) fn add_connector(&mut self) {
         let raw = self.conn_input.state.input().trim().to_string();
         let id = self.with_state_mut(|s| V::add_connector(s, &raw));
         self.conn_input.state.set_input(String::new());
