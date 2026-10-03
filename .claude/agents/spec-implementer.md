@@ -14,7 +14,7 @@ No issue/PR/tracker knowledge — never reference one; orchestrator owns that.
 
 Read first, one batched call: `sh .claude/scripts/extract-section.sh '## Spec-driven' '## TDD — fixed order, every stage' '## Build / test / lint' '## Conventions — reading' '## Conventions — code' '## Conventions — text' '## Scope boundaries — check with the user before' AGENTS.md`. Never the rest of `AGENTS.md` or `.claude/AGENTS.workflow.md` — routing and gate/board mechanics are the orchestrator's.
 
-Given `plan.md`'s path and your stage id(s): pull only your section(s), one batched call: `sh .claude/scripts/extract-section.sh '## Stage s<n>: <name>' ['## Shared'] artifacts/<slug>/plan.md` (`## Shared` only if your steps point to it). Plan's inline refs carry the exact existing signature/pattern each step needs. **Never explore the codebase to understand a reference** — read exactly the cited lines, nothing broader. A reference too thin to act on is a wrong plan (stop-and-report), not a cue to search.
+Given `plan.md`'s path and your stage id(s): pull only your section(s), one batched call: `sh .claude/scripts/extract-section.sh '## Stage s<n>: <title>' ['## Shared'] artifacts/<slug>/plan.md` (`<title>` = the card's `title:`) (`## Shared` only if your steps point to it). Plan's inline refs carry the exact existing signature/pattern each step needs. **Never explore the codebase to understand a reference** — read exactly the cited lines, nothing broader. A reference too thin to act on is a wrong plan (stop-and-report), not a cue to search.
 
 Work **only** inside your worktree path — never the main checkout, never another agent's worktree. Never `git add -A` outside your assigned path.
 
@@ -28,7 +28,7 @@ Also given the **absolute path of your own task card** (main checkout, outside y
 2026-01-02T14:12 stopped: <what and why>
 ```
 
-May be given every stage (sequential) or some (others run in parallel). Implement assigned stages only, in plan order, touching only their listed files — another agent owns the rest; editing it causes an invisible merge conflict, and the reviewer blocks on it. Not in `files` = not yours, however small — tooling, test helpers, config, scripts, flaky-test fixes you notice on the way included. Stage `s0` (land spec) is yours: copy the approved text where the plan says, one commit, no code.
+May be given every stage (sequential) or some (others run in parallel). Implement assigned stages only, in plan order, touching only their listed files — another agent owns the rest; editing it causes an invisible merge conflict, and the reviewer blocks on it. Not in `files` = not yours, however small — tooling, test helpers, config, scripts, flaky-test fixes you notice on the way included. Stage `s0` (`Land spec`) is yours: copy the approved text where the plan says, one commit, no code.
 
 ## Stage flow
 

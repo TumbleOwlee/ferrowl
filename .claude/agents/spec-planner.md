@@ -27,9 +27,11 @@ Surface every plan-shaped decision (stage boundaries, extend-vs-reimplement, tes
 
 `plan.md` is flat markdown, headed so `.claude/scripts/extract-section.sh` pulls exactly one section — no later reader (implementer, reviewer, resumed session) opens the whole file:
 
-- `## Shared` — first section. **Dependency tree** (below), verification approach if uniform across stages, any code reference cited by 2+ stages. Tree lists every stage's `files` and `blocked-by` — orchestrator copies those two fields onto cards from this section alone.
-- `## Stage s0: land spec` — always present, the first stage: copy each `## <ID>` of `spec-diff.md` into its `docs/specs/<area>/` file (exact target file + insertion point per ID, contract-file rows likewise), one commit, no code. Every other stage is `blocked-by: [s0]`.
-- `## Stage s<n>: <short name>` — one per stage, self-contained: numbered file-level steps, tests added, `files` touched, `blocked-by`, ID→test table, **Verification** (how exercised beyond unit tests — in this project: unit tests alone, driving the demo TUI, or a real CSMS — plus expected coverage impact), expected commits.
+- `## Shared` — first section. **Dependency tree** (below), verification approach if uniform across stages, any code reference cited by 2+ stages. Tree lists every stage's `title`, `files` and `blocked-by` — orchestrator copies those three fields onto cards from this section alone.
+- `## Stage s0: Land spec` — always present, the first stage: copy each `## <ID>` of `spec-diff.md` into its `docs/specs/<area>/` file (exact target file + insertion point per ID, contract-file rows likewise), one commit, no code. Every other stage is `blocked-by: [s0]`.
+- `## Stage s<n>: <title>` — one per stage, self-contained: numbered file-level steps, tests added, `files` touched, `blocked-by`, ID→test table, **Verification** (how exercised beyond unit tests — in this project: unit tests alone, driving the demo TUI, or a real CSMS — plus expected coverage impact), expected commits.
+
+**Title** — the stage's display name, also its card's `title:`: imperative, verb first (`Update README`); ≤ 3 words, ≤ 20 characters; letters, digits, hyphens, spaces only; unique within the plan; no stage id. s0 is always `Land spec`.
 
 `plan.summary.md` — the user's file, written last, rewritten whole on every revision, **≤ 25 lines / 2 KB** (`show-file.sh` refuses more). Decisions only, never how. The verification method cannot be waived without asking. `Touches` names crates and modules, never full paths. Blank line between blocks:
 
@@ -40,7 +42,7 @@ Surface every plan-shaped decision (stage boundaries, extend-vs-reimplement, tes
 
 | Stage | What | Touches |
 |---|---|---|
-| s0 | land spec | docs/specs <areas> |
+| s0 | Land spec | docs/specs <areas> |
 | s1 | <≤ 12 words> | <crate module> |
 
 **Accepted behavior changes**
@@ -63,6 +65,6 @@ Dependency tree, must hold under parallel reading:
 ## Rules
 
 - Write to `artifacts/<slug>/plan.md` — must stand alone for a crash-resumed session.
-- Stage ids `s1`, `s2`, … (card ids `<slug>.s2`). **`files` is a contract, not a hint:** a stage may touch exactly what its list names — tooling, test helpers, config, scripts, flaky-test fixes a stage needs are listed too; the reviewer blocks on any file outside the list. Heading text exact and stable once written (`## Stage s2: <name>`) — the orchestrator hands it to each implementer to extract; renaming after approval breaks the lookup.
+- Stage ids `s1`, `s2`, … (card ids `<slug>.s2`). **`files` is a contract, not a hint:** a stage may touch exactly what its list names — tooling, test helpers, config, scripts, flaky-test fixes a stage needs are listed too; the reviewer blocks on any file outside the list. Heading text exact and stable once written (`## Stage s2: <title>`) — implementers extract by it via the card's `title:`, reviewers via the `## Shared` tree; renaming after approval breaks the lookup.
 - Never create/move task cards, push, write product code or tests.
 - Final message one line: `status=ready file=artifacts/<slug>/plan.md summary=artifacts/<slug>/plan.summary.md count=<stages>`. Never the plan itself. Given a `review.md` path afterwards: apply its plan-scoped findings to `plan.md` in place, rewrite `plan.summary.md` (bump `rev`), answer `status=ready` again.
