@@ -688,7 +688,7 @@ Method:   ModuleHandle:Register()
 Return:   `C_Register`-shaped accessor for modbus modules; raises for others.
 
 Method:   ModuleHandle:OCPP()
-Return:   Role-specific `C_OCPP`-shaped accessor for ocpp modules; raises for others.
+Return:   Role-specific `C_OCPP`-shaped accessor for ocpp modules; raises for others. A held accessor raises `module '<name>' was replaced; call OCPP() again` once the module instance behind the name changed (role or version change, or the module closed); call `OCPP()` again for the current one.
 ```
 
 #### Example: mirror a register between two modbus modules

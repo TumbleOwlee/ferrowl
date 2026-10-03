@@ -1580,7 +1580,7 @@ if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
     }
 
     #[tokio::test]
-    /// SC-R-081 — reconfiguring endpoint/role keeps the sim running with its globals intact.
+    /// SC-R-081, SC-E-032 — reconfiguring endpoint/role keeps the sim running with its globals intact; reconfigure is not a stop trigger.
     async fn ut_reconfigure_keeps_sim_and_globals() {
         use super::ModbusModule;
         use crate::config::{Endpoint, Role};
