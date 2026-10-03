@@ -11,6 +11,7 @@ use std::time::Duration;
 use ferrowl_ocpp::cs::{self, CsActionHandler};
 use ferrowl_ocpp::csms::{self, CsmsActionHandler};
 use ferrowl_ocpp::{Action16, CallError, CallErrorCode, Response16, V1_6};
+use ferrowl_test_support::wait_until;
 use tokio::net::TcpListener as TokioTcpListener;
 use tokio::time::sleep;
 
@@ -228,16 +229,13 @@ async fn it_csms_terminate_during_accept_ends_task_ok() {
     .await
     .expect("spawn always returns Ok");
 
-    for _ in 0..50 {
-        if server.local_addr().is_some() {
-            break;
-        }
-        sleep(Duration::from_millis(20)).await;
-    }
-    assert!(
-        server.local_addr().is_some(),
-        "the listener must bind before this test can exercise accept()"
-    );
+    wait_until(
+        "the listener must bind before this test can exercise accept()",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || server.local_addr().map(|_| ()),
+    )
+    .await;
 
     let result = tokio::time::timeout(Duration::from_millis(500), server.terminate())
         .await

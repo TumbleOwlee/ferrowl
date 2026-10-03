@@ -13,7 +13,7 @@
 use ferrowl_ocpp::cs::{self, CsActionHandler};
 use ferrowl_ocpp::csms::{self, CsmsActionHandler};
 use ferrowl_ocpp::{Action16, BasicAuth, CallError, CallErrorCode, Response16, V1_6};
-use ferrowl_test_support::{TempDirGuard, reserve_temp_dir};
+use ferrowl_test_support::{TempDirGuard, reserve_temp_dir, wait_until};
 use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy, ServerTlsPolicy};
 use serde_json::json;
 
@@ -37,19 +37,6 @@ fn capturing_sink() -> (
         }
     };
     (sink, lines)
-}
-
-/// Poll until the CSMS listener has bound: `spawn` binds asynchronously, retrying a
-/// failed bind with backoff (OC-R-083), so `local_addr()` is `None` until the first
-/// successful bind lands.
-async fn bound_addr<V: ferrowl_ocpp::Version>(server: &csms::Server<V>) -> std::net::SocketAddr {
-    for _ in 0..50 {
-        if let Some(addr) = server.local_addr() {
-            return addr;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    panic!("CSMS listener never bound");
 }
 
 /// CSMS handler answering the single action these tests exercise.
@@ -123,7 +110,16 @@ async fn basic_auth_accepts_matching_credentials() {
     .await
     .expect("server failed to bind");
 
-    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "ws://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             extra_headers: Vec::new(),
@@ -167,7 +163,16 @@ async fn basic_auth_rejects_mismatched_credentials() {
     .await
     .expect("server failed to bind");
 
-    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "ws://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
     // OC-R-048/OC-R-105: `spawn` always succeeds (the dial moved inside the retried task);
     // `reconnect: false` ends the task on the first failed dial instead of retrying forever, and
     // the credential-mismatch error surfaces from `join()`.
@@ -218,7 +223,16 @@ async fn basic_auth_rejects_missing_credentials() {
     .await
     .expect("server failed to bind");
 
-    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "ws://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
     let mut result = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             extra_headers: Vec::new(),
@@ -275,7 +289,16 @@ async fn tls_loopback_over_self_signed_cert() {
     .await
     .expect("server failed to bind");
 
-    let url = format!("wss://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "wss://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             extra_headers: Vec::new(),
@@ -336,7 +359,16 @@ async fn tls_loopback_rejects_untrusted_cert() {
 
     // `extra_ca_files` empty: only the webpki root store is trusted, so the self-signed cert
     // must be rejected.
-    let url = format!("wss://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "wss://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
     let mut result = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             extra_headers: Vec::new(),
@@ -384,7 +416,16 @@ async fn self_signed_csms_with_skip_verify_client_connects() {
     .await
     .expect("server failed to bind");
 
-    let url = format!("wss://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "wss://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             extra_headers: Vec::new(),
@@ -429,7 +470,16 @@ async fn self_signed_csms_without_skip_verify_client_rejects() {
     .await
     .expect("server failed to bind");
 
-    let url = format!("wss://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "wss://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
     let mut result = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             extra_headers: Vec::new(),
@@ -483,7 +533,16 @@ async fn basic_auth_over_self_signed_tls_checks_credentials() {
     .await
     .expect("server failed to bind");
 
-    let url = format!("wss://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "wss://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             extra_headers: Vec::new(),
@@ -581,7 +640,16 @@ async fn it_csms_self_signed_mutual_with_ca_files_accepts_connection() {
     .await
     .expect("server should start: self-signed identity + Mutual with CaFiles is a valid policy");
 
-    let url = format!("wss://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "wss://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             extra_headers: Vec::new(),
@@ -669,7 +737,16 @@ async fn it_csms_multi_ca_accepts_cert_signed_by_either_ca() {
     .await
     .expect("server should start with a multi-CA trust store");
 
-    let url = format!("wss://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "wss://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             extra_headers: Vec::new(),
@@ -723,7 +800,16 @@ async fn it_csms_skip_verify_accepts_untrusted_self_signed_client_identity() {
     .await
     .expect("server failed to bind");
 
-    let url = format!("wss://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "wss://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             extra_headers: Vec::new(),
@@ -791,7 +877,16 @@ async fn it_cs_cafiles_trusts_only_named_ca() {
     .await
     .expect("server failed to bind");
 
-    let url = format!("wss://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "wss://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             extra_headers: Vec::new(),
@@ -854,7 +949,16 @@ async fn it_cs_cafiles_trusts_only_named_ca() {
             .expect("self-signed ca2 cert")
             .pem(),
     );
-    let other_url = format!("wss://{}/ocpp/CS001", bound_addr(&other_server).await);
+    let other_url = format!(
+        "wss://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || other_server.local_addr()
+        )
+        .await
+    );
     let mut untrusted = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             extra_headers: Vec::new(),
@@ -943,7 +1047,16 @@ async fn it_ws_endpoint_skips_client_tls_validation() {
         verification: CertVerification::CaFiles { ca_files: vec![] },
     };
 
-    let url = format!("ws://{}/ocpp/CS001", bound_addr(&plain_server).await);
+    let url = format!(
+        "ws://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || plain_server.local_addr()
+        )
+        .await
+    );
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             extra_headers: Vec::new(),
@@ -989,7 +1102,16 @@ async fn it_ws_endpoint_skips_client_tls_validation() {
     .await
     .expect("server failed to bind");
 
-    let wss_url = format!("wss://{}/ocpp/CS001", bound_addr(&tls_server).await);
+    let wss_url = format!(
+        "wss://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || tls_server.local_addr()
+        )
+        .await
+    );
     let mut wss_client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             extra_headers: Vec::new(),

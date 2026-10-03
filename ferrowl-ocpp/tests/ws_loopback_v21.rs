@@ -13,25 +13,12 @@ use std::time::Duration;
 use ferrowl_ocpp::cs::{self, CsActionHandler};
 use ferrowl_ocpp::csms::{self, CsmsActionHandler};
 use ferrowl_ocpp::{Action21, CallError, CallErrorCode, Response21, V2_1};
+use ferrowl_test_support::wait_until;
 use serde_json::json;
-use tokio::time::sleep;
 
 /// No-op log sink.
 fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
     |_s: String| async move {}
-}
-
-/// Poll until the CSMS listener has bound: `spawn` binds asynchronously, retrying a
-/// failed bind with backoff (OC-R-083), so `local_addr()` is `None` until the first
-/// successful bind lands.
-async fn bound_addr<V: ferrowl_ocpp::Version>(server: &csms::Server<V>) -> std::net::SocketAddr {
-    for _ in 0..50 {
-        if let Some(addr) = server.local_addr() {
-            return addr;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    panic!("CSMS listener never bound");
 }
 
 /// CSMS handler answering the two CS-initiated actions used by this test.
@@ -98,22 +85,20 @@ async fn start_server() -> csms::Server<V2_1> {
     .expect("server failed to bind")
 }
 
-/// Wait until the server registry reports at least one connection, then return its id.
-async fn first_connection(server: &csms::Server<V2_1>) -> csms::ConnectionId {
-    for _ in 0..50 {
-        if let Some(id) = server.registry().connection_ids().first().copied() {
-            return id;
-        }
-        sleep(Duration::from_millis(20)).await;
-    }
-    panic!("no CS connected in time");
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 /// OC-R-014 — the 2.1 connection is full-duplex: CS and CSMS each originate Calls on the same socket.
 async fn cs_calls_csms_and_csms_calls_cs() {
     let server = start_server().await;
-    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "ws://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            Duration::from_millis(20),
+            Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
 
     let clear_cache_seen = Arc::new(AtomicBool::new(false));
     // The client advertises `ocpp2.1`; a successful connect proves the server accepted it.
@@ -166,7 +151,13 @@ async fn cs_calls_csms_and_csms_calls_cs() {
     ));
 
     // CSMS -> CS: server-initiated ClearCache (reverse direction).
-    let conn = first_connection(&server).await;
+    let conn = wait_until(
+        "CS connection",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || server.registry().connection_ids().first().copied(),
+    )
+    .await;
     let clear = Action21::ClearCache(serde_json::from_value(json!({})).unwrap());
     let resp = server
         .call(conn, clear)

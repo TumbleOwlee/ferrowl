@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use ferrowl_ocpp::cs::{self, CsActionHandler};
 use ferrowl_ocpp::{CallError, CallErrorCode, HeaderDef, Response16, V1_6};
+use ferrowl_test_support::wait_until;
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tokio_tungstenite::accept_hdr_async;
@@ -75,17 +76,16 @@ async fn extra_headers_are_sent_on_upgrade_request() {
         .await
         .expect("spawn always returns Ok; the dial happens inside the task");
 
-    let mut found = Vec::new();
-    for _ in 0..50 {
-        {
-            let headers = seen.lock().unwrap();
-            if !headers.is_empty() {
-                found = headers.clone();
-                break;
-            }
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
+    let found = wait_until(
+        "upgrade headers seen",
+        std::time::Duration::from_millis(20),
+        std::time::Duration::from_secs(10),
+        || {
+            let h = seen.lock().unwrap();
+            (!h.is_empty()).then(|| h.clone())
+        },
+    )
+    .await;
 
     assert!(
         found.iter().any(|(n, v)| n == "x-tenant" && v == "acme-1"),

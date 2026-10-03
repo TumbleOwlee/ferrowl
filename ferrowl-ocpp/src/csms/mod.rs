@@ -474,6 +474,7 @@ fn reject_unauthorized() -> ErrorResponse {
 #[cfg(test)]
 mod tests {
     use super::identity_from_path;
+    use ferrowl_test_support::wait_until;
 
     #[test]
     /// OC-R-044 — the charge-point identity is the last non-empty path segment of the URL.
@@ -541,12 +542,13 @@ mod tests {
             let _client = tokio::net::TcpStream::connect(addr)
                 .await
                 .expect("connect to accept_loop's listener");
-            for _ in 0..50 {
-                if activity.load(Ordering::Relaxed) {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            }
+            wait_until(
+                "accept_loop sets activity",
+                std::time::Duration::from_millis(20),
+                std::time::Duration::from_secs(10),
+                || activity.load(Ordering::Relaxed).then_some(()),
+            )
+            .await;
             let _ = cmd_tx.send(super::Command::Terminate).await;
         };
 
@@ -633,17 +635,12 @@ mod tests {
 
         server.send(super::Command::Terminate).await.unwrap();
 
-        let mut running = true;
-        for _ in 0..50 {
-            running = server.is_running();
-            if !running {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        assert!(
-            !running,
-            "the server task must stop running after Terminate"
-        );
+        wait_until(
+            "the server task must stop running after Terminate",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || (!server.is_running()).then_some(()),
+        )
+        .await;
     }
 }
