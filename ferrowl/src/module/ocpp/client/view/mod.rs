@@ -463,6 +463,8 @@ pub struct ClientView<V: ClientVersion> {
     overlay: ClientOverlay,
     /// Results produced mid-tick, consumed by a later `refresh` (send / re-setup / replacement).
     deferred: Deferred,
+    /// Identity of this view instance in the session registry (SC-R-080).
+    instance_id: u64,
     /// Simulation + liveness bookkeeping (sim handle, action queue, tick counters, online/log).
     runtime: SimRuntime,
     code_content: String,
@@ -564,6 +566,7 @@ impl<V: ClientVersion> ClientView<V> {
             )
         });
         let mut view = Self {
+            instance_id: crate::registry::next_instance_id(),
             device_path,
             device,
             backend: OcppClient::new(),
@@ -715,6 +718,7 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
         Some(std::sync::Arc::new(crate::registry::OcppClientEntry {
             state: self.state.clone(),
             queue: self.runtime.action_queue.clone(),
+            instance_id: self.instance_id,
         }))
     }
 }

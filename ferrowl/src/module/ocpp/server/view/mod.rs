@@ -374,6 +374,8 @@ pub struct ServerView<V: ServerVersion> {
     cs_configs: HashMap<String, Vec<(String, String, bool)>>,
     /// Shared registry of every entry's observed state, read by the single Lua sim.
     lua_states: SharedServerStates<V>,
+    /// Identity of this view instance in the session registry (SC-R-080).
+    instance_id: u64,
     /// Simulation + liveness bookkeeping (sim handle, action queue, log tee/`:log` tracking).
     runtime: SimRuntime,
     /// UI-R-314/UI-R-315 — a stop-bearing lifecycle command (`:stop`/`:restart`) that has
@@ -413,6 +415,7 @@ where
         let (events_tx, events_rx) = tokio::sync::mpsc::unbounded_channel();
         let rfids: RfidLists = Arc::new(parking_lot::RwLock::new(rfid_store_from_device(&device)));
         let mut view = Self {
+            instance_id: crate::registry::next_instance_id(),
             backend: OcppServer::new(),
             spec,
             device_path,
@@ -544,6 +547,7 @@ where
         Some(std::sync::Arc::new(crate::registry::OcppServerEntry {
             states: self.lua_states.clone(),
             queue: self.runtime.lua_queue.clone(),
+            instance_id: self.instance_id,
         }))
     }
 }

@@ -1415,7 +1415,7 @@ mod tests {
 if C_Register:Has("extra") then C_Register:Set("extra", 9) end"#,
             true,
         )]);
-        let mut module = ModbusModule::new(&test_spec("sim_add", 15301), &device);
+        let mut module = ModbusModule::new(&test_spec("sim_add", 0), &device);
         assert!(module.lua_running());
         assert!(wait_for_marker(&module, 1), "sim never ran before the add");
         module.add_register(
@@ -1446,7 +1446,7 @@ if C_Register:Has("extra") then C_Register:Set("extra", 9) end"#,
 if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
             true,
         )]);
-        let mut module = ModbusModule::new(&test_spec("sim_edit", 15302), &device);
+        let mut module = ModbusModule::new(&test_spec("sim_edit", 0), &device);
         assert!(wait_for_marker(&module, 3));
         module.memory().write().write_unchecked(
             ferrowl_modbus::Key {
@@ -1478,7 +1478,7 @@ if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
     fn ut_sim_keeps_globals_across_register_edits() {
         use super::ModbusModule;
         let device = device_with_script(vec![script(COUNTER, true)]);
-        let mut module = ModbusModule::new(&test_spec("sim_glob", 15303), &device);
+        let mut module = ModbusModule::new(&test_spec("sim_glob", 0), &device);
         assert_counter_survives(&mut module, |m| {
             m.add_register("x".into(), String::new(), test_register(5, false), vec![]);
             let reg = m.registers()[0].2.clone();
@@ -1504,7 +1504,7 @@ if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
         let mut gone = device.definitions["marker"].clone();
         gone.address = Some(1);
         device.definitions.insert("gone".into(), gone);
-        let mut module = ModbusModule::new(&test_spec("sim_del", 15304), &device);
+        let mut module = ModbusModule::new(&test_spec("sim_del", 0), &device);
         assert!(
             wait_for_marker(&module, 1),
             "sim never ran before the delete"
@@ -1543,7 +1543,7 @@ if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
             r#"if held == nil then held = C_Register:Get("marker") end; C_Register:Set("copy", held + 100)"#,
             true,
         )]);
-        let mut module = ModbusModule::new(&test_spec("sim_held", 15305), &device);
+        let mut module = ModbusModule::new(&test_spec("sim_held", 0), &device);
         module.add_register(
             "copy".into(),
             String::new(),
@@ -1585,7 +1585,7 @@ if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
         use super::ModbusModule;
         use crate::config::{Endpoint, Role};
         let device = device_with_script(vec![script(COUNTER, true)]);
-        let mut module = ModbusModule::new(&test_spec("sim_reconf", 15306), &device);
+        let mut module = ModbusModule::new(&test_spec("sim_reconf", 0), &device);
         for _ in 0..200 {
             if read_marker(&module) >= 3 {
                 break;

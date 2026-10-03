@@ -54,6 +54,8 @@ enum ModbusViewOverlay {
 ferrowl_ui::impl_overlay_keys!(SetupDialog);
 
 pub struct ModbusModuleView {
+    /// Identity of this view instance in the session registry (SC-R-080).
+    instance_id: u64,
     module: ModbusModule,
     spec: ModuleSpec,
     device: DeviceConfig,
@@ -114,6 +116,7 @@ impl ModbusModuleView {
             })
             .collect();
         Self {
+            instance_id: crate::registry::next_instance_id(),
             table: TableView::new(definitions),
             module,
             spec,
@@ -984,6 +987,7 @@ impl ModuleView for ModbusModuleView {
             memory: self.module.memory(),
             virtual_store: self.module.virtual_store(),
             registers: self.module.lua_registers(),
+            instance_id: self.instance_id,
             role,
         }))
     }

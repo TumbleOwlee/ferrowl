@@ -30,6 +30,7 @@ use crate::module::ocpp::scope::Scope;
 use crate::module::ocpp::server::lua::{ServerActionQueue, ServerStates, SharedServerStates};
 use crate::module::ocpp::server::view::ServerVersion;
 use crate::module::view::SharedLog;
+use crate::registry::next_instance_id;
 use crate::registry::{ModbusHost, ModuleRegistry, OcppClientEntry, OcppServerEntry};
 use crate::session::SessionSim;
 
@@ -128,6 +129,7 @@ fn modbus_host_with(
         virtual_store: Arc::new(tokio::sync::RwLock::new(HashMap::new())) as VirtualStore,
         registers,
         role,
+        instance_id: next_instance_id(),
     }
 }
 
@@ -146,11 +148,18 @@ fn as_directory(registry: ModuleRegistry) -> Arc<dyn ModuleDirectory> {
 }
 
 fn client_entry() -> (Arc<RwLock<Cs16>>, ScopedActionQueue, OcppClientEntry<Cs16>) {
+    client_entry_with_id(next_instance_id())
+}
+
+fn client_entry_with_id(
+    instance_id: u64,
+) -> (Arc<RwLock<Cs16>>, ScopedActionQueue, OcppClientEntry<Cs16>) {
     let state: Arc<RwLock<Cs16>> = Arc::new(RwLock::new(Cs16::default()));
     let queue: ScopedActionQueue = Arc::new(parking_lot::Mutex::new(Default::default()));
     let entry = OcppClientEntry {
         state: state.clone(),
         queue: queue.clone(),
+        instance_id,
     };
     (state, queue, entry)
 }
@@ -179,6 +188,7 @@ fn server_entry_with_station(
     let entry = OcppServerEntry {
         states: states.clone(),
         queue: queue.clone(),
+        instance_id: next_instance_id(),
     };
     (states, queue, entry)
 }
@@ -487,4 +497,145 @@ fn it_type_role_introspection() {
         let lines = log_lines(&log);
         lines.iter().any(|l| l == "modbus/client") && lines.iter().any(|l| l == "ocpp/client")
     }));
+}
+
+fn registry_map(modules: Vec<(&str, Arc<dyn ModuleHost>)>) -> HashMap<String, Arc<dyn ModuleHost>> {
+    modules
+        .into_iter()
+        .map(|(name, host)| (name.to_string(), host))
+        .collect()
+}
+
+#[test]
+/// SC-R-078 — a `Register()` accessor held across cycles reaches a module rebuilt under the same name.
+fn it_held_modbus_accessor_reaches_rebuilt_module() {
+    let old_mem = evse_memory();
+    let registry = registry_from(vec![(
+        "evse",
+        Arc::new(modbus_host(old_mem.clone(), "client")) as Arc<dyn ModuleHost>,
+    )]);
+    let mut sim = SessionSim::new(as_directory(registry.clone()), log());
+    sim.set_interval(Duration::from_millis(20));
+    sim.set_scripts(vec![script(
+        "held",
+        r#"r = r or C_Module:Get("evse"):Register(); r:Set("setpoint", 5)"#,
+    )]);
+    assert!(wait_for(Duration::from_millis(500), || {
+        read_register(&old_mem, 0) == 5
+    }));
+
+    let new_mem = evse_memory();
+    registry.replace_all(registry_map(vec![(
+        "evse",
+        Arc::new(modbus_host(new_mem.clone(), "client")),
+    )]));
+    assert!(wait_for(Duration::from_millis(500), || {
+        read_register(&new_mem, 0) == 5
+    }));
+}
+
+#[test]
+/// SC-R-080 — a held `OCPP()` accessor raises `was replaced` once its module is replaced, and the sim loop keeps running.
+fn it_held_ocpp_accessor_raises_after_replacement() {
+    let (_state, _queue, entry) = client_entry();
+    let registry = registry_from(vec![("cs1", Arc::new(entry) as Arc<dyn ModuleHost>)]);
+    let log = log();
+    let mut sim = SessionSim::new(as_directory(registry.clone()), log.clone());
+    sim.set_interval(Duration::from_millis(20));
+    sim.set_scripts(vec![script(
+        "held",
+        r#"o = o or C_Module:Get("cs1"):OCPP(); o:Get("Model")"#,
+    )]);
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(
+        !log_lines(&log).iter().any(|l| l.contains("was replaced")),
+        "no error before the replacement"
+    );
+
+    let (_state2, _queue2, entry2) = client_entry();
+    registry.replace_all(registry_map(vec![("cs1", Arc::new(entry2))]));
+    assert!(wait_for(Duration::from_millis(500), || {
+        log_lines(&log)
+            .iter()
+            .any(|l| l.contains("module 'cs1' was replaced; call OCPP() again"))
+    }));
+    let n = log_lines(&log).len();
+    assert!(
+        wait_for(Duration::from_millis(500), || log_lines(&log).len() > n),
+        "sim loop must keep running"
+    );
+}
+
+#[test]
+/// SC-R-078 — a held `OCPP()` accessor follows an in-place rebuild that keeps state, queue and instance id.
+fn it_held_ocpp_accessor_follows_in_place_rebuild() {
+    let id = next_instance_id();
+    let (state, queue, entry) = client_entry_with_id(id);
+    let registry = registry_from(vec![("cs1", Arc::new(entry) as Arc<dyn ModuleHost>)]);
+    let log = log();
+    let mut sim = SessionSim::new(as_directory(registry.clone()), log.clone());
+    sim.set_interval(Duration::from_millis(20));
+    sim.set_scripts(vec![script(
+        "held",
+        r#"o = o or C_Module:Get("cs1"):OCPP(); o:Set("Model", "x")"#,
+    )]);
+    assert!(wait_for(Duration::from_millis(500), || {
+        state.read().model == "x"
+    }));
+
+    state.write().model = String::new();
+    registry.replace_all(registry_map(vec![(
+        "cs1",
+        Arc::new(OcppClientEntry {
+            state: state.clone(),
+            queue: queue.clone(),
+            instance_id: id,
+        }),
+    )]));
+    assert!(wait_for(Duration::from_millis(500), || {
+        state.read().model == "x"
+    }));
+    assert!(!log_lines(&log).iter().any(|l| l.contains("was replaced")));
+}
+
+#[test]
+/// SC-R-079 — module-set changes never restart the session sim nor reset its globals.
+fn it_session_sim_survives_module_set_changes() {
+    let mem = evse_memory();
+    let registry = registry_from(vec![(
+        "evse",
+        Arc::new(modbus_host(mem.clone(), "client")) as Arc<dyn ModuleHost>,
+    )]);
+    let mut sim = SessionSim::new(as_directory(registry.clone()), log());
+    sim.set_interval(Duration::from_millis(20));
+    sim.set_scripts(vec![script(
+        "count",
+        r#"n = (n or 0) + 1; C_Module:Get("evse"):Register():Set("setpoint", n)"#,
+    )]);
+    assert!(wait_for(Duration::from_millis(2000), || {
+        read_register(&mem, 0) >= 10
+    }));
+    let before = read_register(&mem, 0);
+
+    let (_s, _q, cs) = client_entry();
+    registry.replace_all(registry_map(vec![
+        ("evse", Arc::new(modbus_host(mem.clone(), "client"))),
+        ("cs1", Arc::new(cs)),
+    ]));
+    std::thread::sleep(Duration::from_millis(60));
+    registry.replace_all(registry_map(vec![
+        ("evse", Arc::new(modbus_host(mem.clone(), "client"))),
+        ("cs1", Arc::new(client_entry().2)),
+    ]));
+    let mut max = before;
+    for _ in 0..30 {
+        let v = read_register(&mem, 0);
+        assert!(
+            v >= before,
+            "counter dropped to {v} (before {before}): sim restarted"
+        );
+        max = max.max(v);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(max > before, "counter stopped advancing");
 }

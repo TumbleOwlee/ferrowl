@@ -20,7 +20,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crossterm::event::{KeyCode, KeyModifiers};
-use ferrowl_lua::module::ModuleHost;
+use ferrowl_lua::module::{ModuleHost, OcppGuard, RegisterAccess};
 use ferrowl_ui::traits::{IsFocus, SetFocus};
 use ferrowl_ui::{DrawSurface, EventResult};
 use mlua::{AnyUserData, Lua, Result as LuaResult};
@@ -91,10 +91,13 @@ impl ModuleHost for MockHost {
     fn role(&self) -> &'static str {
         "mock"
     }
-    fn register_accessor(&self, _lua: &Lua) -> LuaResult<Option<AnyUserData>> {
-        Ok(None)
+    fn instance_id(&self) -> u64 {
+        0
     }
-    fn ocpp_accessor(&self, _lua: &Lua) -> LuaResult<Option<AnyUserData>> {
+    fn register_access(&self) -> Option<Arc<dyn RegisterAccess>> {
+        None
+    }
+    fn ocpp_accessor(&self, _lua: &Lua, _guard: OcppGuard) -> LuaResult<Option<AnyUserData>> {
         Ok(None)
     }
 }
