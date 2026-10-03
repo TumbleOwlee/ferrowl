@@ -54,11 +54,11 @@ Optional area or path argument narrows the run. None → every area in the routi
 
 ## 2. Map each area to source
 
-Per area: guess its source directory (area name vs `src/<area>`, or the routing table's "covers" wording), confirm via one `AskUserQuestion` before reading — auditing the wrong directory silently is worse than one question.
+Per area: guess its source directory (area name vs `src/<area>`, or the routing table's "covers" wording), confirm via one `AskUserQuestion` before reading.
 
 ## 3. Read and compare — per area
 
-Semantic read, not a citation grep: a citation grep catches only tests missing an ID, never code with *no test at all* — the gap that matters most.
+Semantic read, not a citation grep: a grep catches only tests missing an ID, never code with no test at all.
 
 1. Read the area's `requirements.md` (and `edge-cases.md`, so a documented intentional gap isn't re-flagged).
 2. Read the source in that area.
@@ -77,20 +77,14 @@ Draft only; write nothing yet.
 
 Present the full draft — grouped by area, new areas called out — for one explicit approval. No tracking issue, no commit — code exists, nothing to track.
 
-Rejected/edited items: adjust, re-confirm before writing. Never write a requirement the user didn't see in this form.
+Rejected/edited items: adjust, re-confirm before writing.
 
 ## 6. Write
 
-New area approved: write from `templates/area/*.tmpl` as step 0a item 5 (substitute placeholders, only the files needed), append a routing row:
-
-```
-| <area covers> | [`<area>`](<spec-dir>/<area>/) | `<PREFIX>-R-*` |
-```
-
-Then append approved entries to each `requirements.md` — one per physical line, never wrapped.
+New area approved: write from `templates/area/*.tmpl` as step 0a item 5 (substitute placeholders, only the files needed), append a routing row shaped as in step 0a item 6(a). Then append approved entries to each `requirements.md` — one per physical line, never wrapped.
 
 Report what was written (files, IDs, new area/scaffold). Stop — no commit, issue, PR. User reviews and commits.
 
 ## 7. Ask about the other direction
 
-Last: ask whether a follow-up should report requirements with no citing test (spec → no test), and whether to add to this skill or build separately. Record a clear answer; act on nothing.
+Last: ask whether a follow-up should report requirements with no citing test (spec → no test), and whether to add to this skill or build separately. Record the answer.

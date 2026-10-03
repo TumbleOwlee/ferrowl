@@ -7,7 +7,7 @@ description: Check every agent-facing markdown file this project's agents read (
 
 **Concise, compact, facts only.**
 
-Read-only. Never split or edit — propose, user decides (a split is a maintenance commitment and churns every cross-reference; same "ask before" spirit as AGENTS.md's scope boundaries). Companion to `context-audit`: that finds re-reads from session history; this finds structural waste from the files themselves.
+Read-only. Never split or edit — propose, user decides (a split churns every cross-reference). Companion to `context-audit`: that finds re-reads from session history; this finds structural waste from the files themselves.
 
 ## 1. Scope: agent-facing files
 
@@ -60,4 +60,4 @@ One line each, no praise, no summary. A proposed split under ~10 lines: say so, 
 
 Report only improvements found. Empty table → "none" — never a reason, never "already good".
 
-Create or edit nothing here. If the user approves a split, make the new file's headings match exactly what the citing instructions name (or update those instructions in the same change).
+If the user approves a split, make the new file's headings match exactly what the citing instructions name (or update those instructions in the same change).

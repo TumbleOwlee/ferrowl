@@ -22,23 +22,7 @@ Per [`../README.md`](../README.md)'s ownership rules, this area does **not** own
 
 **BR-R-017** — `rtu_over_tcp`/`ascii_over_tcp` descriptors (BR-R-004) carry the same `tcp::Config` field set as `tcp` (MB-R-113/MB-R-125), differing only in framing; either may be upstream or downstream independently of the other side's transport.
 
-## Roles and relay behavior
-
-**BR-R-005** — Upstream always acts as server: bridge listens for/accepts connections (tcp, rtu_over_tcp, ascii_over_tcp) or serves the opened link (rtu), reusing the existing server accept-loop / single-serial-link behavior unchanged.
-
-**BR-R-006** — Downstream always acts as client: bridge connects (tcp, rtu_over_tcp, ascii_over_tcp) or opens the serial port (rtu) as an ordinary client, including reconnect/backoff (MB-R-050–056) when enabled.
-
-**BR-R-007** — Each decoded upstream request is forwarded downstream unmodified (same unit id, function code, address, count) and awaited; the downstream response or exception is relayed back upstream unmodified. No register/bit-count limit beyond each transport's wire format.
-
-**BR-R-008** — A request to slave id 0 received on an RTU upstream is forwarded downstream and receives no upstream response (MB-R-103).
-
-**BR-R-009** — A request forwarded to an RTU downstream addressed to slave id 0 is transmitted fire-and-forget, not awaited (MB-R-102).
-
-**BR-R-010** — When downstream fails to connect while a forwarded request is outstanding (no established connection/serial link), bridge answers the upstream requester with exception `GatewayPathUnavailable` (0x0A).
-
-**BR-R-018** — When downstream is connected but the forwarded request times out or the connection drops before a response, bridge answers the upstream requester with exception `GatewayTargetDeviceFailedToRespond` (0x0B).
-
-**BR-R-019** — Both bridge exception codes `GatewayPathUnavailable` (0x0A, BR-R-010) and `GatewayTargetDeviceFailedToRespond` (0x0B, BR-R-018) exist in the vendored `rust_modbus::ExceptionCode` enum (values 10/11); ordinary ferrowl servers never emit them (`api-contract.md`'s exhaustive list is 0x01–0x04).
+### TLS descriptor keys
 
 **BR-R-011** — TCP-socket interfaces (`tcp`, `rtu_over_tcp`, `ascii_over_tcp`; upstream and/or downstream) may enable TLS through descriptor keys mirroring the block form's paths, the interface's role fixed by its flag: an upstream descriptor carries a `ServerTlsPolicy` (BR-R-005), a downstream a `ClientTlsPolicy` (BR-R-006), neither the two-role container of MB-R-104.
 
@@ -57,6 +41,24 @@ Per [`../README.md`](../README.md)'s ownership rules, this area does **not** own
 **BR-R-023** — Any `tls.*` key on a `transport=rtu` descriptor is a setup failure (exit 1, BR-R-013) naming the offending key, whatever its path or value, including `tls.mode=none`.
 
 **BR-R-024** — Descriptor TLS resolution, verification, and validation not covered by BR-R-011, BR-R-020, BR-R-021, BR-R-022, and BR-R-023 follow MB-R-104–109 and MB-R-161–MB-R-174; the bridge defines no TLS field of its own.
+
+## Roles and relay behavior
+
+**BR-R-005** — Upstream always acts as server: bridge listens for/accepts connections (tcp, rtu_over_tcp, ascii_over_tcp) or serves the opened link (rtu), reusing the existing server accept-loop / single-serial-link behavior unchanged.
+
+**BR-R-006** — Downstream always acts as client: bridge connects (tcp, rtu_over_tcp, ascii_over_tcp) or opens the serial port (rtu) as an ordinary client, including reconnect/backoff (MB-R-050–056) when enabled.
+
+**BR-R-007** — Each decoded upstream request is forwarded downstream unmodified (same unit id, function code, address, count) and awaited; the downstream response or exception is relayed back upstream unmodified. No register/bit-count limit beyond each transport's wire format.
+
+**BR-R-008** — A request to slave id 0 received on an RTU upstream is forwarded downstream and receives no upstream response (MB-R-103).
+
+**BR-R-009** — A request forwarded to an RTU downstream addressed to slave id 0 is transmitted fire-and-forget, not awaited (MB-R-102).
+
+**BR-R-010** — When downstream fails to connect while a forwarded request is outstanding (no established connection/serial link), bridge answers the upstream requester with exception `GatewayPathUnavailable` (0x0A).
+
+**BR-R-018** — When downstream is connected but the forwarded request times out or the connection drops before a response, bridge answers the upstream requester with exception `GatewayTargetDeviceFailedToRespond` (0x0B).
+
+**BR-R-019** — Both bridge exception codes `GatewayPathUnavailable` (0x0A, BR-R-010) and `GatewayTargetDeviceFailedToRespond` (0x0B, BR-R-018) exist in the vendored `rust_modbus::ExceptionCode` enum (values 10/11); ordinary ferrowl servers never emit them (`api-contract.md`'s exhaustive list is 0x01–0x04).
 
 ```
 --upstream 'transport=tcp,ip=0.0.0.0,port=8502,tls.mode=mutual,tls.identity.source=self-signed,tls.verification.verify=ca-files,tls.verification.ca_files=/etc/ferrowl/a.pem;/etc/ferrowl/b.pem'

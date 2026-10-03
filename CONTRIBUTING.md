@@ -170,6 +170,10 @@ sequenceDiagram
     User->>Orch: approved
     deactivate Planner
     Orch->>Git: create feature branch and worktree, one stage card per plan stage
+    Orch->>Author: spawn: draft PR body from the issue and the plan summary
+    activate Author
+    Author-->>Orch: ready, draft PR body written (no approval stop, gate 4 replaces it)
+    deactivate Author
     end
 
     rect rgba(180,83,9,0.10)
@@ -192,15 +196,28 @@ sequenceDiagram
             Orch->>Impl: findings, review path
             Impl-->>Orch: stage green again
         end
+        opt draft PR exists and has unresolved review threads
+            Orch->>Git: fetch the threads into a file
+            Orch->>Impl: feedback file, like review findings
+            Impl-->>Orch: fixed, reply per thread filled in
+            Note over Orch,Reviewer: checks and a fresh review again before the approval stop
+        end
         Orch->>User: approval stop: stage (or wave)
         User->>Orch: approved
         Orch->>Impl: commit
         Impl->>Git: commit stage in worktree
         Impl-->>Orch: committed
         Orch->>Git: push, re-run checks on the pushed commit
+        opt first push of the branch
+            Orch->>Git: open draft PR from the draft body
+            Note over Orch,Git: every later push updates it, the user reviews there, gate 4 marks it ready
+        end
+        opt replies filled in
+            Orch->>Git: post each reply on its thread and resolve it
+        end
     end
     deactivate Impl
-    Note over Orch,Git: parallel: per-stage worktrees branch off the feature branch, clean stages merge into it, then a fresh review of the wave and an approval stop
+    Note over Orch,Git: parallel: per-stage worktrees branch off the feature branch, clean stages merge into it and the feature branch is pushed, then a fresh review of the wave and an approval stop
     end
 
     rect rgba(29,78,216,0.10)
@@ -219,15 +236,15 @@ sequenceDiagram
 
     rect rgba(47,111,78,0.10)
     Note over User,Git: Gate 4 - pull request
-    Orch->>User: approval stop: open a PR, or manual run first?
+    Orch->>User: approval stop: mark the draft PR ready, or manual run first?
     User->>Orch: approved
     Orch->>Author: spawn: spec diff, plan, review, check log, branch commit log
     activate Author
-    Author-->>Orch: ready, PR draft written
+    Author-->>Orch: ready, full PR body written
     deactivate Author
-    Orch->>User: approval stop: PR draft
+    Orch->>User: approval stop: PR body
     User->>Orch: approved
-    Orch->>Git: push, create PR from draft, link the issue
+    Orch->>Git: push, replace the draft PR's title and body, link the issue, mark ready
     end
 
     rect rgba(75,85,99,0.12)

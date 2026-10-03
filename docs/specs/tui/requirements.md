@@ -2,7 +2,7 @@
 
 Application shell and tab model, focus model, keyboard navigation, `:` command line mechanism, modal dialog/overlay mechanism, in-TUI vim-modal Lua/JSON code editor, syntax highlighting, reusable widget set, live value/log rendering.
 
-IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contract.md) (exhaustive `:` command list, every keybinding table, code-editor mode/command set), [`edge-cases.md`](./edge-cases.md).
+See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contract.md) (exhaustive `:` command list, every keybinding table, code-editor mode/command set), [`edge-cases.md`](./edge-cases.md).
 
 **Area boundaries.** This area owns the *mechanism*: how `:` commands parse and dispatch, generic (app-level) commands, keybindings, vim + arrow navigation, dialogs as a mechanism, the code editor, syntax highlighting. It does **not** own protocol-specific command *semantics*: a command forwarded to a module view (Modbus `:set`, `:reload`, OCPP `:rfid`, `:start`/`:stop`) is *listed* here with general syntax; its effect on protocol state is `modbus/` or `ocpp/`. Which config fields a dialog exposes and their valid ranges belong to the protocol / `config-session/` areas; the dialog *mechanism* is owned here. The process command line (`ferrowl run`, CLI flags) is `cli-headless/`; only the in-TUI `:` line is owned here.
 
@@ -64,6 +64,8 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 ## Command line mechanism
 
+### Command mode and dispatch
+
 **UI-R-014** — `:` while the content panes are focused and no view overlay is open enters command mode: focus moves to the command line, buffer cleared, printable keys type into it. With a view overlay open, `:` types into the overlay.
 
 **UI-R-015** — In command mode, `Esc` cancels (discard buffer, restore content focus); `Enter` submits the trimmed buffer and restores content focus. Empty submission is a no-op.
@@ -83,6 +85,8 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 **UI-R-019** — `:quit` closes the active tab, stopping its module first, and quits the application only when it was the last tab. `:qall` quits immediately regardless of tab count.
 
 **UI-R-020** — While the command line is focused, a help popup lists available commands: generic app-level commands plus whatever the active view advertises for its module type.
+
+### Command-line widget
 
 **UI-R-189** — A command-line widget state carries an open flag, a single-line input state holding the typed text and its cursor, an optional error message, an optional notice message and a hint string.
 
@@ -104,6 +108,8 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-198** — The command-line widget parses nothing: the submit outcome of UI-R-191 carries the raw trimmed string and the widget derives no command from it.
 
+### Lifecycle command dispatch
+
 **UI-R-314** — Dispatching a module lifecycle `:` command (start, stop, restart, reload) never blocks the application's input and redraw loop: the command signals the module and returns, the loop continuing to consume key events and render frames while the operation runs to completion.
 
 **UI-R-315** — The outcome of a stop-bearing lifecycle command (stop, restart, reload) dispatched per UI-R-314 is appended to that module's message log when the stop completes, a failure at Error level (MB-R-098, OC-R-102), never discarded and never carried as the command's immediate `(level, message)` result. `:start` is outside this rule: spawning only schedules the task, so it has no deferred outcome and keeps its immediate result.
@@ -113,6 +119,8 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 **UI-R-350** — Applying an edited module configuration never blocks the application's input and redraw loop: the apply signals the backend's stop and returns, the restart completing asynchronously exactly as a lifecycle command does (UI-R-314), with the outcome appended to that module's message log when it lands (UI-R-315).
 
 ## Dialogs & overlays mechanism
+
+### Dialog keys
 
 **UI-R-021** — A dialog/overlay is a modal layer rendered over the content and log panes, consuming keyboard input while open. Overlays paint back-to-front (module overlays, command help popup, app-level dialog, keybind-help dialog on top).
 
@@ -124,11 +132,13 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-080** — The dialog key defaults (UI-R-022, UI-R-078, UI-R-079) apply only when the focused widget did not consume the key.
 
+### Setup dialog focus and borders
+
 **UI-R-067** — A setup dialog opens with exactly one field focused, the first in its `Tab` cycle (UI-R-022), and its focus cursor names that same field.
 
-**UI-R-330** — Every field of a freshly opened setup dialog other than the focused one (UI-R-067) opens unfocused, nested sections included.
+**UI-R-351** — Every field of a freshly opened setup dialog other than the focused one (UI-R-067) opens unfocused, nested sections included.
 
-**UI-R-331** — Where a setup dialog's focused field (UI-R-067) is a text input, it is the dialog's only field painting a text cursor.
+**UI-R-352** — Where a setup dialog's focused field (UI-R-067) is a text input, it is the dialog's only field painting a text cursor.
 
 **UI-R-068** — A single-line input's border is styled by validation first and focus second: text failing validation paints the error style focused or not; only a field whose text validates, or has no validator, paints the focused style when focused and the normal border otherwise. A disabled single-line input never paints the focused style.
 
@@ -136,11 +146,13 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-111** — As a consequence of UI-R-068, a fresh setup dialog shows a focused field with an error border (empty name input against a non-empty requirement); a dialog opened by `:edit` prefills the name and shows the focused border.
 
+### Close confirm and new-module flow
+
 **UI-R-023** — `Esc` on a dialog that may hold unsaved edits opens a close-confirmation popup; confirming (`Enter` or `Space`) closes, dismissing (`Esc`) returns to editing. A yes/no box defaults focus to the safe (cancel) choice.
 
 **UI-R-024** — The new-module flow is two staged overlays: module-type selector, then the chosen type's setup dialog.
 
-**UI-R-332** — Confirming the new-module type selector (UI-R-024) swaps in the chosen type's setup dialog.
+**UI-R-353** — Confirming the new-module type selector (UI-R-024) swaps in the chosen type's setup dialog.
 
 **UI-R-333** — Confirming a valid new-module setup dialog (UI-R-024) creates and starts the tab.
 
@@ -148,11 +160,15 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-025** — Creating a tab whose name collides with an existing tab is refused with a warning in the active tab's log, dialog left open.
 
+### Field-completion popup
+
 **UI-R-026** — A field-completion popup (suggestion input), while open, consumes `Up`/`Down` to move the highlight, `Enter` to accept, `Esc` to dismiss. While closed, `Up`/`Down`/`Enter`/`Esc` pass through to the dialog.
 
 **UI-R-081** — `Tab` is never consumed by a field-completion popup (UI-R-026), so it always moves focus to the dialog's next field.
 
 **UI-R-082** — Accepting a field-completion popup suggestion (UI-R-026) marked *partial* keeps the popup open and re-queries (e.g. descending a directory); accepting a non-partial one closes it.
+
+### Editor dialog
 
 **UI-R-199** — An editor-dialog widget renders a centered bordered box over the frame, clearing the cells beneath it, with a caller-supplied title on its border.
 
@@ -258,6 +274,8 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-036** — A disabled code editor ignores all mutating keys (insert, delete, paste, mode entry that would edit) while permitting navigation, and reports such keys unhandled.
 
+### Editor gutter labels
+
 **UI-R-164** — The multi-line code editor's state carries an optional list of gutter labels, one entry per buffer line, settable both when the state is built and afterwards; the default is no labels.
 
 **UI-R-165** — With gutter labels set (UI-R-164), the gutter cell of buffer row `i` renders the label at index `i` in place of that row's line index.
@@ -271,6 +289,8 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 **UI-R-169** — Gutter styling is independent of gutter content: a row rendering a gutter label is styled exactly as the same row rendering its line index would be, for the active row and every other row alike.
 
 **UI-R-172** — The gutter width of UI-R-167 is clamped to the field's area width, never exceeding it and never wrapping, so the gutter is always drawn inside the widget's area.
+
+### Editor paging and disabled-editor navigation
 
 **UI-R-293** — The multi-line code editor's state remembers the visible height in rows of its last render, and reports one row before the first render.
 
@@ -295,6 +315,8 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 **UI-R-303** — The multi-line code editor's state reports its current vertical scroll offset, the zero-based buffer line index drawn at the top of the viewport by its last render, and reports zero before the first render.
 
 ## Markdown input field
+
+### Markdown view modes, wrapping and navigation
 
 **UI-R-181** — The markdown input field is a multi-line widget composing the vim-modal code-editor state (UI-R-027 through UI-R-036): buffer, `Normal`/`Insert`/`Visual` modes, motions and operators, registers, single-level undo and the disabled flag, which the markdown widget surfaces as read-only.
 
@@ -332,6 +354,12 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-140** — An optional line-number gutter, off by default and selected on the widget builder, prints the source line number on the first display row of each source line and leaves continuation rows blank.
 
+**UI-R-155** — A read-only markdown input field ignores every mutating key and every mode-entry key, reporting them unhandled as the disabled code editor does (UI-R-036), so the widget never leaves `Normal` mode.
+
+**UI-R-188** — The markdown input field widget measures text without rendering it: given a text and an available width, it reports the number of display rows that text would occupy if drawn by that widget at that width, applying the same wrapping, hanging-indent and gutter rules as a render (UI-R-130 through UI-R-133, UI-R-140, UI-R-142), and mutating no state.
+
+### Markdown rendering
+
 **UI-R-141** — Markdown rendering styles come from a markdown theme with compile-time defaults, injected on the widget builder like the syntax theme, holding per-level heading styles, per-level quote-bar styles, and link, inline-code, bullet, horizontal-rule, image and read-only highlighted-row styles.
 
 **UI-R-142** — Rendering is line-preserving: one source line produces exactly one rendered line, wrapped over one or more display rows; lines are never joined into paragraphs and no construct is laid out across lines.
@@ -360,11 +388,9 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-154** — `![alt](url)` renders as `alt` in the theme's image style; the `!`, brackets, parentheses and URL are hidden.
 
-**UI-R-155** — A read-only markdown input field ignores every mutating key and every mode-entry key, reporting them unhandled as the disabled code editor does (UI-R-036), so the widget never leaves `Normal` mode.
-
-**UI-R-188** — The markdown input field widget measures text without rendering it: given a text and an available width, it reports the number of display rows that text would occupy if drawn by that widget at that width, applying the same wrapping, hanging-indent and gutter rules as a render (UI-R-130 through UI-R-133, UI-R-140, UI-R-142), and mutating no state.
-
 ## Diff widget
+
+### Diff parsing and layout
 
 **UI-R-207** — The diff widget takes a unified diff text and, optionally, the full new-side file text, and parses the diff into hunks, each hunk's header line supplying the old-side and new-side starting line numbers of its body.
 
@@ -396,6 +422,8 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-221** — The syntax language of UI-R-220 defaults to none, in which case the diff-kind style of UI-R-219 alone styles the text.
 
+### Diff modes, selection and navigation
+
 **UI-R-222** — The diff widget is read-only: it holds no editable buffer and reports every mutating and Insert-entering key unhandled, as the disabled code editor does (UI-R-036).
 
 **UI-R-223** — The diff widget has two modes, `Normal` and `Visual`: `v` and `V` enter Visual from Normal, `Esc` in Visual returns to Normal, `Esc` in Normal is left unhandled so it reaches the enclosing layer (UI-R-028), and no Insert mode exists.
@@ -419,6 +447,8 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 **UI-R-232** — With wrapping off (UI-R-260), `h`, `l`, `Left`, `Right`, `0` and `$` scroll the diff widget horizontally with the semantics of UI-R-296 through UI-R-299, applying one horizontal offset to every pane at once.
 
 **UI-R-233** — `]c` moves the active row to the first row of the next hunk and `[c` to the first row of the previous hunk, each clamping at the last and first hunk.
+
+### Diff display mode, hunk-only and wrapping
 
 **UI-R-253** — With the full new-side text supplied (UI-R-207), each row's new-side entry is the corresponding line of that text, the old side is reconstructed from it — a context line repeated with its old-side number offset by the cumulative line delta of the preceding hunks — and removed lines come from the patch; the widget runs no diff algorithm of its own.
 
@@ -446,6 +476,8 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-265** — The vertical scroll offset, the paging of UI-R-231 and the keep-the-active-row-visible settle count display rows, so wrapping and annotations never make part of a row unreachable.
 
+### Diff marked ranges and annotations
+
 **UI-R-266** — The diff widget takes a list of marked ranges, each naming a side, a file line range on that side and a colour, settable when built and afterwards.
 
 **UI-R-267** — For every row a marked range covers (UI-R-266), the widget fills that side's gutter cell with the range's colour, so a marked span reads as one continuous block down the gutter.
@@ -472,6 +504,8 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-275** — `Ctrl+A` toggles every annotation between shown and hidden at once, hidden annotations contributing no display rows.
 
+### Diff row styling and word diff
+
 **UI-R-276** — The diff widget's added, removed and meta row styles are builder-settable and default to white on the color scheme's `diff_added` color, white on its `diff_removed` color, and the theme's meta style respectively (UI-R-219, UI-R-289).
 
 **UI-R-278** — The added and removed row styles (UI-R-219, UI-R-276) paint every cell of that entry's row across the full width of its pane — gutter cell, text cells and the blank cells past the end of the text alike — in either layout (UI-R-211, UI-R-213), so the row reads as one uninterrupted band.
@@ -489,6 +523,8 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 **UI-R-284** — Word-diff emphasis (UI-R-283) sets the background only: a span's foreground stays whatever UI-R-219 through UI-R-221 give it, so syntax highlighting survives inside the emphasised words.
 
 **UI-R-285** — A body line inside a hunk with no characters at all is a context line whose text is empty, so it occupies both entries of one row (UI-R-209) and both sides advance their file line counter and show their number in the gutter (UI-R-217), never a meta row (UI-R-210).
+
+### Diff border, colors and focus
 
 **UI-R-286** — The diff widget's border is a builder option, a border around its pane or panes or no border at all, defaulting to no border (UI-R-306, UI-R-307).
 
@@ -522,6 +558,8 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 ## File tree widget
 
+### File tree navigation
+
 **UI-R-234** — The file tree widget's state is built from a list of entries, each naming a path and optionally a status and a badge, and derives the directory nodes from the paths' components, so a caller supplies a flat list and never assembles a tree.
 
 **UI-R-235** — Every directory node is expanded when the tree is built, and the state can expand all directories or collapse all of them in one call.
@@ -542,13 +580,15 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-243** — The file tree widget answers the selected node's full path and whether that node is a directory.
 
-**UI-R-244** — A file tree is generic over a caller-chosen status type, a file node may carry an optional status of that type, and the row's leading marker and its styling are the ones the formatting trait implemented for that type reports for the node's status, so the widget fixes neither the set of statuses nor how any of them looks.
-
 **UI-R-245** — The file tree's viewport scrolls vertically to keep the selected row visible, and `PageDown`, `PageUp`, `Ctrl+D` and `Ctrl+U` move the selection with the remembered-height and clamping semantics of UI-R-293 through UI-R-295.
 
 **UI-R-246** — The file tree paints the focused border style while focused and the normal border otherwise (UI-R-110).
 
 **UI-R-252** — The file tree draws its selected row in the theme's highlighted-row style across the widget's full width, as the diff widget draws its active row (UI-R-224), the row's status styling (UI-R-244) supplying the foreground.
+
+### File tree status and badges
+
+**UI-R-244** — A file tree is generic over a caller-chosen status type, a file node may carry an optional status of that type, and the row's leading marker and its styling are the ones the formatting trait implemented for that type reports for the node's status, so the widget fixes neither the set of statuses nor how any of them looks.
 
 **UI-R-341** — A file tree is generic over a caller-chosen badge type, a file node may carry an optional badge of that type, and the badge's text and its optional style are the ones the badge-formatting trait implemented for that type reports, so a caller can hand the widget its own values and never assemble a rendered badge.
 
@@ -572,11 +612,15 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 ## Syntax highlighting
 
+### Highlighting model
+
 **UI-R-037** — Syntax highlighting is pure text-to-span computation: for a language and one line of source (plus a carry-over line state for multi-line constructs) it returns `(start_char, end_char, kind)` spans, sorted by start, non-overlapping, character indices. Four languages: Lua, JSON, Markdown and Diff.
 
 **UI-R-038** — When lines are highlighted in order, the carry-over state passes an open multi-line construct (Lua long string, long comment) from each line to the next, so every line from the one carrying the opening delimiter through the one carrying the closing delimiter is highlighted as that construct rather than restarting as ordinary code at the line boundary.
 
 **UI-R-039** — Highlight kinds are a fixed enumeration (keyword, identifier, number, string, comment, punctuation, JSON key, literal, object identifier, function identifier, diff added, diff removed, diff meta); the consumer maps kind to colors. Highlighting never mutates the source.
+
+### Diff language
 
 **UI-R-156** — The Diff language classifies whole lines only: highlighting one line yields at most one span, and that span covers the entire line from the first to the last character.
 
@@ -597,6 +641,8 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 **UI-R-170** — The Diff language provides no formatter, so a field set to Diff is left byte-for-byte unchanged on blur (UI-R-033).
 
 **UI-R-171** — The Diff language's per-line block-balance delta is always zero, so auto-indent on newline (UI-R-032) in a Diff field only inherits the current line's leading indentation.
+
+### Markdown language
 
 **UI-R-176** — The Markdown language exposes, beside the span path of UI-R-037, a per-line block-model entry point: given one source line and a carried state it returns that line's block kind — paragraph, heading with level 1–6, unordered list item with nesting depth and marker character, ordered list item with nesting depth, task item with checked state, block quote with nesting depth, horizontal rule, fence delimiter with info string, or fence body — together with the inline spans of UI-R-178.
 
@@ -628,6 +674,10 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-185** — A live-updated table cell (UI-R-046) whose value changes is painted in a change-highlight style for 2 seconds after the change (the same window MB-R-147's monitor recency marker uses), then returns to its normal style.
 
+**UI-R-066** — The shared `Table` widget's optional selection-marker gutter reserves zero width whenever no row is selected, otherwise exactly the highlight symbol's rendered width, for every table regardless of whether the marker is shown.
+
+**UI-R-109** — A `Table` widget's selected row's background is painted with its highlight style in every case except an unfocused table with the selection marker (UI-R-066) shown, where the marker glyph alone is the cue.
+
 ## Widget & focus-derive contract
 
 **UI-R-047** — Reusable widgets follow one event contract: offered a `(modifiers, code)` key event, each returns *consumed* or *unhandled* (carrying the original key back). Unhandled propagates to the enclosing layer; consumed stops propagation.
@@ -642,6 +692,8 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-050** — The color scheme is a single compile-time constant selected by build feature; no runtime switch.
 
+### Tab widget rendering
+
 **UI-R-114** — A tab widget renders an ordered list of tab titles laid out one after another in list order along its layout direction (UI-R-173), each tab occupying as many cells along that direction as its title has characters, plus its padding cells (UI-R-120).
 
 **UI-R-115** — Under `Vertical` layout (UI-R-173) a tab's title in the tab widget (UI-R-114) is written one character per row, top to bottom in title order, so an n-character title occupies n consecutive character rows.
@@ -651,8 +703,6 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 **UI-R-117** — When the tabs of the tab widget (UI-R-114) need more cells along the layout direction (UI-R-173) than the area offers, the widget scrolls along that direction so the active tab's block of cells stays visible.
 
 **UI-R-118** — The tab widget's scroll (UI-R-117) places the active tab's block as near the middle of the area as fits: the cells before the block along the layout direction take at most half the leftover extent and the cells after it take the remainder, and extent one side cannot use never rolls over to the other.
-
-**UI-R-119** — The tab widget (UI-R-114) derives no selection of its own: the caller owns the tab list and the active index in the widget's state and updates them before each render, and the only field the widget itself maintains is the scroll offset (UI-R-117), in either layout direction.
 
 **UI-R-120** — The tab widget (UI-R-114) takes a padding of a horizontal count H and a vertical count V, both default 0, and renders the count running along its layout direction (UI-R-173) — V under `Vertical`, H under `Horizontal` — as that many blank cells before and that many after every tab's character cells (UI-R-115, UI-R-174).
 
@@ -678,6 +728,10 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-175** — The tab widget recomputes its scroll offset from the active tab's block on every render (UI-R-118) and stores it in its state as the record of the last computed window start, so the stored offset is an output of a render and never an input carried into the next one.
 
+### Tab widget state
+
+**UI-R-119** — The tab widget (UI-R-114) derives no selection of its own: the caller owns the tab list and the active index in the widget's state and updates them before each render, and the only field the widget itself maintains is the scroll offset (UI-R-117), in either layout direction.
+
 **UI-R-324** — The tab widget's state (UI-R-119) reports a shared reference to the tab value at its active index (UI-R-325), and reports nothing only when its tab list is empty.
 
 **UI-R-325** — Every read of the tab widget state's active index — by the state's own accessors, by a selection operation (UI-R-326, UI-R-327, UI-R-328) and by rendering (UI-R-116, UI-R-118) alike — yields a valid index into the current tab list: a stored value that is not one, including a value the caller wrote into the field directly (UI-R-119), yields `0`.
@@ -692,13 +746,13 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 ## Modbus monitor view
 
+### Monitor panels and tables
+
 **UI-R-060** — A Modbus monitor module's content view has a left panel listing every unit id observed (updated live) and, on the right, sections scoped to the selected unit id: a message table (MB-R-146 records), a memory layout (MB-R-144's observed-value table, grouped by table kind), and a resolved-registers table (MB-R-145 interpretations applied to that unit id's memory).
 
 **UI-R-100** — The Modbus monitor content view's resolved-registers table (UI-R-060) is hidden entirely when no interpretation exists for the selected unit id.
 
 **UI-R-101** — A Modbus monitor module's own log occupies the bottom log pane of its tab per UI-R-003 (UI-R-060).
-
-**UI-R-061** — On a monitor view, `:add`/`:a` opens a dialog to add a register interpretation (MB-R-145) scoped to the selected unit id, mirroring the client/server `:add` dialog (`api-contract.md`). The resolved-registers table reflects it immediately. With no unit id discovered yet, `:add` is rejected with a Warning-level message instead of opening.
 
 **UI-R-062** — The message table (UI-R-060) renders one row per MB-R-146 record for the selected unit id, most recent first, columns Time, Status, Slave, Operation, Address, Quantity, Values/Payload.
 
@@ -722,9 +776,9 @@ IDs stable, append-only (`UI-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **UI-R-065** — Tab/Shift+Tab on a monitor content view cycles focus across panels: Units, Messages, Memory layout, Resolved registers, back to Units, skipping Resolved registers whenever hidden (UI-R-100). Each panel keeps its own selection/scroll position; Up/Down/Left/Right and Enter act on the focused panel.
 
-**UI-R-066** — The shared `Table` widget's optional selection-marker gutter reserves zero width whenever no row is selected, otherwise exactly the highlight symbol's rendered width, for every table regardless of whether the marker is shown.
+### Monitor overlays
 
-**UI-R-109** — A `Table` widget's selected row's background is painted with its highlight style in every case except an unfocused table with the selection marker (UI-R-066) shown, where the marker glyph alone is the cue.
+**UI-R-061** — On a monitor view, `:add`/`:a` opens a dialog to add a register interpretation (MB-R-145) scoped to the selected unit id, mirroring the client/server `:add` dialog (`api-contract.md`). The resolved-registers table reflects it immediately. With no unit id discovered yet, `:add` is rejected with a Warning-level message instead of opening.
 
 **UI-R-112** — `Esc` on a Modbus monitor view overlay — the monitor setup-edit dialog, the add-interpretation dialog (UI-R-061), the edit-interpretation dialog (UI-R-108) — opens that overlay's own close-confirmation popup per UI-R-023 and never closes the overlay directly.
 

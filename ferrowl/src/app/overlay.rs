@@ -161,7 +161,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// UI-R-332 — confirming the new-module type selector swaps in the chosen type's setup dialog.
+    /// UI-R-353 — confirming the new-module type selector swaps in the chosen type's setup dialog.
     async fn ut_confirm_type_selector_swaps_in_setup_dialog() {
         let mut app = app_with(&[]);
         app.enter_new();

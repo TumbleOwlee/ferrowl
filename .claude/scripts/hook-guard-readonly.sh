@@ -7,8 +7,11 @@
 # `;`, `&&`, `||`, `|`, `&`, newline) is checked and the whole call is denied
 # if any segment could alter the repo, the working tree, or the filesystem —
 # mutating git subcommands, file-changing coreutils, in-place editors,
-# interpreters (a script can write anything), mutating cargo/gh subcommands,
-# and any output redirection. The sanctioned writes are an append (`>>` or
+# interpreters (a script can write anything), mutating package-manager/gh
+# subcommands, and any output redirection. The `cargo` case below is the one
+# stack-specific block: extend it with this project's package manager's
+# mutating subcommands (npm/pnpm install|add|remove, pip/uv add|sync, go get,
+# …); an unmatched command name never fires, so a foreign block is harmless. The sanctioned writes are an append (`>>` or
 # `tee -a`) to `.claude/tasks/artifacts/<slug>/review.md` and a rewrite (`>`
 # or `tee`) of `.claude/tasks/artifacts/<slug>/review.verdict.md`; everything
 # else the reviewer wanted to try belongs in the review as a finding for the
@@ -147,7 +150,7 @@ for seg in $segments; do
         tag)     case "$args" in '') case " $* " in *' -l '*|*' --list '*|*' -n'*|' tag '|*' --contains '*|*' --points-at '*) ;; *) offender=$seg ;; esac ;; *) offender=$seg ;; esac ;;
         config)  case " $* " in *' --get'*|*' -l '*|*' --list '*|*' get '*|*' list '*) ;; *) offender=$seg ;; esac ;;
       esac ;;
-    cargo)
+    cargo)  # stack-specific: see header
       subcommand "$@"
       case "$sub" in
         fix|install|uninstall|add|remove|rm|update|publish|init|new|generate-lockfile|vendor|yank|login|logout) offender=$seg ;;

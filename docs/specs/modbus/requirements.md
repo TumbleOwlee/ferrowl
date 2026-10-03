@@ -2,7 +2,7 @@
 
 Register model and codec, register store, client/server roles, TCP/RTU transports, reconnect, Modbus device configuration.
 
-IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contract.md) (function codes, config fields), [`data-contract.md`](./data-contract.md) (register tables, formats, addressing), [`edge-cases.md`](./edge-cases.md).
+See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contract.md) (function codes, config fields), [`data-contract.md`](./data-contract.md) (register tables, formats, addressing), [`edge-cases.md`](./edge-cases.md).
 
 ---
 
@@ -334,6 +334,8 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 ## Module lifecycle and device configuration
 
+### Store build
+
 **MB-R-076** — Each Modbus module instance is a client, a server, or a monitor (never more than one), over TCP, RTU, RtuOverTcp, Udp, Ascii, or AsciiOverTcp.
 
 **MB-R-210** — A client or server instance (MB-R-076) owns one shared register store, one register set, and one log.
@@ -348,6 +350,8 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-080** — A virtual register never occupies store memory; its value lives in a per-module, name-keyed virtual store. Without `default` it is seeded with its format's decoding of all-zero words.
 
+### Poll planning
+
 **MB-R-081** — A client's poll operations derive from the definitions: write-only and virtual registers excluded; the rest grouped by (slave id, read function code).
 
 **MB-R-082** — Without explicit `read_ranges` for a function code, each register in that group is read by its own request; no merging across gaps.
@@ -360,11 +364,15 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-086** — A split point falling inside a register moves back to that register's start, so no request reads a register in half.
 
+### Timing and runtime reconfiguration
+
 **MB-R-087** — Effective timing: device config's `timeout_ms` / `delay_ms` / `interval_ms` / `reconnect` when set, else 3000 ms / 1000 ms / 1000 ms / enabled. Timing is a property of the device config, never the session's per-instance spec.
 
 **MB-R-088** — Adding, editing, or deleting a register at runtime rebuilds the shared operation list; the running client picks it up on its next poll cycle without reconnect.
 
 **MB-R-089** — Reconfiguring a module's endpoint or role stops the running instance, rebuilds it against the same store and register set, and preserves stored values.
+
+### Writes
 
 **MB-R-090** — Writing a value to a fixed-address register on a **server** read-modify-writes its words into the store per MB-R-009, bypassing cell access checks.
 
@@ -378,11 +386,15 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-093** — Sending a write command to a module whose instance is a server, or not running, fails with an error, never silently dropped.
 
+### Stop
+
 **MB-R-094** — Stopping a client first requests graceful termination and aborts the task only if it has not finished within the grace period; a stopped instance is restartable.
 
 **MB-R-098** — When a Modbus module view stops its instance for `:restart` or `:reload`, a stop failure other than "not running" is reported in the module message log at Error level, not discarded.
 
 ## TLS policy
+
+### TLS config shape
 
 **MB-R-104** — The Modbus TCP connection config carries a `tls` field of type `ModbusTlsConfig`, present unconditionally, holding one `ServerTlsPolicy` under `server` and one `ClientTlsPolicy` under `client`, serialized `[tls.server]`/`[tls.client]`.
 
@@ -404,6 +416,10 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-168** — OCPP CS and CSMS adopt the same policy enums and shared types as MB-R-105 (OC-R-039/OC-R-096) in the two-role container of OC-R-126.
 
+**MB-R-112** — The RTU connection config carries no `tls` field; TLS applies to TCP transports only.
+
+### Server-role TLS
+
 **MB-R-106** — With `tls` set, a server's presented certificate follows its `identity`: `CertSource::Files` presents the PEM files at `cert_file`/`key_file`; `CertSource::SelfSigned` presents an ephemeral self-signed certificate; `CertSource::Ephemeral` presents the same with the fallback logged.
 
 **MB-R-169** — A server's self-signed pair (MB-R-106) is generated once and cached for the module instance's life; every subsequent bind, reconnect-driven rebind, `:restart`/`:reload` reuses it, including across a config edit leaving the source self-signed. A torn-down and freshly constructed instance (not `:restart`/`:reload`) discards the cache; the pair is never persisted.
@@ -422,6 +438,8 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-174** — A server's `ServerTlsPolicy::Tls` never requests a client certificate.
 
+### Client-role TLS
+
 **MB-R-109** — With `tls` set on a client, the server certificate is verified per `verification`: `RootStore` against the native root store plus every `extra_ca_files` entry, any one anchor sufficing; `CaFiles` against exactly the named `ca_files`, not the native store, `ca_files` non-empty; `Skip` accepts any server certificate unauthenticated.
 
 **MB-R-110** — A client presents a TLS identity when, and only when, its policy is `ClientTlsPolicy::Mutual`; `Tls` and `None` present none.
@@ -429,6 +447,8 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 **MB-R-175** — A client's presented TLS identity (MB-R-110) follows its `identity`: `CertSource::Files` presents the PEM pair at `cert_file`/`key_file`; `CertSource::SelfSigned` presents MB-R-138's cached ephemeral pair.
 
 **MB-R-176** — `CertSource::Ephemeral` is rejected at construction as a client identity (MB-R-110).
+
+### TLS handshake and build failures
 
 **MB-R-111** — A TLS handshake failure is distinguished from a connection-refused/transport error and from a request timeout. Client: a failed connection attempt under MB-R-050–MB-R-055.
 
@@ -440,8 +460,6 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-251** — `ferrowl-modbus`'s typed TLS error (MB-R-250) covers both failure tiers as distinct cases: each of MB-R-167's three construction rejections, mapped from the shared TLS policy error rather than carrying it by identity; a certificate, key, or CA file that cannot be read, carrying the path and the underlying I/O cause; a readable certificate, key, or CA file whose PEM cannot be parsed, carrying the path and the underlying parse cause; a readable file holding no certificate; and a failure to generate a self-signed pair (MB-R-106).
 
-**MB-R-112** — The RTU connection config carries no `tls` field; TLS applies to TCP transports only.
-
 ## Region-declaration diagnostics
 
 **MB-R-129** — When `Memory::add_ranges` returns `false` at a module-construction, module-reconfiguration, or runtime register-edit call site, the module logs the rejection to its message log at Warning level.
@@ -451,6 +469,8 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 **MB-R-185** — `Memory::add_ranges`'s return value and the silent non-application are unchanged by the MB-R-129 logging.
 
 ## Monitor
+
+### Monitor port and framing
 
 **MB-R-140** — A monitor module is configurable only on `Rtu` or `Ascii`; `RtuOverTcp`, `AsciiOverTcp`, `Tcp`, `Udp` are invalid for the monitor role, since only a physical serial bus carries traffic between other devices.
 
@@ -466,6 +486,8 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-194** — A frame failing CRC (RTU) or LRC (Ascii), or otherwise malformed, is logged by the monitor at Warning level and discarded; decoding resumes at the next frame boundary (MB-R-142).
 
+### Monitor log, observed values and interpretations
+
 **MB-R-143** — The monitor's log carries one entry per completed request/response pairing and one per unmatched request, each with MB-R-142's decoded fields plus a timestamp. A request to slave id 0 (broadcast) is logged complete on its own (MB-R-102's fire-and-forget semantics), never marked unmatched.
 
 **MB-R-144** — A monitor maintains an observed-value table keyed by (slave id, table kind), MB-R-026's key shape, for the nine table-shaping operations `ReadCoils`, `ReadDiscreteInputs`, `ReadHoldingRegisters`, `ReadInputRegisters`, `WriteSingleCoil`, `WriteSingleRegister`, `WriteMultipleCoils`, `WriteMultipleRegisters`, `ReadWriteMultipleRegisters`.
@@ -476,7 +498,7 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-197** — A matched pair with an exception code, and an unmatched request, write no value into the monitor's observed-value table (MB-R-144), but every slave id reaching an MB-R-143 entry is marked seen, so any slave with recorded traffic appears in the unit id listing (UI-R-060) before its first value.
 
-**MB-R-145** — A monitor lets the user author display-only register definitions against its observed-value table: (slave id, table kind, address, format), the same format machinery as a `RegisterDef` (data-contract.md `## Address ranges in the store`) with no access-direction field.
+**MB-R-145** — A monitor lets the user author display-only register definitions against its observed-value table: (slave id, table kind, address, format), the same format machinery as a `RegisterDef` (api-contract.md ``### `RegisterDef` ``) with no access-direction field.
 
 **MB-R-198** — Applying a monitor interpretation (MB-R-145) decodes the observed-value table's current raw words at that address as a store cell would be decoded; an address with no value observed yet renders as not-yet-observed, never decoding zeroed memory as a value.
 
@@ -492,6 +514,8 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-217** — Neither editing (MB-R-148) nor removing (MB-R-216) an interpretation writes to the bus or touches the observed-value table (MB-R-144).
 
+### Monitor lifecycle and configuration
+
 **MB-R-252** — Stopping a monitor module signals its receive task a graceful terminate and aborts that task only if it has not finished within a 100 ms grace period.
 
 **MB-R-255** — Applying an edited monitor configuration rebuilds the module only once the stop it signalled per MB-R-252 has settled, never aborting the receive task outright at apply time.
@@ -505,6 +529,14 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 **MB-R-200** — On an MB-R-150 path match the module instance skips the OS-level open for that attempt, reports a distinct path-conflict status/log entry, then retries on the ordinary open-failure backoff cadence, recovering once the conflicting instance stops or moves off that path.
 
 **MB-R-201** — With `reconnect` disabled, an MB-R-150 path match makes the single attempt report the same path-conflict status (MB-R-200) before stopping.
+
+**MB-R-152** — A monitor module's displayed status follows MB-R-137's three-state rule with "serial port open" for "transport connected": `CONNECTED` while the port is open and read; `RECONNECTING` while the task runs but the port is not open (MB-R-130–MB-R-134, MB-R-192); `DISCONNECTED` while the task is not running.
+
+---
+
+## Add/edit register dialog
+
+### Value and default evaluation
 
 **MB-R-151** — The add/edit register dialog's Value and Default Value inputs are hidden and unfocusable for a `ReadOnly` register on a **client** module (MB-R-159 excludes it from client writes). On a **server**, where MB-R-090 bypasses access checks, they stay shown and editable regardless of access.
 
@@ -522,6 +554,8 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-228** — Confirming with a pane hidden by MB-R-151 writes no value through that pane and carries the register's existing stored value and configured `default` through unchanged, on add as on edit; a hidden pane never unsets `default` (MB-R-225 applies to shown inputs only).
 
+### Coil and discrete-input selection
+
 **MB-R-229** — In the add/edit **register** dialog, and nowhere else, a register of kind `Coil` or `DiscreteInput` presents its Value pane in that dialog's selection variant by default, offering exactly `ON`, `OFF` (MB-R-232's fixed pair, never any alias list the register declares) plus a not-set state `UNSET`, selected `UNSET`, never a free-text input.
 
 **MB-R-230** — `ON` in an MB-R-229 selection is the value 1 and `OFF` is 0, the same set/clear encoding a coil write uses (MB-R-061).
@@ -538,12 +572,6 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-236** — Confirming through a *shown* MB-R-234 Default Value pane sets the register definition's `default` to 1 for `ON` and 0 for `OFF` (MB-R-230), so a boolean register confirmed with that pane shown always carries a default and MB-R-225's unset case cannot arise for it; a pane hidden by MB-R-151 writes nothing and preserves the configured default under MB-R-228.
 
-**MB-R-237** — Confirming the add/edit register dialog opened as *add* (`:add`, client or server) appends a new register to the module's register list and never replaces the selected row, whichever row is selected.
-
-**MB-R-238** — Confirming the add/edit register dialog opened as *edit* replaces the selected register in place, keeping its position in the module's register list.
-
-**MB-R-239** — MB-R-237 and MB-R-238 hold identically for the dialog's text inputs and for its selection variant (MB-R-229, MB-R-234), the pane kind never affecting whether a register is appended or replaced.
-
 **MB-R-240** — Changing the add/edit register dialog's Kind to `Coil` or `DiscreteInput` replaces the dialog's working named-value list with exactly MB-R-232's fixed pair, `ON` = 1 and `OFF` = 0.
 
 **MB-R-241** — Changing the add/edit register dialog's Kind from `Coil` or `DiscreteInput` to any other kind leaves the dialog's working named-value list empty; neither the fixed pair (MB-R-240) nor any list the register declared before is carried over.
@@ -558,13 +586,25 @@ IDs stable, append-only (`MB-R-nnn`). See [`../README.md`](../README.md). Compan
 
 **MB-R-246** — Confirming a register of kind `Coil` or `DiscreteInput` through the add/edit register dialog stores the format a coil write is already encoded through — `U16`, `Big` endian, `Normal` word order, resolution 1.0, no bit-field mask — whatever the Type input showed before the Kind switch.
 
+### Add versus edit confirm
+
+**MB-R-237** — Confirming the add/edit register dialog opened as *add* (`:add`, client or server) appends a new register to the module's register list and never replaces the selected row, whichever row is selected.
+
+**MB-R-238** — Confirming the add/edit register dialog opened as *edit* replaces the selected register in place, keeping its position in the module's register list.
+
+**MB-R-239** — MB-R-237 and MB-R-238 hold identically for the dialog's text inputs and for its selection variant (MB-R-229, MB-R-234), the pane kind never affecting whether a register is appended or replaced.
+
+### Focus on open
+
 **MB-R-247** — The add/edit register dialog opened as *add* (`:add`) opens with its Label input focused.
 
 **MB-R-248** — The add/edit register dialog opened as *edit* opens with its Value pane focused, the text input or the selection (MB-R-229) according to the register's kind.
 
 **MB-R-249** — Where MB-R-151 hides the Value pane, an edit dialog (MB-R-248) opens with the first focusable field of its `Tab` cycle focused instead, UI-R-078's skipping applied.
 
-**MB-R-152** — A monitor module's displayed status follows MB-R-137's three-state rule with "serial port open" for "transport connected": `CONNECTED` while the port is open and read; `RECONNECTING` while the task runs but the port is not open (MB-R-130–MB-R-134, MB-R-192); `DISCONNECTED` while the task is not running.
+---
+
+## Format display text
 
 **MB-R-154** — A format's display text is its name followed by a parenthesized qualifier: numeric → byte order (`Big Endian` or `Little Endian`); `Ascii` → alignment (`Left` or `Right`).
 
