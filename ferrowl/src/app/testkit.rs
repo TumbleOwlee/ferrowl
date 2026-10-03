@@ -385,7 +385,12 @@ impl ModuleView for MockView {
     fn session_spec(&self, base: &std::path::Path) -> Option<serde_json::Value> {
         if let Some(device) = &self.device_for_spec {
             let relative = ferrowl_util::path::relativize_under(base, device);
-            return Some(serde_json::json!({"type": "mock", "device": relative}));
+            let mut spec = self
+                .session_spec
+                .clone()
+                .unwrap_or_else(|| serde_json::json!({"type": "mock"}));
+            spec["device"] = serde_json::Value::String(relative);
+            return Some(spec);
         }
         self.session_spec.clone()
     }

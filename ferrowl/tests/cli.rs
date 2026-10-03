@@ -250,7 +250,7 @@ fn it_fatal_diagnostics_go_to_stderr() {
 /// NF-R-071 — a bare `--session` argument is resolved against the process working directory,
 /// not against anything else: run from a directory containing only the session file, referenced
 /// by its bare filename. Regression guard, not red-first: `--session` was always CWD-relative,
-/// so this passes unchanged before and after s3's change.
+/// so this passes unchanged.
 fn it_session_flag_is_cwd_relative() {
     let dir = reserve_temp_dir("ferrowl_session_flag_cwd");
     std::fs::write(

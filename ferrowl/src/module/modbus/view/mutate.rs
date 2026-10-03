@@ -839,9 +839,7 @@ mod tests {
 
     /// NF-R-070 — TLS variants carrying no path (`source = "self-signed"`, `verify = "skip"`)
     /// survive a save unchanged; `relativize_paths` is a no-op on them. Regression guard: these
-    /// variants hold no path already today, so this passes before the NF-R-072
-    /// `relativize_paths` calls land too — it pins that adding them didn't turn this no-op case
-    /// into a mutation.
+    /// variants hold no path, so the test passes regardless of the relativization calls.
     #[test]
     fn ut_write_device_pathless_tls_variants_unchanged() {
         use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy, ServerTlsPolicy};

@@ -574,6 +574,55 @@ mod tests {
     }
 
     #[tokio::test]
+    /// CS-R-074 — a session written by `:write` loads back with the same instance list and its
+    /// file-relative `device` resolved against the session file's own directory, so the saved
+    /// bundle reloads identically.
+    async fn ut_write_output_reloads_with_same_instances() {
+        let dir = reserve_temp_dir("ferrowl_cs074_write_reload");
+        let spec = json!({
+            "type": "modbus",
+            "name": "bundle-instance",
+            "role": "server",
+            "endpoint": {"transport": "tcp", "ip": "127.0.0.1", "port": 0}
+        });
+        let device_path = dir.join("dev.toml").to_string_lossy().into_owned();
+        let (v, _h) = MockView::pair("m");
+        let mut app = build_app(vec![
+            v.with_session_spec(spec.clone())
+                .with_device(&device_path)
+                .boxed(),
+        ]);
+        let session_path = dir.join("session.toml");
+        app.run_command(&format!("write {}", session_path.to_str().unwrap()))
+            .await;
+
+        let loaded = crate::config::load_session(session_path.to_str().unwrap()).unwrap();
+        let mut expected = spec;
+        expected["device"] = json!("dev.toml");
+        assert_eq!(
+            loaded.modules,
+            vec![expected],
+            "the absolute device is written relative to the session file's directory"
+        );
+
+        let args = crate::cli::CliArgs {
+            command: None,
+            modules: vec![],
+            sessions: vec![session_path.to_str().unwrap().to_string()],
+            devices: vec![],
+            demo: false,
+        };
+        let specs = args.module_specs().unwrap();
+        assert_eq!(specs.len(), 1);
+        assert_eq!(specs[0].name, "bundle-instance");
+        assert_eq!(
+            specs[0].device,
+            dir.join("dev.toml").to_string_lossy(),
+            "the relative device resolves against the session file's directory"
+        );
+    }
+
+    #[tokio::test]
     /// CS-E-028 — a device file outside the save target's directory is written as the unchanged
     /// absolute path, never a `..`-relative one.
     async fn ut_write_leaves_device_outside_target_dir_absolute() {

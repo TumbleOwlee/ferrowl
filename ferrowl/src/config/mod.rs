@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     /// NF-R-069 — regression guard: an already-absolute PEM path survives `load_device`
-    /// unchanged, as it did before base-directory resolution existed.
+    /// unchanged.
     fn ut_load_device_leaves_absolute_pem_unchanged() {
         let dir = reserve_temp_dir("ferrowl_cfgmod_tls");
         let path = dir.join("device.toml").to_string_lossy().into_owned();

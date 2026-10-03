@@ -1073,7 +1073,7 @@ mod tests {
     }
 
     #[test]
-    /// CS-R-073 — regression guard: an absolute `device` is unaffected by the new resolution.
+    /// CS-R-073 — regression guard: an absolute `device` resolves to itself.
     fn ut_session_absolute_device_unchanged() {
         use crate::convert::{Converter, FileType};
         let session = config::Session {

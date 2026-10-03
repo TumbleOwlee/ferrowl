@@ -337,7 +337,7 @@ captured terminal content to PNG — run it after UI changes to refresh them.
 
 ### Session Configuration
 
-The session configuration can be saved using `:write` and contains the module configuration consisting of the name, path to the device configuration, the role and endpoint information. Timings (`timeout_ms`, `delay_ms`, `interval_ms`) are part of the device configuration, not the session. A relative `device` path is resolved against the session file's own directory, not the working directory — unlike `--session`, `--device` and `--module`'s `device=` key, which are relative to the working directory.
+The session configuration can be saved using `:write` and contains the module configuration consisting of the name, path to the device configuration, the role and endpoint information. Timings (`timeout_ms`, `delay_ms`, `interval_ms`) are part of the device configuration, not the session. A relative `device` path is resolved against the session file's own directory, not the working directory — unlike `--session`, `--device`, `--module`'s and `--ocpp`'s `device=` key, which are relative to the working directory. `:write` and `:write-device` re-encode a path as relative when it lies under the target file's directory and leave it absolute otherwise.
 
 ```toml
 [[modules]]
@@ -491,7 +491,7 @@ Timing precedence is device → built-in defaults (3000/1000/1000 ms).
 
 #### TLS
 
-A `tcp`, `rtu_over_tcp` or `ascii_over_tcp` device file may carry an optional `tls` table holding
+A device file may carry an optional `tls` table, consulted only for instances using the `tcp`, `rtu_over_tcp` or `ascii_over_tcp` transport (transport is chosen per instance), holding
 a `server` policy and a `client` policy, each independently defaulting to `mode = "none"` (plain
 TCP); an absent `tls` table, an empty one, and one with both policies `mode = "none"` are the same
 state. Only the policy matching the instance's own role (client or server, chosen per instance in
