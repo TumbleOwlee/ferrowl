@@ -421,23 +421,32 @@ mod tests {
     }
 
     fn roundtrip(ty: FileType, ext: &str) {
-        let original = sample();
+        // A live log-file sink (set at runtime, never present in a loaded file) must not survive
+        // the round trip: if it did, `#[serde(skip)]` would have regressed to a serialized field.
+        let mut original = sample();
+        original.log_file = Some("/tmp/live.log".into());
         let dir = reserve_temp_dir("ferrowl_modbus_device");
         let path = dir.join(format!("device.{ext}"));
         let path = path.to_str().unwrap();
         Converter::save(&original, path, ty).expect("save");
         let back: DeviceConfig = Converter::load(path, ty).expect("load");
-        assert_eq!(original, back);
+        let mut expected = original.clone();
+        expected.log_file = None;
+        assert_eq!(expected, back);
     }
 
     #[test]
-    /// CS-R-004 — a device config round-trips through TOML with no field loss.
+    /// CS-R-004, CS-R-075 — a device config round-trips through TOML with no field loss, and a
+    /// live `log_file` sink does not survive the round trip (it is runtime state, never
+    /// serialized).
     fn ut_device_roundtrip_toml() {
         roundtrip(FileType::Toml, "toml");
     }
 
     #[test]
-    /// CS-R-004 — a device config round-trips through JSON with no field loss.
+    /// CS-R-004, CS-R-075 — a device config round-trips through JSON with no field loss, and a
+    /// live `log_file` sink does not survive the round trip (it is runtime state, never
+    /// serialized).
     fn ut_device_roundtrip_json() {
         roundtrip(FileType::Json, "json");
     }

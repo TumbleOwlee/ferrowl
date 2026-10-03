@@ -142,9 +142,10 @@ pub struct OcppDeviceConfig {
     /// thread. Older device config files without this field load as the default (1.0s).
     #[serde(default = "default_script_interval")]
     pub script_interval: f64,
-    /// Persistent log-file base set via `:log <file>`; `None` disables file logging. The actual
-    /// file is `<stem>.<tab-name>.<ext>` next to this path (see `module_log_path`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Live log-file sink base set via `:log <file>`, for this run only; `None` disables file
+    /// logging. The actual file is `<stem>.<tab-name>.<ext>` next to this path (see
+    /// `module_log_path`). Runtime state — never written to the device-config file (CS-R-075).
+    #[serde(skip)]
     pub log_file: Option<String>,
     /// Charge-point-wide CSMS RFID accept-list (server role): id tags accepted for Authorize /
     /// transaction starts, inherited by every connector. Empty (together with all connector lists)
@@ -285,7 +286,7 @@ mod tests {
                 enabled: false,
             }],
             script_interval: 2.5,
-            log_file: Some("/tmp/ferrowl.log".into()),
+            log_file: None,
             rfids: vec!["DEADBEEF".into(), "CAFE1234".into()],
             connector_rfids: vec![ConnectorRfids {
                 evse: Some(1),
@@ -344,6 +345,62 @@ mod tests {
             let back: OcppDeviceConfig = Converter::load(path, ty).expect("load");
             assert_eq!(cfg, back);
         }
+    }
+
+    #[test]
+    /// CS-R-075 — a module's log-file sink path is runtime state and is never written to the
+    /// device-config file.
+    fn ut_device_config_log_file_not_serialized() {
+        let mut cfg = OcppDeviceConfig {
+            version: None,
+            ocpp_version: OcppVersion::V1_6,
+            role: OcppRole::Client,
+            timeout_ms: None,
+            reconnect: None,
+            scripts: Vec::new(),
+            script_interval: 1.0,
+            log_file: Some("/tmp/x.log".into()),
+            rfids: Vec::new(),
+            connector_rfids: Vec::new(),
+            connectors: Vec::new(),
+            config: Vec::new(),
+            extra_headers: Vec::new(),
+            model: None,
+            vendor: None,
+            firmware_version: None,
+            serial_number: None,
+            iccid: None,
+            imsi: None,
+            meter_serial_number: None,
+            meter_type: None,
+            security: OcppSecurityConfig::default(),
+        };
+        let toml = toml::to_string(&cfg).expect("serialize toml");
+        assert!(
+            !toml.contains("log_file"),
+            "TOML unexpectedly carries log_file: {toml}"
+        );
+        let json = serde_json::to_string(&cfg).expect("serialize json");
+        assert!(
+            !json.contains("log_file"),
+            "JSON unexpectedly carries log_file: {json}"
+        );
+        cfg.log_file = None;
+        let back: OcppDeviceConfig = toml::from_str(&toml).expect("deserialize toml");
+        assert_eq!(back, cfg);
+    }
+
+    #[test]
+    /// CS-R-076 — a device-config file written by an earlier build that still carries `log_file`
+    /// loads without error, and without configuring a sink.
+    fn ut_device_config_ignores_legacy_log_file_key() {
+        let json = serde_json::json!({
+            "ocpp_version": "1.6",
+            "role": "client",
+            "log_file": "/tmp/x.log",
+        });
+        let cfg: OcppDeviceConfig = serde_json::from_value(json).expect("legacy key ignored");
+        assert_eq!(cfg.log_file, None);
     }
 
     #[test]

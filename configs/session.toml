@@ -3,7 +3,7 @@
 
 [[modules]]
 name = "evse-1"
-device = "configs/evse.toml"
+device = "evse.toml"
 role = "server"
 
 [modules.endpoint]
@@ -13,7 +13,7 @@ port = 5020
 
 [[modules]]
 name = "evse-2"
-device = "configs/evse.toml"
+device = "evse.toml"
 role = "server"
 
 [modules.endpoint]

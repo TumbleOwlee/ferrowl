@@ -73,7 +73,7 @@ Boundary behavior, error semantics, intentional constraints.
 | **OC-E-042** | CSMS `ServerTlsPolicy::Mutual`, `verification` resolves to `CaFiles` with zero `ca_files` | fails at construction/`resolve()`, never at listener start (OC-R-039) |
 | **OC-E-043** | CSMS `ServerTlsPolicy::Mutual` with `identity: CertSource::SelfSigned` and `verification: CaFiles` with ≥1 file | permitted; self-signed identity and client-cert CAs are independent (OC-R-040) |
 | **OC-E-044** | CSMS `ServerTlsPolicy::Mutual` with self-signed certificate, `CaFiles` with zero files | fails at construction, as any zero-file `CaFiles` (OC-R-039) |
-| **OC-E-049** | Configured PEM file cannot be opened, or contains no certificate or no private key | CS dial / CSMS bind fails with a TLS error, before socket work |
+| **OC-E-049** | Configured PEM file cannot be opened, or contains no certificate or no private key | CS dial / CSMS bind fails with a TLS error, before socket work; the error names the resolved path (NF-R-069) |
 | **OC-E-050** | `username` without `password` (or vice versa) | Basic Auth **not** enabled; field inert |
 | **OC-E-051** | `wss://` **server** endpoint, identity `CertSource::Ephemeral` | binds with an ephemeral self-signed certificate, logs the fallback; never silently plain TCP |
 | **OC-E-052** | `ws://` **client** endpoint with TLS material | material inert; connection plain |

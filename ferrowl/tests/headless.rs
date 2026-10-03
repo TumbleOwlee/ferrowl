@@ -56,6 +56,55 @@ fn it_fails_hard_on_a_missing_device_config() {
 }
 
 #[test]
+/// CL-E-016, CS-E-031 — a session instance's `device` failing to load names the resolved
+/// (session-directory-relative) path in the `Error:` line, exactly as the TUI's skip warning
+/// does (CS-R-053), except headless exits 1 instead of skipping.
+fn it_headless_missing_device_error_names_resolved_path() {
+    let dir = reserve_temp_dir("ferrowl_headless_missing_device");
+    let session_path = dir.join("session.toml");
+    std::fs::write(
+        &session_path,
+        r#"
+[[modules]]
+name = "broken"
+device = "missing.toml"
+role = "server"
+
+[modules.endpoint]
+transport = "tcp"
+ip = "127.0.0.1"
+port = 0
+"#,
+    )
+    .unwrap();
+
+    // An unrelated working directory: if resolution fell back to the CWD instead of the
+    // session file's own directory, the warning would name a path under here, not under `dir`.
+    let unrelated_cwd = reserve_temp_dir("ferrowl_headless_missing_device_cwd");
+
+    let output = bin()
+        .current_dir(unrelated_cwd.path())
+        .args([
+            "run",
+            "--session",
+            session_path.to_str().unwrap(),
+            "--duration",
+            "1",
+        ])
+        .output()
+        .expect("failed to run ferrowl binary");
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let resolved = dir.join("missing.toml");
+    assert!(
+        stderr.lines().any(|line| line.starts_with("Error:")
+            && line.contains(&resolved.to_string_lossy().to_string())),
+        "expected an `Error:` line naming the resolved path {resolved:?}, got: {stderr}"
+    );
+}
+
+#[test]
 /// CL-R-050, CL-R-056 — a setup failure on the `build_modules_into` arm (a later module's device
 /// config fails to load) still stops every already-started module and reports it on stderr,
 /// the same as the other setup-failure arms.

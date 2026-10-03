@@ -951,8 +951,10 @@ impl ModuleView for ModbusModuleView {
         self.last_stop_outcome.take()
     }
 
-    fn session_spec(&self) -> Option<serde_json::Value> {
-        let mut v = serde_json::to_value(&self.spec).ok()?;
+    fn session_spec(&self, base: &std::path::Path) -> Option<serde_json::Value> {
+        let mut spec = self.spec.clone();
+        spec.device = ferrowl_util::path::relativize_under(base, &spec.device);
+        let mut v = serde_json::to_value(&spec).ok()?;
         v.as_object_mut()?.insert("type".into(), "modbus".into());
         Some(v)
     }
@@ -3258,5 +3260,19 @@ mod tests {
             }
             _ => panic!("bare :set should warn about usage"),
         }
+    }
+
+    #[test]
+    /// NF-R-072 — `session_spec` relativizes `spec.device` against the `:write` target directory.
+    fn ut_modbus_session_spec_relativizes_device() {
+        let dir = reserve_temp_dir("ferrowl_modbus_view_nfr072");
+        let device_path = dir.join("dev.toml").to_string_lossy().into_owned();
+        let device = empty_device();
+        let mut spec = tcp_server_spec();
+        spec.device = device_path;
+        let module = super::super::ModbusModule::new(&spec, &device);
+        let view = ModbusModuleView::new(module, spec, device);
+        let v = view.session_spec(dir.path()).unwrap();
+        assert_eq!(v["device"], "dev.toml");
     }
 }
