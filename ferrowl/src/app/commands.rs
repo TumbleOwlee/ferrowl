@@ -435,8 +435,10 @@ mod tests {
                 stop_bits: None,
             },
         };
-        let mut device = MonitorDeviceConfig::default();
-        device.reconnect = Some(true);
+        let device = MonitorDeviceConfig {
+            reconnect: Some(true),
+            ..Default::default()
+        };
         let module = ModbusMonitorModule::new(&spec, &device);
         let mut v = ModbusMonitorModuleView::new(module, spec.clone(), device);
         v.handle_command("start").await;
