@@ -10,7 +10,7 @@ use std::sync::atomic::Ordering;
 
 use ferrowl_modbus::tcp;
 use ferrowl_modbus::{Command, SlaveKey};
-use ferrowl_test_support::{TempDirGuard, reserve_tcp_port, reserve_temp_dir};
+use ferrowl_test_support::{TempDirGuard, reserve_tcp_port, reserve_temp_dir, wait_until};
 use ferrowl_util::tls::{CertSource, CertVerification, ClientTlsPolicy};
 use rcgen::{CertificateParams, Issuer, KeyPair};
 use rust_modbus::{
@@ -378,10 +378,13 @@ async fn it_tls_client_presents_self_signed_identity() {
     // quirk note above); the server's own accept count does. `accept()`'s task may not have
     // recorded it yet even though `connect()` already returned, so poll to a deadline instead
     // of guessing a fixed delay.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while accepted.load(Ordering::SeqCst) == 0 && std::time::Instant::now() < deadline {
-        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-    }
+    wait_until(
+        "the server accepted the handshake",
+        std::time::Duration::from_millis(5),
+        std::time::Duration::from_secs(10),
+        || (accepted.load(Ordering::SeqCst) != 0).then_some(()),
+    )
+    .await;
     assert_eq!(
         accepted.load(Ordering::SeqCst),
         1,

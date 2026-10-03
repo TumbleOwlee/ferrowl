@@ -15,6 +15,7 @@ use ferrowl_modbus::{
     Command, Error, FunctionCode, Key, Operation, SerialError, ServerCommand, SlaveKey, UnitId,
 };
 use ferrowl_store::{Memory, Range};
+use ferrowl_test_support::wait_until;
 use parking_lot::RwLock as MemLock;
 use tokio::sync::{RwLock, mpsc};
 use tokio::time::sleep;
@@ -191,21 +192,18 @@ async fn bridge_rtu_downstream_open_failure_answers_gateway_path_unavailable_and
 
     // The open keeps failing on a 1s-then-doubling backoff (INITIAL_BACKOFF): poll until a
     // second [bridge]-prefixed attempt has been logged, proving the retry loop is alive.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
-    loop {
-        let count = lines
-            .lock()
-            .iter()
-            .filter(|l| l.starts_with(ferrowl_modbus::bridge::ERROR_PREFIX))
-            .count();
-        if count >= 2 {
-            break;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "expected at least two [bridge]-prefixed open-failure lines within the deadline: {:?}",
-            lines.lock()
-        );
-        sleep(Duration::from_millis(20)).await;
-    }
+    wait_until(
+        "two [bridge]-prefixed open-failure lines",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || {
+            let count = lines
+                .lock()
+                .iter()
+                .filter(|l| l.starts_with(ferrowl_modbus::bridge::ERROR_PREFIX))
+                .count();
+            (count >= 2).then_some(())
+        },
+    )
+    .await;
 }
