@@ -496,6 +496,9 @@ impl<S: DrawSurface> App<S> {
                 tab.replace_view(new_view);
                 registry_stale = true;
             }
+            if tab.view.take_host_changed() {
+                registry_stale = true;
+            }
             // A deferred lifecycle command (e.g. `:reload`) may swap in a fresh module with a
             // fresh log ring after `run_command` already returned, so `commands.rs`'s own
             // `tab.log = tab.view.log();` on a `Handled` result no longer catches it.
@@ -1115,6 +1118,25 @@ mod tests {
         app.draw().unwrap();
         app.draw().unwrap();
         assert_eq!(app.screen.draws, before + 2, "each tick draws a frame");
+    }
+
+    #[tokio::test]
+    async fn ut_host_change_rebuilds_registry_on_next_tick() {
+        use super::testkit::{MockView, build_app};
+        use std::sync::Arc;
+
+        let view = MockView::pair("m")
+            .0
+            .with_host("mock")
+            .with_host_changed()
+            .boxed();
+        let mut app = build_app(vec![view]);
+        let before = app.registry.resolve("m").expect("registered");
+
+        app.refresh_snapshot().await;
+
+        let after = app.registry.resolve("m").expect("still registered");
+        assert!(!Arc::ptr_eq(&before, &after), "registry not rebuilt");
     }
 
     #[tokio::test]

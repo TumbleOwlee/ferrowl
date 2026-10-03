@@ -54,6 +54,8 @@ enum ModbusViewOverlay {
 ferrowl_ui::impl_overlay_keys!(SetupDialog);
 
 pub struct ModbusModuleView {
+    /// Set when `:reload` swaps in a fresh module, so `App` rebuilds the session registry.
+    host_changed: bool,
     /// Identity of this view instance in the session registry (SC-R-080).
     instance_id: u64,
     module: ModbusModule,
@@ -116,6 +118,7 @@ impl ModbusModuleView {
             })
             .collect();
         Self {
+            host_changed: false,
             instance_id: crate::registry::next_instance_id(),
             table: TableView::new(definitions),
             module,
@@ -545,6 +548,7 @@ impl ModuleView for ModbusModuleView {
                         let stop_err = stop_result.err().filter(|e| !e.is_not_running());
                         let new_module = ModbusModule::new(&self.spec, &device);
                         self.module = new_module;
+                        self.host_changed = true;
                         self.device = *device;
                         // MB-R-150 — reattach the session-wide registry (`ModbusModule::new`
                         // defaults to a private one), so an in-progress conflict survives
@@ -792,6 +796,7 @@ impl ModuleView for ModbusModuleView {
                     Err(_) => {
                         let new_module = ModbusModule::new(&self.spec, &device);
                         self.module = new_module;
+                        self.host_changed = true;
                         self.device = device;
                         // MB-R-150 — the fresh module's `serial_paths` defaults to a private
                         // registry (`ModbusModule::new`); reattach the session-wide one so an
@@ -976,6 +981,10 @@ impl ModuleView for ModbusModuleView {
     fn set_serial_paths(&mut self, registry: super::SerialPathRegistry) {
         self.module.set_serial_paths(registry.clone());
         self.serial_paths = registry;
+    }
+
+    fn take_host_changed(&mut self) -> bool {
+        std::mem::take(&mut self.host_changed)
     }
 
     fn module_host(&self) -> Option<std::sync::Arc<dyn ferrowl_lua::module::ModuleHost>> {
@@ -3272,5 +3281,126 @@ mod tests {
         let view = ModbusModuleView::new(module, spec, device);
         let v = view.session_spec(dir.path()).unwrap();
         assert_eq!(v["device"], "dev.toml");
+    }
+    /// A device with one holding register `marker` at address 0 and an enabled script that
+    /// counts into it, saved to a temp file; returns the spec pointing at the file and the device.
+    async fn counter_device_file(tag: &str) -> (ModuleSpec, DeviceConfig, impl Sized) {
+        use crate::config::device::{
+            AccessCfg, AlignmentCfg, EndianCfg, ReadRanges, RegisterDef, ValueType, WordOrderCfg,
+        };
+        let mut device = empty_device();
+        device.script_interval = 0.05;
+        device.read_ranges = ReadRanges {
+            holding: Some("0-10".into()),
+            ..Default::default()
+        };
+        device.definitions.insert(
+            "marker".into(),
+            RegisterDef {
+                slave_id: 1,
+                kind: Kind::HoldingRegister,
+                address: Some(0),
+                is_virtual: false,
+                access: AccessCfg::ReadWrite,
+                value_type: ValueType::U16,
+                endian: EndianCfg::Big,
+                word_order: WordOrderCfg::default(),
+                resolution: 1.0,
+                bitmask: None,
+                length: 1,
+                alignment: AlignmentCfg::Left,
+                values: vec![],
+                update: None,
+                description: String::new(),
+                default: None,
+            },
+        );
+        device.scripts = vec![ScriptDef {
+            name: "count".into(),
+            code: r#"n = (n or 0) + 1; C_Register:Set("marker", n)"#.into(),
+            enabled: true,
+        }];
+        let dir = reserve_temp_dir(tag);
+        let path = dir
+            .join("counter.toml")
+            .to_str()
+            .expect("utf-8")
+            .to_string();
+        let writer_spec = ModuleSpec {
+            device: path.clone(),
+            ..tcp_server_spec()
+        };
+        let module = super::super::ModbusModule::new(&writer_spec, &device);
+        let mut writer = ModbusModuleView::new(module, writer_spec.clone(), device.clone());
+        let _ = writer.handle_command(&format!("write-device {path}")).await;
+
+        let spec = ModuleSpec {
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 0,
+            },
+            ..writer_spec
+        };
+        (spec, device, dir)
+    }
+
+    fn marker_of(view: &ModbusModuleView) -> u16 {
+        view.module
+            .memory()
+            .read()
+            .read_unchecked(
+                Key {
+                    id: SlaveKey {
+                        slave_id: UnitId(1),
+                        kind: Kind::HoldingRegister,
+                    },
+                },
+                &Range::new(0, 1),
+            )
+            .map_or(0, |v| v[0])
+    }
+
+    #[tokio::test]
+    /// A `:reload` that swaps in a fresh module flags the host as changed, once.
+    async fn ut_reload_flags_host_changed() {
+        let (spec, device, _dir) = counter_device_file("ferrowl_view_hostchg").await;
+        let module = super::super::ModbusModule::new(&spec, &device);
+        let mut view = ModbusModuleView::new(module, spec, device);
+        assert!(!view.take_host_changed());
+        let _ = view.handle_command("reload").await;
+        assert!(view.take_host_changed());
+        assert!(!view.take_host_changed());
+        let _ = view.handle_command("stop").await;
+    }
+
+    #[tokio::test]
+    /// SC-R-024, SC-E-044 — `:reload` restarts the module's sim from a fresh Lua state.
+    async fn ut_reload_restarts_sim_with_fresh_globals() {
+        let (spec, device, _dir) = counter_device_file("ferrowl_view_reloadsim").await;
+        let module = super::super::ModbusModule::new(&spec, &device);
+        let mut view = ModbusModuleView::new(module, spec, device);
+        for _ in 0..300 {
+            if marker_of(&view) >= 5 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(marker_of(&view) >= 5, "counter never reached 5");
+        let _ = view.handle_command("reload").await;
+        let mut first = None;
+        for _ in 0..300 {
+            let v = marker_of(&view);
+            if v > 0 {
+                first = Some(v);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+        let first = first.expect("reloaded sim never wrote the marker");
+        assert!(
+            first < 5,
+            "globals survived the reload: first value {first}"
+        );
+        let _ = view.handle_command("stop").await;
     }
 }

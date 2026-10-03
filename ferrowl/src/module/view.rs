@@ -182,6 +182,12 @@ pub trait ModuleView: SetFocus + IsFocus {
     fn module_host(&self) -> Option<std::sync::Arc<dyn ferrowl_lua::module::ModuleHost>> {
         None
     }
+
+    /// True once after the view swapped the state its `module_host()` exposes without changing
+    /// identity; `App` then rebuilds the registry.
+    fn take_host_changed(&mut self) -> bool {
+        false
+    }
 }
 
 // Forwarding impls so a boxed module view is itself a focusable, event-handling node — lets the
