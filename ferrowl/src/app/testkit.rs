@@ -20,7 +20,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crossterm::event::{KeyCode, KeyModifiers};
-use ferrowl_lua::module::ModuleHost;
+use ferrowl_lua::module::{ModuleHost, OcppGuard, RegisterAccess};
 use ferrowl_ui::traits::{IsFocus, SetFocus};
 use ferrowl_ui::{DrawSurface, EventResult};
 use mlua::{AnyUserData, Lua, Result as LuaResult};
@@ -91,10 +91,13 @@ impl ModuleHost for MockHost {
     fn role(&self) -> &'static str {
         "mock"
     }
-    fn register_accessor(&self, _lua: &Lua) -> LuaResult<Option<AnyUserData>> {
-        Ok(None)
+    fn instance_id(&self) -> u64 {
+        0
     }
-    fn ocpp_accessor(&self, _lua: &Lua) -> LuaResult<Option<AnyUserData>> {
+    fn register_access(&self) -> Option<Arc<dyn RegisterAccess>> {
+        None
+    }
+    fn ocpp_accessor(&self, _lua: &Lua, _guard: OcppGuard) -> LuaResult<Option<AnyUserData>> {
         Ok(None)
     }
 }
@@ -158,6 +161,7 @@ pub(crate) struct MockView {
     device_for_spec: Option<String>,
     replacement: Option<Box<dyn ModuleView>>,
     host_kind: Option<&'static str>,
+    host_changed: bool,
     refreshes: Arc<AtomicUsize>,
     renders: Arc<AtomicUsize>,
     commands: Arc<Mutex<Vec<String>>>,
@@ -204,6 +208,7 @@ impl MockView {
             device_for_spec: None,
             replacement: None,
             host_kind: None,
+            host_changed: false,
             refreshes,
             renders,
             commands,
@@ -292,6 +297,12 @@ impl MockView {
     /// Make this view participate in the session-module registry under the given kind.
     pub(super) fn with_host(mut self, kind: &'static str) -> Self {
         self.host_kind = Some(kind);
+        self
+    }
+
+    /// Make the next `take_host_changed` poll report a swapped host state (one-shot).
+    pub(super) fn with_host_changed(mut self) -> Self {
+        self.host_changed = true;
         self
     }
 
@@ -406,6 +417,10 @@ impl ModuleView for MockView {
     fn module_host(&self) -> Option<Arc<dyn ModuleHost>> {
         self.host_kind
             .map(|kind| Arc::new(MockHost { kind }) as Arc<dyn ModuleHost>)
+    }
+
+    fn take_host_changed(&mut self) -> bool {
+        std::mem::take(&mut self.host_changed)
     }
 
     fn set_serial_paths(&mut self, registry: SerialPathRegistry) {

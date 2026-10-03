@@ -102,6 +102,14 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **SC-R-020** — The session-level sim reaches every other module's state through `C_Module`, which resolves modules by name and hands out the same `C_Register`-shaped or `C_OCPP`-shaped accessor those modules expose to their own sims.
 
+**SC-R-077** — `C_Module:Get(name)` in the session-level sim resolves `name` against the session's module set as it stands at the moment of the call, so a module added after the session sim started is returned on the next call.
+
+**SC-R-078** — A `ModuleHandle` (SC-E-038) and the `Register()` accessor obtained from it address the module instance current at the moment of each call, so after a Modbus reconfigure (MB-R-089) the next call reaches the new instance's state and never raises `unknown register`, `unknown module` or an unknown-field error for a name the new instance defines; an `OCPP()` accessor follows its module only across an in-place reconfiguration (OC-R-085), which keeps the module instance, and any change of the instance behind the name is SC-R-080.
+
+**SC-R-080** — Once the OCPP module instance an `OCPP()` accessor (or an `Accessor` derived from it) was obtained from is no longer the instance behind its module name (replaced by a role or version change, OC-R-085, SC-R-076; or its module closed, with or without a module reopened under the same name), every call on that accessor raises `module '<name>' was replaced; call OCPP() again`, while the `ModuleHandle` it came from stays live and its next `OCPP()` call returns an accessor for the current instance (or raises `unknown module` per SC-E-038 when none exists).
+
+**SC-R-079** — Adding, editing, rebuilding or replacing a session module neither stops nor restarts the session-level sim thread and leaves its Lua globals intact.
+
 **SC-R-021** — An OCPP **server** module runs its scripts as a client module does; scripting is not limited to the client role.
 
 ---
@@ -116,7 +124,15 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **SC-R-023** — Scripts are stored inline in device/session config files, not external `.lua` files.
 
-**SC-R-024** — Editing a script, toggling its enabled flag, or changing the cycle interval stops any running sim thread and starts a fresh one from the current enabled-script set (or leaves it stopped if none remain). The new context is fresh: all globals reset.
+**SC-R-024** — Editing a script, toggling its enabled flag, changing the cycle interval, or a Modbus module's `:reload` (which reloads the module's scripts) stops any running sim thread and starts a fresh one from the current enabled-script set (or leaves it stopped if none remain). The new context is fresh: all globals reset.
+
+**SC-R-070** — Adding, editing or deleting a register at runtime (MB-R-088) neither stops nor restarts the module's sim thread and leaves its Lua globals intact; only the edits listed in SC-R-024 restart a sim.
+
+**SC-R-081** — Reconfiguring a Modbus module's endpoint or role (MB-R-089) neither stops nor restarts the module's sim thread and leaves its Lua globals intact (SC-R-070).
+
+**SC-R-075** — An in-place OCPP module reconfiguration (OC-R-085) neither stops nor restarts the module's sim thread and leaves its Lua globals intact.
+
+**SC-R-076** — A role or version change of an OCPP module (OC-R-085) stops the module's running sim thread and starts a fresh one against the replacement view, with all globals reset as under SC-R-024, because the `C_OCPP` shape and action set are fixed per role and version (SC-E-044).
 
 **SC-R-025** — Legacy per-register `update` snippets in an older Modbus device config are migrated on load into named, enabled entries in the module's script list, preserving code.
 
@@ -149,6 +165,20 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **SC-R-028** — A register or OCPP state write from Lua applies to the module's in-memory/observed state only. A Modbus Lua write never emits a Modbus write command (unlike interactive `:set`); a written value on a client is transient and may be overwritten by the next poll (SC-E-033).
 
 **SC-R-029** — Host state reached from Lua is guarded by the same locks the network task uses, so each `Get`/`Set`/action call is atomic against concurrent host access. No cross-call transaction: a read-then-write may interleave with a concurrent host update.
+
+**SC-R-067** — `C_Register` `Get`, `Set` and `Has` resolve `name` against the module's register definitions as they stand at the moment of the call, never against a set captured when the sim's Lua context was built.
+
+**SC-R-068** — A register added to a Modbus module at runtime (MB-R-088) is reachable by its name from a sim thread running since before the add, on that sim's next `C_Register` call, with no sim restart (SC-R-067).
+
+**SC-R-069** — A register whose name, address, kind or format is edited at runtime (MB-R-088) is reachable by its post-edit name on a running sim's next `C_Register` call, and `Get`/`Set` read and write at its post-edit address in its post-edit format (SC-R-067).
+
+**SC-R-071** — A `C_Register`-shaped accessor obtained in the session-level sim through `C_Module:Get(name):Register()` resolves register names per SC-R-067, so SC-R-068 and SC-R-069 hold for it unchanged.
+
+**SC-R-072** — `C_OCPP` `Get`, `Set`, `<Action>` and the scoping methods (`Connector`, `GetConnectors`, `ChargingStation`, `GetChargingStations`) resolve against the OCPP module's state as it stands at the moment of the call, never against state captured when the sim's Lua context was built.
+
+**SC-R-073** — After an in-place OCPP module reconfiguration (OC-R-085), every field name a running sim's `C_OCPP` `Get`/`Set` accepted before the edit is accepted again on its next call at any scope still present after the edit (SC-R-072).
+
+**SC-R-074** — A connector added to an OCPP client module at runtime through the client view's connector add is listed by a running sim's next `GetConnectors` call and reachable through `Connector` (SC-R-072).
 
 ---
 

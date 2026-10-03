@@ -12,9 +12,11 @@ mod time;
 mod value_type;
 
 pub use log::{Log as LogModule, LogLevel, LogSink};
-pub use module_dir::{ModuleDir as ModuleDirModule, ModuleDirectory, ModuleHandle, ModuleHost};
+pub use module_dir::{
+    ModuleDir as ModuleDirModule, ModuleDirectory, ModuleHandle, ModuleHost, RegisterAccess,
+};
 pub use ocpp::traits::{OcppActions, OcppClientHost, OcppHandle, OcppServerHost};
-pub use ocpp::{Accessor, Ocpp as OcppModule, OcppClient, OcppServer};
+pub use ocpp::{Accessor, Ocpp as OcppModule, OcppClient, OcppGuard, OcppServer};
 pub use register::Register as RegisterModule;
 pub use register::traits::{Has, Read, Write};
 pub use statics::Statics as StaticsModule;

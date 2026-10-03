@@ -6,18 +6,26 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use parking_lot::RwLock;
 
-use ferrowl_codec::Register;
-use ferrowl_lua::module::{ModuleDirectory, ModuleHost, OcppClient, OcppServer, RegisterModule};
+use ferrowl_lua::module::{
+    ModuleDirectory, ModuleHost, OcppClient, OcppGuard, OcppServer, RegisterAccess,
+};
 use mlua::{AnyUserData, Lua, Result as LuaResult};
 
-use crate::lua::RegisterBridge;
+use crate::lua::{RegisterBridge, SharedRegisters};
 use crate::module::modbus::{ModuleMemory, VirtualStore};
 use crate::module::ocpp::client::lua_sim::{ClientCsHandle, ClientFields, ScopedActionQueue};
 use crate::module::ocpp::server::lua::{ServerActionQueue, ServerHost, SharedServerStates};
 use crate::module::ocpp::server::view::ServerVersion;
+
+/// Mints the identity of one module instance in the registry (SC-R-080).
+pub fn next_instance_id() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
 
 /// Live directory of every open tab's module, keyed by tab name.
 #[derive(Clone, Default)]
@@ -49,13 +57,14 @@ impl ModuleDirectory for ModuleRegistry {
 // --- Modbus ------------------------------------------------------------------
 
 /// `ModuleHost` for a modbus module: builds a fresh [`RegisterBridge`] accessor over the memory/
-/// virtual-store/register-set snapshot the owning view handed to [`ModuleView::module_host`]
+/// virtual-store/live register map the owning view handed to [`ModuleView::module_host`]
 /// (`crate::module::view::ModuleView`).
 pub struct ModbusHost {
     pub memory: ModuleMemory,
     pub virtual_store: VirtualStore,
-    pub registers: Arc<HashMap<String, Register>>,
+    pub registers: SharedRegisters,
     pub role: &'static str,
+    pub instance_id: u64,
 }
 
 impl ModuleHost for ModbusHost {
@@ -67,16 +76,19 @@ impl ModuleHost for ModbusHost {
         self.role
     }
 
-    fn register_accessor(&self, lua: &Lua) -> LuaResult<Option<AnyUserData>> {
-        let bridge = RegisterBridge::new(
+    fn instance_id(&self) -> u64 {
+        self.instance_id
+    }
+
+    fn register_access(&self) -> Option<Arc<dyn RegisterAccess>> {
+        Some(Arc::new(RegisterBridge::new(
             self.memory.clone(),
             self.virtual_store.clone(),
             self.registers.clone(),
-        );
-        Ok(Some(lua.create_userdata(RegisterModule::init(bridge))?))
+        )))
     }
 
-    fn ocpp_accessor(&self, _lua: &Lua) -> LuaResult<Option<AnyUserData>> {
+    fn ocpp_accessor(&self, _lua: &Lua, _guard: OcppGuard) -> LuaResult<Option<AnyUserData>> {
         Ok(None)
     }
 }
@@ -89,6 +101,7 @@ impl ModuleHost for ModbusHost {
 pub struct OcppClientEntry<S: ClientFields + Send + Sync + 'static> {
     pub state: Arc<parking_lot::RwLock<S>>,
     pub queue: ScopedActionQueue,
+    pub instance_id: u64,
 }
 
 impl<S: ClientFields + Send + Sync + 'static> ModuleHost for OcppClientEntry<S> {
@@ -100,13 +113,19 @@ impl<S: ClientFields + Send + Sync + 'static> ModuleHost for OcppClientEntry<S> 
         "client"
     }
 
-    fn register_accessor(&self, _lua: &Lua) -> LuaResult<Option<AnyUserData>> {
-        Ok(None)
+    fn instance_id(&self) -> u64 {
+        self.instance_id
     }
 
-    fn ocpp_accessor(&self, lua: &Lua) -> LuaResult<Option<AnyUserData>> {
+    fn register_access(&self) -> Option<Arc<dyn RegisterAccess>> {
+        None
+    }
+
+    fn ocpp_accessor(&self, lua: &Lua, guard: OcppGuard) -> LuaResult<Option<AnyUserData>> {
         let handle = ClientCsHandle::new(self.state.clone(), self.queue.clone());
-        Ok(Some(lua.create_userdata(OcppClient::init(handle))?))
+        Ok(Some(lua.create_userdata(OcppClient::init_guarded(
+            handle, guard,
+        ))?))
     }
 }
 
@@ -118,6 +137,7 @@ impl<S: ClientFields + Send + Sync + 'static> ModuleHost for OcppClientEntry<S> 
 pub struct OcppServerEntry<V: ServerVersion + Send + Sync + 'static> {
     pub states: SharedServerStates<V>,
     pub queue: ServerActionQueue,
+    pub instance_id: u64,
 }
 
 impl<V: ServerVersion + Send + Sync + 'static> ModuleHost for OcppServerEntry<V> {
@@ -129,13 +149,19 @@ impl<V: ServerVersion + Send + Sync + 'static> ModuleHost for OcppServerEntry<V>
         "server"
     }
 
-    fn register_accessor(&self, _lua: &Lua) -> LuaResult<Option<AnyUserData>> {
-        Ok(None)
+    fn instance_id(&self) -> u64 {
+        self.instance_id
     }
 
-    fn ocpp_accessor(&self, lua: &Lua) -> LuaResult<Option<AnyUserData>> {
+    fn register_access(&self) -> Option<Arc<dyn RegisterAccess>> {
+        None
+    }
+
+    fn ocpp_accessor(&self, lua: &Lua, guard: OcppGuard) -> LuaResult<Option<AnyUserData>> {
         let host = ServerHost::new(self.states.clone(), self.queue.clone());
-        Ok(Some(lua.create_userdata(OcppServer::init(host))?))
+        Ok(Some(
+            lua.create_userdata(OcppServer::init_guarded(host, guard))?,
+        ))
     }
 }
 
@@ -190,10 +216,13 @@ mod tests {
         fn role(&self) -> &'static str {
             self.role
         }
-        fn register_accessor(&self, _lua: &Lua) -> LuaResult<Option<AnyUserData>> {
-            Ok(None)
+        fn instance_id(&self) -> u64 {
+            0
         }
-        fn ocpp_accessor(&self, _lua: &Lua) -> LuaResult<Option<AnyUserData>> {
+        fn register_access(&self) -> Option<Arc<dyn RegisterAccess>> {
+            None
+        }
+        fn ocpp_accessor(&self, _lua: &Lua, _guard: OcppGuard) -> LuaResult<Option<AnyUserData>> {
             Ok(None)
         }
     }
@@ -307,7 +336,7 @@ mod tests {
     use ferrowl_modbus::{Key, SlaveKey};
     use ferrowl_store::{CellKind, Memory, Range};
 
-    fn holding(addr: u16) -> Register {
+    fn holding(addr: u16) -> ferrowl_codec::Register {
         RegisterBuilder::default()
             .slave_id(UnitId(1))
             .access(Access::ReadWrite)
@@ -350,8 +379,9 @@ mod tests {
         let host = ModbusHost {
             memory: memory.clone(),
             virtual_store: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
-            registers: Arc::new(registers),
+            registers: Arc::new(parking_lot::RwLock::new(registers)),
             role: "client",
+            instance_id: next_instance_id(),
         };
 
         let registry = ModuleRegistry::new();
@@ -402,6 +432,7 @@ mod tests {
         let entry = OcppClientEntry {
             state: state.clone(),
             queue: queue.clone(),
+            instance_id: next_instance_id(),
         };
 
         let registry = ModuleRegistry::new();
@@ -464,6 +495,7 @@ mod tests {
         let entry = OcppServerEntry {
             states: states.clone(),
             queue: queue.clone(),
+            instance_id: next_instance_id(),
         };
 
         let registry = ModuleRegistry::new();

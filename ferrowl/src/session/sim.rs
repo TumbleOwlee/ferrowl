@@ -158,7 +158,7 @@ impl Drop for SessionSim {
 mod tests {
     use super::*;
     use crate::app::LOG_SIZE;
-    use ferrowl_lua::module::{Has, ModuleHost, Read, RegisterModule, ValueType, Write};
+    use ferrowl_lua::module::{Has, ModuleHost, OcppGuard, Read, RegisterAccess, ValueType, Write};
     use mlua::{AnyUserData, Lua, Result as LuaResult};
     use std::collections::HashMap;
     use std::sync::Mutex;
@@ -201,12 +201,13 @@ mod tests {
         fn role(&self) -> &'static str {
             "server"
         }
-        fn register_accessor(&self, lua: &Lua) -> LuaResult<Option<AnyUserData>> {
-            Ok(Some(
-                lua.create_userdata(RegisterModule::init(self.rw.clone()))?,
-            ))
+        fn instance_id(&self) -> u64 {
+            0
         }
-        fn ocpp_accessor(&self, _lua: &Lua) -> LuaResult<Option<AnyUserData>> {
+        fn register_access(&self) -> Option<Arc<dyn RegisterAccess>> {
+            Some(Arc::new(self.rw.clone()))
+        }
+        fn ocpp_accessor(&self, _lua: &Lua, _guard: OcppGuard) -> LuaResult<Option<AnyUserData>> {
             Ok(None)
         }
     }

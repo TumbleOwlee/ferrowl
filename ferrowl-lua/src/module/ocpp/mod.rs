@@ -18,32 +18,55 @@ pub mod traits;
 use crate::module::ValueType;
 use ferrowl_lua_derive::Module;
 use mlua::{Result, Table, UserData, UserDataMethods};
+use std::sync::Arc;
 use traits::{OcppClientHost, OcppHandle, OcppServerHost};
+
+/// A per-call precondition a host-built accessor runs before every method; the default is none.
+#[derive(Clone, Default)]
+pub struct OcppGuard(Option<Arc<dyn Fn() -> Result<()> + Send + Sync>>);
+
+impl OcppGuard {
+    /// Guard that runs `check` before every accessor method and propagates its error.
+    pub fn new(check: impl Fn() -> Result<()> + Send + Sync + 'static) -> Self {
+        Self(Some(Arc::new(check)))
+    }
+
+    fn check(&self) -> Result<()> {
+        self.0.as_ref().map_or(Ok(()), |c| c())
+    }
+}
 
 /// Register the shared `Get(name)` / `Set(name, value)` / `<Action>(overrides?)` methods onto any
 /// userdata `U` whose host handle `H` is reachable via the `handle` projection. Used by every
 /// `C_OCPP` shape (top-level module and per-scope [`Accessor`]) so the surface stays identical.
-fn register_state_actions<U, H, M>(methods: &mut M, handle: fn(&U) -> &H)
-where
+fn register_state_actions<U, H, M>(
+    methods: &mut M,
+    handle: fn(&U) -> &H,
+    guard: fn(&U) -> &OcppGuard,
+) where
     U: 'static,
     H: OcppHandle,
     M: UserDataMethods<U>,
 {
     // `Get(name)` / `Set(name, value)` mirror the register module.
-    methods.add_method("Get", move |_, this, name: String| handle(this).read(name));
+    methods.add_method("Get", move |_, this, name: String| {
+        guard(this).check()?;
+        handle(this).read(name)
+    });
     methods.add_method("Set", move |_, this, (name, value): (String, ValueType)| {
+        guard(this).check()?;
         handle(this).write(name, value)
     });
 
     // One method per version-specific action: `:<Action>(overrides?)`.
     for action in H::actions() {
-        methods.add_method(
-            action,
-            move |_, this, args: Option<Table>| match table_to_overrides(args) {
+        methods.add_method(action, move |_, this, args: Option<Table>| {
+            guard(this).check()?;
+            match table_to_overrides(args) {
                 Ok(overrides) => Ok(handle(this).dispatch(action, overrides)),
                 Err(e) => Err(e),
-            },
-        );
+            }
+        });
     }
 }
 
@@ -51,18 +74,24 @@ where
 /// handle and exposes that scope's `Get`/`Set`/`<Action>` surface.
 pub struct Accessor<H: OcppHandle> {
     handle: H,
+    guard: OcppGuard,
 }
 
 impl<H: OcppHandle> Accessor<H> {
     /// Wrap a resolved scope handle.
     pub fn new(handle: H) -> Self {
-        Self { handle }
+        Self::guarded(handle, OcppGuard::default())
+    }
+
+    /// Wrap a resolved scope handle behind the parent accessor's guard.
+    pub fn guarded(handle: H, guard: OcppGuard) -> Self {
+        Self { handle, guard }
     }
 }
 
 impl<H: OcppHandle> UserData for Accessor<H> {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        register_state_actions(methods, |a: &Accessor<H>| &a.handle);
+        register_state_actions(methods, |a: &Accessor<H>| &a.handle, |a| &a.guard);
     }
 }
 
@@ -72,18 +101,22 @@ impl<H: OcppHandle> UserData for Accessor<H> {
 #[module = "C_OCPP"]
 pub struct Ocpp<H: OcppHandle> {
     handle: H,
+    guard: OcppGuard,
 }
 
 impl<H: OcppHandle> Ocpp<H> {
     /// Creates the module around the host handle.
     pub fn init(handle: H) -> Self {
-        Self { handle }
+        Self {
+            handle,
+            guard: OcppGuard::default(),
+        }
     }
 }
 
 impl<H: OcppHandle> UserData for Ocpp<H> {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        register_state_actions(methods, |o: &Ocpp<H>| &o.handle);
+        register_state_actions(methods, |o: &Ocpp<H>| &o.handle, |o| &o.guard);
     }
 }
 
@@ -92,22 +125,35 @@ impl<H: OcppHandle> UserData for Ocpp<H> {
 #[module = "C_OCPP"]
 pub struct OcppClient<H: OcppHandle + OcppClientHost> {
     handle: H,
+    guard: OcppGuard,
 }
 
 impl<H: OcppHandle + OcppClientHost> OcppClient<H> {
     /// Creates the module around the client host handle.
     pub fn init(handle: H) -> Self {
-        Self { handle }
+        Self::init_guarded(handle, OcppGuard::default())
+    }
+
+    /// Creates the module with a per-call guard run before every method.
+    pub fn init_guarded(handle: H, guard: OcppGuard) -> Self {
+        Self { handle, guard }
     }
 }
 
 impl<H: OcppHandle + OcppClientHost> UserData for OcppClient<H> {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        register_state_actions(methods, |o: &OcppClient<H>| &o.handle);
+        register_state_actions(methods, |o: &OcppClient<H>| &o.handle, |o| &o.guard);
         methods.add_method("Connector", |_, this, id: i64| {
-            Ok(Accessor::new(this.handle.connector(id)))
+            this.guard.check()?;
+            Ok(Accessor::guarded(
+                this.handle.connector(id),
+                this.guard.clone(),
+            ))
         });
-        methods.add_method("GetConnectors", |_, this, ()| Ok(this.handle.connectors()));
+        methods.add_method("GetConnectors", |_, this, ()| {
+            this.guard.check()?;
+            Ok(this.handle.connectors())
+        });
     }
 }
 
@@ -116,28 +162,44 @@ impl<H: OcppHandle + OcppClientHost> UserData for OcppClient<H> {
 #[module = "C_OCPP"]
 pub struct OcppServer<H: OcppServerHost + 'static> {
     handle: H,
+    guard: OcppGuard,
 }
 
 impl<H: OcppServerHost + 'static> OcppServer<H> {
     /// Creates the module around the server host handle.
     pub fn init(handle: H) -> Self {
-        Self { handle }
+        Self::init_guarded(handle, OcppGuard::default())
+    }
+
+    /// Creates the module with a per-call guard run before every method.
+    pub fn init_guarded(handle: H, guard: OcppGuard) -> Self {
+        Self { handle, guard }
     }
 }
 
 impl<H: OcppServerHost + 'static> UserData for OcppServer<H> {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("GetChargingStations", |_, this, ()| {
+            this.guard.check()?;
             Ok(this.handle.stations())
         });
         methods.add_method("GetConnectors", |_, this, cs: String| {
+            this.guard.check()?;
             Ok(this.handle.connectors(&cs))
         });
         methods.add_method("ChargingStation", |_, this, cs: String| {
-            Ok(this.handle.station(&cs).map(Accessor::new))
+            this.guard.check()?;
+            Ok(this
+                .handle
+                .station(&cs)
+                .map(|h| Accessor::guarded(h, this.guard.clone())))
         });
         methods.add_method("Connector", |_, this, (cs, id): (String, i64)| {
-            Ok(this.handle.connector(&cs, id).map(Accessor::new))
+            this.guard.check()?;
+            Ok(this
+                .handle
+                .connector(&cs, id)
+                .map(|h| Accessor::guarded(h, this.guard.clone())))
         });
     }
 }

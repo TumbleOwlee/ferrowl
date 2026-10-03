@@ -21,7 +21,7 @@ use crate::config::{
 };
 use crate::instance::Instance;
 use crate::instance::error::Error;
-use crate::lua::{SimHandle, run_script_once, run_sim};
+use crate::lua::{SharedRegisters, SimHandle, run_script_once, run_sim};
 
 use super::build::{
     Timing, build_instance, build_read_operations, declare_or_reject_msg, default_value,
@@ -66,6 +66,8 @@ pub struct ModbusModule {
     name: String,
     instance: Instance<SlaveKey>,
     registers: Vec<(String, String, Register, Vec<NamedValue>)>,
+    /// Live name to `Register` view of `registers` that every Lua bridge reads (SC-R-067).
+    lua_registers: SharedRegisters,
     /// Shared operations list — owned here so it can be updated in-place without rebuilding the
     /// network instance (the instance holds a clone of the same Arc).
     operations: Arc<RwLock<Vec<Operation>>>,
@@ -193,10 +195,17 @@ impl ModbusModule {
             self_signed_cache.clone(),
         );
 
+        let lua_registers: SharedRegisters = Arc::new(MemLock::new(
+            registers
+                .iter()
+                .map(|(name, _, register, _)| (name.clone(), register.clone()))
+                .collect(),
+        ));
         let mut module = Self {
             name: spec.name.clone(),
             instance,
             registers,
+            lua_registers,
             operations,
             memory,
             log,
@@ -275,6 +284,10 @@ impl ModbusModule {
         self.script_log.clone()
     }
 
+    pub fn lua_registers(&self) -> SharedRegisters {
+        self.lua_registers.clone()
+    }
+
     pub fn registers(&self) -> &[(String, String, Register, Vec<NamedValue>)] {
         &self.registers
     }
@@ -300,12 +313,16 @@ impl ModbusModule {
         register: Register,
         named_values: Vec<NamedValue>,
     ) {
+        self.lua_registers
+            .write()
+            .insert(name.clone(), register.clone());
         self.registers
             .push((name, description, register, named_values));
     }
 
     /// Remove a register from the module's cached register list by name (no-op if absent).
     pub fn remove_register_by_name(&mut self, name: &str) {
+        self.lua_registers.write().remove(name);
         self.registers.retain(|(n, _, _, _)| n != name);
     }
 
@@ -319,6 +336,10 @@ impl ModbusModule {
         named_values: Vec<NamedValue>,
     ) {
         if let Some(slot) = self.registers.get_mut(idx) {
+            let mut map = self.lua_registers.write();
+            map.remove(&slot.0);
+            map.insert(name.clone(), register.clone());
+            drop(map);
             *slot = (name, description, register, named_values);
         }
     }
@@ -407,21 +428,16 @@ impl ModbusModule {
         Some(result)
     }
 
-    /// (Re)start the simulation thread from a fresh register snapshot if there is at least one
+    /// (Re)start the simulation thread (registers resolve live, SC-R-067) if there is at least one
     /// enabled script; stop it otherwise. Any previously running thread is stopped first, so this
     /// is safe to call whenever the enabled-script set may have changed (construction, script
     /// edits) — it is the single source of truth for whether the sim runs.
     fn ensure_sim(&mut self) {
         self.stop_sim();
-        let registers: HashMap<String, Register> = self
-            .registers
-            .iter()
-            .map(|(name, _, register, _)| (name.clone(), register.clone()))
-            .collect();
         self.sim = run_sim(
             self.memory.clone(),
             self.virtual_values.clone(),
-            registers,
+            self.lua_registers.clone(),
             self.scripts.clone(),
             self.script_interval,
             self.script_log.clone(),
@@ -461,15 +477,10 @@ impl ModbusModule {
     /// not touch the sim thread: the script need not be in `self.scripts` and need not be enabled,
     /// which is what lets the script dialog run an unsaved, disabled script on demand.
     pub fn run_script_once(&self, name: String, code: String) {
-        let registers: HashMap<String, Register> = self
-            .registers
-            .iter()
-            .map(|(name, _, register, _)| (name.clone(), register.clone()))
-            .collect();
         run_script_once(
             self.memory.clone(),
             self.virtual_values.clone(),
-            registers,
+            self.lua_registers.clone(),
             name,
             code,
             self.script_log.clone(),
@@ -486,8 +497,8 @@ impl ModbusModule {
     /// reusing the existing memory + registers. The caller must have already settled its own
     /// deferred stop of any previously running instance before calling; the caller is expected to
     /// `start()` afterwards. This keeps the instance in sync with the spec so writes dispatch
-    /// correctly. The simulation thread is left running (it's decoupled from the network
-    /// instance) but is restarted at the end so a changed sim interval takes effect.
+    /// correctly. The simulation thread is decoupled from the network instance and keeps running
+    /// untouched (SC-R-081).
     pub async fn reconfigure(
         &mut self,
         endpoint: &Endpoint,
@@ -519,7 +530,6 @@ impl ModbusModule {
         );
         self.own_serial_path = endpoint_serial_path(endpoint);
         self.attach_path_conflict();
-        self.ensure_sim();
         Ok(())
     }
 
@@ -1317,5 +1327,297 @@ mod tests {
                 .any(|l| l == "hello" || l == "info-line"),
             "Lua output must not leak into the general log: {general_lines:?}"
         );
+    }
+    fn test_register(addr: u16, u32_format: bool) -> ferrowl_codec::Register {
+        use ferrowl_codec::format::{BitField, Endian, Resolution, WordOrder};
+        use ferrowl_codec::{Access, Format, RegisterBuilder};
+        let format = if u32_format {
+            Format::u32(
+                Endian::Big,
+                WordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            )
+        } else {
+            Format::u16(
+                Endian::Big,
+                WordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            )
+        };
+        RegisterBuilder::default()
+            .slave_id(UnitId(1))
+            .access(Access::ReadWrite)
+            .kind(Kind::HoldingRegister)
+            .address(ferrowl_codec::Address::Fixed(addr))
+            .format(format)
+            .build()
+            .unwrap()
+    }
+
+    fn read_holding(module: &super::ModbusModule, addr: u16, len: u16) -> Vec<u16> {
+        use ferrowl_modbus::{Key, SlaveKey};
+        use ferrowl_store::{CellType, Range};
+        module
+            .memory()
+            .read()
+            .read(
+                Key {
+                    id: SlaveKey {
+                        slave_id: UnitId(1),
+                        kind: Kind::HoldingRegister,
+                    },
+                },
+                &CellType::Register,
+                &Range::new(addr as usize, len as usize),
+            )
+            .unwrap_or_default()
+    }
+
+    const COUNTER: &str = r#"n = (n or 0) + 1; C_Register:Set("marker", n)"#;
+
+    /// Globals-intact observation: wait for the counter to reach 3, run `edit`, then require
+    /// that the counter never drops and keeps rising for ~300 ms.
+    fn assert_counter_survives(
+        module: &mut super::ModbusModule,
+        edit: impl FnOnce(&mut super::ModbusModule),
+    ) {
+        for _ in 0..200 {
+            if read_marker(module) >= 3 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let before = read_marker(module);
+        assert!(before >= 3, "counter never reached 3");
+        edit(module);
+        let mut max = before;
+        for _ in 0..30 {
+            let v = read_marker(module);
+            assert!(
+                v >= before,
+                "counter dropped to {v} (before {before}): sim restarted"
+            );
+            max = max.max(v);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(max > before, "counter stopped advancing");
+        assert!(module.lua_running());
+    }
+
+    #[test]
+    /// SC-R-068 — a register added at runtime is reachable by a sim already running.
+    fn ut_sim_reaches_register_added_at_runtime() {
+        use super::ModbusModule;
+        let device = device_with_script(vec![script(
+            r#"C_Register:Set("marker", 1)
+if C_Register:Has("extra") then C_Register:Set("extra", 9) end"#,
+            true,
+        )]);
+        let mut module = ModbusModule::new(&test_spec("sim_add", 0), &device);
+        assert!(module.lua_running());
+        assert!(wait_for_marker(&module, 1), "sim never ran before the add");
+        module.add_register(
+            "extra".into(),
+            String::new(),
+            test_register(1, false),
+            vec![],
+        );
+        let mut ok = false;
+        for _ in 0..200 {
+            if read_holding(&module, 1, 1) == [9] {
+                ok = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(ok, "added register never written by the running sim");
+        assert!(module.lua_running());
+    }
+
+    #[test]
+    /// SC-R-069, SC-E-041 — an edited register is reached by its new name, address and format;
+    /// the old name is unknown.
+    fn ut_sim_follows_register_edit_to_new_name_address_format() {
+        use super::ModbusModule;
+        let device = device_with_script(vec![script(
+            r#"if C_Register:Has("wide") then C_Register:Set("wide", 70000) end
+if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
+            true,
+        )]);
+        let mut module = ModbusModule::new(&test_spec("sim_edit", 0), &device);
+        assert!(wait_for_marker(&module, 3));
+        module.memory().write().write_unchecked(
+            ferrowl_modbus::Key {
+                id: ferrowl_modbus::SlaveKey {
+                    slave_id: UnitId(1),
+                    kind: Kind::HoldingRegister,
+                },
+            },
+            &ferrowl_store::Range::new(0, 1),
+            &[0],
+        );
+        module.update_register(0, "wide".into(), "d".into(), test_register(2, true), vec![]);
+        let mut ok = false;
+        for _ in 0..200 {
+            if read_holding(&module, 2, 2) == [1, 4464] {
+                ok = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(ok, "post-edit name/address/format not honoured");
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert_eq!(read_marker(&module), 0, "old name must be unknown");
+        assert!(module.lua_running());
+    }
+
+    #[test]
+    /// SC-R-070 — register add, edit and delete never restart the sim nor reset its globals.
+    fn ut_sim_keeps_globals_across_register_edits() {
+        use super::ModbusModule;
+        let device = device_with_script(vec![script(COUNTER, true)]);
+        let mut module = ModbusModule::new(&test_spec("sim_glob", 0), &device);
+        assert_counter_survives(&mut module, |m| {
+            m.add_register("x".into(), String::new(), test_register(5, false), vec![]);
+            let reg = m.registers()[0].2.clone();
+            m.update_register(0, "marker".into(), "desc".into(), reg, vec![]);
+            m.remove_register_by_name("x");
+        });
+    }
+
+    #[test]
+    /// SC-E-042 — a deleted register errors in the sim log while the sim and its other scripts
+    /// keep running.
+    fn ut_sim_keeps_running_after_register_delete() {
+        use super::ModbusModule;
+        let def = |name: &str, code: &str| crate::config::script::ScriptDef {
+            name: name.to_string(),
+            code: code.to_string(),
+            enabled: true,
+        };
+        let mut device = device_with_script(vec![
+            def("a", r#"C_Register:Get("gone")"#),
+            def("b", COUNTER),
+        ]);
+        let mut gone = device.definitions["marker"].clone();
+        gone.address = Some(1);
+        device.definitions.insert("gone".into(), gone);
+        let mut module = ModbusModule::new(&test_spec("sim_del", 0), &device);
+        assert!(
+            wait_for_marker(&module, 1),
+            "sim never ran before the delete"
+        );
+        module.remove_register_by_name("gone");
+        let mut logged = false;
+        for _ in 0..200 {
+            let lines: Vec<String> = module
+                .script_log()
+                .blocking_read()
+                .peek_n(crate::app::LOG_SIZE)
+                .into_iter()
+                .map(|(_, _, l)| l)
+                .collect();
+            if lines
+                .iter()
+                .any(|l| l.contains("[sim]") && l.contains("unknown register 'gone'"))
+            {
+                logged = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(logged, "unknown register error not logged");
+        let a = read_marker(&module);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(read_marker(&module) > a, "other script stopped");
+        assert!(module.lua_running());
+    }
+
+    #[test]
+    /// SC-E-043 — a value held in a Lua global is not refreshed by a register edit.
+    fn ut_global_value_not_refreshed_by_edit() {
+        use super::ModbusModule;
+        let device = device_with_script(vec![script(
+            r#"if held == nil then held = C_Register:Get("marker") end; C_Register:Set("copy", held + 100)"#,
+            true,
+        )]);
+        let mut module = ModbusModule::new(&test_spec("sim_held", 0), &device);
+        module.add_register(
+            "copy".into(),
+            String::new(),
+            test_register(1, false),
+            vec![],
+        );
+        let mut ok = false;
+        for _ in 0..200 {
+            if read_holding(&module, 1, 1) == [100] {
+                ok = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(ok);
+        module.memory().write().write_unchecked(
+            ferrowl_modbus::Key {
+                id: ferrowl_modbus::SlaveKey {
+                    slave_id: UnitId(1),
+                    kind: Kind::HoldingRegister,
+                },
+            },
+            &ferrowl_store::Range::new(0, 1),
+            &[42],
+        );
+        let reg = module.registers()[0].2.clone();
+        module.update_register(0, "marker".into(), "desc".into(), reg, vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert_eq!(
+            read_holding(&module, 1, 1),
+            [100],
+            "held global was refreshed"
+        );
+    }
+
+    #[tokio::test]
+    /// SC-R-081, SC-E-032 — reconfiguring endpoint/role keeps the sim running with its globals intact; reconfigure is not a stop trigger.
+    async fn ut_reconfigure_keeps_sim_and_globals() {
+        use super::ModbusModule;
+        use crate::config::{Endpoint, Role};
+        let device = device_with_script(vec![script(COUNTER, true)]);
+        let mut module = ModbusModule::new(&test_spec("sim_reconf", 0), &device);
+        for _ in 0..200 {
+            if read_marker(&module) >= 3 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let before = read_marker(&module);
+        assert!(before >= 3);
+        module
+            .reconfigure(
+                &Endpoint::Tcp {
+                    ip: "127.0.0.1".into(),
+                    port: 0,
+                },
+                Role::Client,
+                ModbusModule::resolve_timing(&device),
+                device.read_ranges.clone(),
+                device.tls.clone(),
+            )
+            .await
+            .expect("reconfigure");
+        let mut max = before;
+        for _ in 0..30 {
+            let v = read_marker(&module);
+            assert!(
+                v >= before,
+                "counter dropped to {v} (before {before}): sim restarted"
+            );
+            max = max.max(v);
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(max > before);
+        assert!(module.lua_running());
     }
 }

@@ -22,21 +22,25 @@ use crate::module::modbus::{FileSink, ModuleLog, ModuleMemory, VirtualStore, app
 mod value_conv;
 use value_conv::{typed_value_from_type, value_to_type, virtual_value_from_type};
 
+/// Name to `Register` map shared between a module and its Lua bridges.
+pub type SharedRegisters = Arc<parking_lot::RwLock<HashMap<String, Register>>>;
+
 /// Bridges Lua register access (`C_Register`) to the module's shared `Memory` (fixed-address
 /// registers) and `VirtualStore` (virtual registers). Runs on the dedicated simulation thread.
+/// Names resolve per call against the module's live definitions (SC-R-067).
 /// `memory` is a synchronous (`parking_lot`) lock, locked directly; `virtual_store` is still a
 /// tokio `RwLock`, locked with its `blocking_*` ops (safe off a runtime worker thread).
 pub struct RegisterBridge {
     memory: ModuleMemory,
     virtual_store: VirtualStore,
-    registers: Arc<HashMap<String, Register>>,
+    registers: SharedRegisters,
 }
 
 impl RegisterBridge {
     pub fn new(
         memory: ModuleMemory,
         virtual_store: VirtualStore,
-        registers: Arc<HashMap<String, Register>>,
+        registers: SharedRegisters,
     ) -> Self {
         Self {
             memory,
@@ -45,9 +49,11 @@ impl RegisterBridge {
         }
     }
 
-    fn register(&self, name: &str) -> Result<&Register> {
+    fn register(&self, name: &str) -> Result<Register> {
         self.registers
+            .read()
             .get(name)
+            .cloned()
             .ok_or_else(|| Error::RuntimeError(format!("unknown register '{name}'")))
     }
 }
@@ -93,7 +99,7 @@ impl Write for RegisterBridge {
         let addr = match register.address() {
             Address::Fixed(addr) => *addr,
             Address::Virtual => {
-                let value = virtual_value_from_type(value, register)?;
+                let value = virtual_value_from_type(value, &register)?;
                 self.virtual_store.blocking_write().insert(name, value);
                 return Ok(());
             }
@@ -175,7 +181,7 @@ impl Drop for SimHandle {
 pub fn run_sim(
     memory: ModuleMemory,
     virtual_store: VirtualStore,
-    registers: HashMap<String, Register>,
+    registers: SharedRegisters,
     scripts: Vec<(String, String)>,
     interval: Duration,
     log: ModuleLog,
@@ -188,7 +194,7 @@ pub fn run_sim(
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = stop.clone();
     let handle = std::thread::spawn(move || {
-        let bridge = RegisterBridge::new(memory, virtual_store, Arc::new(registers));
+        let bridge = RegisterBridge::new(memory, virtual_store, registers);
         let mut builder = ContextBuilder::<String>::default()
             .with_stdlib()
             .with_module(RegisterModule::init(bridge))
@@ -245,14 +251,14 @@ pub fn run_sim(
 pub fn run_script_once(
     memory: ModuleMemory,
     virtual_store: VirtualStore,
-    registers: HashMap<String, Register>,
+    registers: SharedRegisters,
     name: String,
     code: String,
     log: ModuleLog,
     sink: FileSink,
 ) {
     std::thread::spawn(move || {
-        let bridge = RegisterBridge::new(memory, virtual_store, Arc::new(registers));
+        let bridge = RegisterBridge::new(memory, virtual_store, registers);
         let context = ContextBuilder::<String>::default()
             .with_stdlib()
             .with_module(RegisterModule::init(bridge))
@@ -390,7 +396,11 @@ mod tests {
                 .build()
                 .unwrap(),
         );
-        let bridge = RegisterBridge::new(evse_memory(), virtual_store.clone(), Arc::new(registers));
+        let bridge = RegisterBridge::new(
+            evse_memory(),
+            virtual_store.clone(),
+            Arc::new(MemLock::new(registers)),
+        );
 
         // Reading before any write errors; after a write the value round-trips via the store.
         assert!(bridge.read("calc".to_string()).is_err());
@@ -413,7 +423,11 @@ mod tests {
     #[test]
     /// SC-R-028 — a Lua register write is applied to the module's in-memory state and reads back.
     fn ut_bridge_write_then_read() {
-        let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
+        let bridge = RegisterBridge::new(
+            evse_memory(),
+            vstore(),
+            Arc::new(MemLock::new(evse_registers())),
+        );
         bridge
             .write("setpoint".to_string(), ValueType::Int(100))
             .expect("write");
@@ -424,8 +438,66 @@ mod tests {
     }
 
     #[test]
+    /// SC-R-067 — a register inserted into the shared map after the bridge was built resolves.
+    fn ut_bridge_resolves_register_added_after_construction() {
+        let shared: SharedRegisters = Arc::new(MemLock::new(evse_registers()));
+        let bridge = RegisterBridge::new(evse_memory(), vstore(), shared.clone());
+        shared.write().insert("late".to_string(), holding(1));
+        bridge
+            .write("late".to_string(), ValueType::Int(5))
+            .expect("write");
+        match bridge.read("late".to_string()).expect("read") {
+            ValueType::Int(v) => assert_eq!(v, 5),
+            _ => panic!("expected Int"),
+        }
+    }
+
+    #[test]
+    /// SC-E-041, SC-R-069 — after a rename the old name is unknown and the new one works.
+    fn ut_bridge_old_name_unknown_after_rename() {
+        let shared: SharedRegisters = Arc::new(MemLock::new(evse_registers()));
+        let bridge = RegisterBridge::new(evse_memory(), vstore(), shared.clone());
+        {
+            let mut map = shared.write();
+            let reg = map.remove("setpoint").expect("present");
+            map.insert("target".to_string(), reg);
+        }
+        let err = bridge.read("setpoint".to_string()).expect_err("old name");
+        assert!(
+            err.to_string().contains("unknown register 'setpoint'"),
+            "{err}"
+        );
+        assert!(!bridge.has("setpoint".to_string()).expect("has"));
+        assert!(bridge.read("target".to_string()).is_ok());
+    }
+
+    #[test]
+    /// SC-E-042 — a deleted register is unknown to read, write and has.
+    fn ut_bridge_deleted_register_unknown() {
+        let shared: SharedRegisters = Arc::new(MemLock::new(evse_registers()));
+        let bridge = RegisterBridge::new(evse_memory(), vstore(), shared.clone());
+        shared.write().remove("power");
+        for err in [
+            bridge.read("power".to_string()).expect_err("read"),
+            bridge
+                .write("power".to_string(), ValueType::Int(1))
+                .expect_err("write"),
+        ] {
+            assert!(
+                err.to_string().contains("unknown register 'power'"),
+                "{err}"
+            );
+        }
+        assert!(!bridge.has("power".to_string()).expect("has"));
+    }
+
+    #[test]
     fn ut_bridge_unknown_register_errors() {
-        let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
+        let bridge = RegisterBridge::new(
+            evse_memory(),
+            vstore(),
+            Arc::new(MemLock::new(evse_registers())),
+        );
         assert!(bridge.read("nope".to_string()).is_err());
         assert!(bridge.write("nope".to_string(), ValueType::Int(1)).is_err());
     }
@@ -435,7 +507,11 @@ mod tests {
     /// SC-R-028 — a script's register write lands in the module's in-memory state after a cycle.
     fn ut_sim_script_mirrors_register() {
         let memory = evse_memory();
-        let bridge = RegisterBridge::new(memory.clone(), vstore(), Arc::new(evse_registers()));
+        let bridge = RegisterBridge::new(
+            memory.clone(),
+            vstore(),
+            Arc::new(MemLock::new(evse_registers())),
+        );
         bridge
             .write("setpoint".to_string(), ValueType::Int(42))
             .expect("seed setpoint");
@@ -474,7 +550,11 @@ mod tests {
     #[test]
     /// SC-R-032, SC-R-051 — a failed C_Test assertion surfaces through the sim's collected-error path with its `assertion failed:` prefix intact.
     fn ut_sim_script_test_assertion_failure_surfaces() {
-        let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
+        let bridge = RegisterBridge::new(
+            evse_memory(),
+            vstore(),
+            Arc::new(MemLock::new(evse_registers())),
+        );
         let mut context = ContextBuilder::<String>::default()
             .with_stdlib()
             .with_module(RegisterModule::init(bridge))
@@ -535,7 +615,7 @@ mod tests {
         run_script_once(
             memory.clone(),
             vstore(),
-            evse_registers(),
+            Arc::new(MemLock::new(evse_registers())),
             "once".to_string(),
             "C_Register:Set(\"power\", 7)".to_string(),
             log,
@@ -567,7 +647,7 @@ mod tests {
         run_script_once(
             evse_memory(),
             vstore(),
-            evse_registers(),
+            Arc::new(MemLock::new(evse_registers())),
             "bad".to_string(),
             "C_Register:Set(\"nope\", 1)".to_string(),
             log.clone(),
@@ -588,7 +668,7 @@ mod tests {
         run_script_once(
             evse_memory(),
             vstore(),
-            evse_registers(),
+            Arc::new(MemLock::new(evse_registers())),
             "sandbox".to_string(),
             r#"print(os == nil and "os-nil" or "os-present")
                print("time-ok:" .. tostring(C_Time:Get() >= 0))"#
@@ -620,7 +700,11 @@ mod tests {
     #[test]
     /// SC-R-027 — int/float/bool register writes round-trip as their natural host type.
     fn ut_bridge_typed_int_float_bool_roundtrip() {
-        let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
+        let bridge = RegisterBridge::new(
+            evse_memory(),
+            vstore(),
+            Arc::new(MemLock::new(evse_registers())),
+        );
 
         bridge
             .write("setpoint".to_string(), ValueType::Int(1234))
@@ -642,7 +726,11 @@ mod tests {
     #[test]
     fn ut_bridge_typed_float_whole_number_onto_int_format() {
         // SC-R-027 — a whole-number float writes onto an integer format (no coercion loss).
-        let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
+        let bridge = RegisterBridge::new(
+            evse_memory(),
+            vstore(),
+            Arc::new(MemLock::new(evse_registers())),
+        );
         bridge
             .write("setpoint".to_string(), ValueType::Float(42.0))
             .expect("whole float write");
@@ -655,7 +743,11 @@ mod tests {
     #[test]
     /// SC-R-027 — a fractional float onto an integer format is a range mismatch that errors, not truncates.
     fn ut_bridge_typed_float_fractional_onto_int_format_errors() {
-        let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
+        let bridge = RegisterBridge::new(
+            evse_memory(),
+            vstore(),
+            Arc::new(MemLock::new(evse_registers())),
+        );
         assert!(
             bridge
                 .write("setpoint".to_string(), ValueType::Float(3.5))
@@ -666,7 +758,11 @@ mod tests {
     #[test]
     /// SC-R-027 — a string register write is applied via the encode path and reads back as its value.
     fn ut_bridge_typed_string_roundtrip() {
-        let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
+        let bridge = RegisterBridge::new(
+            evse_memory(),
+            vstore(),
+            Arc::new(MemLock::new(evse_registers())),
+        );
         bridge
             .write("setpoint".to_string(), ValueType::String("77".to_string()))
             .expect("string write");
@@ -679,7 +775,11 @@ mod tests {
     #[test]
     /// SC-R-027 — a nil register write is rejected rather than silently coerced.
     fn ut_bridge_typed_nil_errors_cleanly() {
-        let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
+        let bridge = RegisterBridge::new(
+            evse_memory(),
+            vstore(),
+            Arc::new(MemLock::new(evse_registers())),
+        );
         let err = bridge
             .write("setpoint".to_string(), ValueType::Nil)
             .unwrap_err();
@@ -689,7 +789,11 @@ mod tests {
     #[test]
     fn ut_bridge_typed_int_overflow_errors_cleanly() {
         // SC-R-027 — "setpoint" is U16 (max 65535); a too-large Int must error, not silently truncate.
-        let bridge = RegisterBridge::new(evse_memory(), vstore(), Arc::new(evse_registers()));
+        let bridge = RegisterBridge::new(
+            evse_memory(),
+            vstore(),
+            Arc::new(MemLock::new(evse_registers())),
+        );
         assert!(
             bridge
                 .write("setpoint".to_string(), ValueType::Int(100_000))
@@ -719,7 +823,11 @@ mod tests {
                 .build()
                 .unwrap(),
         );
-        let bridge = RegisterBridge::new(evse_memory(), virtual_store, Arc::new(registers));
+        let bridge = RegisterBridge::new(
+            evse_memory(),
+            virtual_store,
+            Arc::new(MemLock::new(registers)),
+        );
         bridge
             .write("calc".to_string(), ValueType::Int(i128::MAX))
             .expect("virtual int overflow falls back to float");
@@ -750,7 +858,11 @@ mod tests {
                 .build()
                 .unwrap(),
         );
-        let bridge = RegisterBridge::new(evse_memory(), virtual_store, Arc::new(registers));
+        let bridge = RegisterBridge::new(
+            evse_memory(),
+            virtual_store,
+            Arc::new(MemLock::new(registers)),
+        );
         let err = bridge
             .write("calc".to_string(), ValueType::Nil)
             .unwrap_err();
@@ -808,7 +920,7 @@ mod tests {
         let mut handle = run_sim(
             evse_memory(),
             vstore(),
-            evse_registers(),
+            Arc::new(MemLock::new(evse_registers())),
             noop(),
             Duration::from_millis(20),
             log.clone(),
@@ -828,7 +940,7 @@ mod tests {
             let _h = run_sim(
                 evse_memory(),
                 vstore(),
-                evse_registers(),
+                Arc::new(MemLock::new(evse_registers())),
                 noop(),
                 Duration::from_millis(20),
                 log2.clone(),
@@ -852,7 +964,7 @@ mod tests {
         let mut handle = run_sim(
             evse_memory(),
             vstore(),
-            evse_registers(),
+            Arc::new(MemLock::new(evse_registers())),
             vec![("runaway".to_string(), "while true do end".to_string())],
             Duration::from_secs(10), // long interval: a between-cycle-only check would never fire
             log.clone(),
@@ -900,7 +1012,11 @@ mod tests {
     /// bridge write blocks while that lock is held elsewhere and completes once it is released.
     fn ut_bridge_write_contends_on_the_host_lock() {
         let memory = evse_memory();
-        let bridge = RegisterBridge::new(memory.clone(), vstore(), Arc::new(evse_registers()));
+        let bridge = RegisterBridge::new(
+            memory.clone(),
+            vstore(),
+            Arc::new(MemLock::new(evse_registers())),
+        );
         let done = Arc::new(AtomicBool::new(false));
 
         // Hold the module memory's write lock, exactly as the network task would while updating.
