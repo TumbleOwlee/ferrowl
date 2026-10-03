@@ -210,7 +210,7 @@ mod tests {
         // so a sender dropped immediately after `spawn()` would end this task before the test
         // gets to use it.
         let (sender, receiver) = tokio::sync::mpsc::channel(1);
-        let (handle, _bound_addr) = ferrowl_modbus::tcp::ServerBuilder::new(
+        let (handle, bound_addr) = ferrowl_modbus::tcp::ServerBuilder::new(
             Arc::new(tokio::sync::RwLock::new(config)),
             srv_mem,
             ferrowl_modbus::tcp::new_self_signed_cache(),
@@ -222,7 +222,39 @@ mod tests {
         )
         .await
         .expect("downstream server failed to start");
+        wait_bound(&bound_addr).await;
         (sender, handle)
+    }
+
+    /// `ServerBuilder::spawn` returns before the listener binds.
+    async fn wait_bound(
+        bound_addr: &std::sync::Arc<parking_lot::Mutex<Option<std::net::SocketAddr>>>,
+    ) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while bound_addr.lock().is_none() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "downstream server did not bind within 10s"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    async fn wait_accepting(port: u16) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            if tokio::net::TcpStream::connect(("127.0.0.1", port))
+                .await
+                .is_ok()
+            {
+                return;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "bridge upstream did not accept within 10s"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
 
     fn descriptor(port: u16) -> String {
@@ -294,8 +326,8 @@ mod tests {
     }
 
     /// BR-R-001, BR-R-002, BR-R-003, BR-R-004, BR-R-005, BR-R-006, BR-R-007, BR-R-013, BR-R-025 — a real downstream server is relayed through to by a real
-    /// upstream bridge connection, and the run exits 0 on its `--duration` deadline
-    /// (CL-R-032 family via BR-R-013).
+    /// upstream bridge connection; the test waits for the relayed `[77]`, and the run then exits 0
+    /// at its `--duration` deadline (BR-R-025).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn ut_bridge_end_to_end_relays_a_real_request() {
         let downstream_port = reserve_tcp_port().release();
@@ -305,27 +337,38 @@ mod tests {
         let args = BridgeArgs {
             upstream: Some(descriptor(upstream_port)),
             downstream: Some(descriptor(downstream_port)),
-            duration: Some(1),
+            duration: Some(3),
             log_file: None,
             exit_on_error: false,
         };
 
+        let bridge = tokio::spawn(async move { run(&args).await });
+        wait_accepting(upstream_port).await;
         let mem = client_mem();
-        let mem_for_poll = mem.clone();
-        let poller = tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            poll_upstream(upstream_port, mem_for_poll).await
-        });
-        let exit_code = run(&args).await;
-        let (_tx, _handle) = poller.await.expect("poller task panicked");
+        let (_client_tx, _client) = poll_upstream(upstream_port, mem.clone()).await;
 
         use ferrowl_store::{CellType, Range};
-        let g = mem.read();
+        loop {
+            let got = mem
+                .read()
+                .read(client_key(), &CellType::Register, &Range::new(0, 1))
+                .unwrap();
+            if got == vec![77] {
+                break;
+            }
+            assert!(
+                !bridge.is_finished(),
+                "bridge run returned before [77] was relayed"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
         assert_eq!(
-            g.read(client_key(), &CellType::Register, &Range::new(0, 1))
+            mem.read()
+                .read(client_key(), &CellType::Register, &Range::new(0, 1))
                 .unwrap(),
             vec![77]
         );
+        let exit_code = bridge.await.expect("bridge task panicked");
         assert_eq!(exit_code, 0);
     }
 
