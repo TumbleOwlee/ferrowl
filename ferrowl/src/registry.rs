@@ -9,11 +9,10 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 
-use ferrowl_codec::Register;
 use ferrowl_lua::module::{ModuleDirectory, ModuleHost, OcppClient, OcppServer, RegisterModule};
 use mlua::{AnyUserData, Lua, Result as LuaResult};
 
-use crate::lua::RegisterBridge;
+use crate::lua::{RegisterBridge, SharedRegisters};
 use crate::module::modbus::{ModuleMemory, VirtualStore};
 use crate::module::ocpp::client::lua_sim::{ClientCsHandle, ClientFields, ScopedActionQueue};
 use crate::module::ocpp::server::lua::{ServerActionQueue, ServerHost, SharedServerStates};
@@ -49,12 +48,12 @@ impl ModuleDirectory for ModuleRegistry {
 // --- Modbus ------------------------------------------------------------------
 
 /// `ModuleHost` for a modbus module: builds a fresh [`RegisterBridge`] accessor over the memory/
-/// virtual-store/register-set snapshot the owning view handed to [`ModuleView::module_host`]
+/// virtual-store/live register map the owning view handed to [`ModuleView::module_host`]
 /// (`crate::module::view::ModuleView`).
 pub struct ModbusHost {
     pub memory: ModuleMemory,
     pub virtual_store: VirtualStore,
-    pub registers: Arc<HashMap<String, Register>>,
+    pub registers: SharedRegisters,
     pub role: &'static str,
 }
 
@@ -307,7 +306,7 @@ mod tests {
     use ferrowl_modbus::{Key, SlaveKey};
     use ferrowl_store::{CellKind, Memory, Range};
 
-    fn holding(addr: u16) -> Register {
+    fn holding(addr: u16) -> ferrowl_codec::Register {
         RegisterBuilder::default()
             .slave_id(UnitId(1))
             .access(Access::ReadWrite)
@@ -350,7 +349,7 @@ mod tests {
         let host = ModbusHost {
             memory: memory.clone(),
             virtual_store: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
-            registers: Arc::new(registers),
+            registers: Arc::new(parking_lot::RwLock::new(registers)),
             role: "client",
         };
 

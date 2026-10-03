@@ -976,12 +976,6 @@ impl ModuleView for ModbusModuleView {
     }
 
     fn module_host(&self) -> Option<std::sync::Arc<dyn ferrowl_lua::module::ModuleHost>> {
-        let registers: HashMap<String, ferrowl_codec::Register> = self
-            .module
-            .registers()
-            .iter()
-            .map(|(name, _, register, _)| (name.clone(), register.clone()))
-            .collect();
         let role = match self.spec.role.client_or_server() {
             crate::config::ClientOrServer::Client => "client",
             crate::config::ClientOrServer::Server => "server",
@@ -989,7 +983,7 @@ impl ModuleView for ModbusModuleView {
         Some(std::sync::Arc::new(crate::registry::ModbusHost {
             memory: self.module.memory(),
             virtual_store: self.module.virtual_store(),
-            registers: std::sync::Arc::new(registers),
+            registers: self.module.lua_registers(),
             role,
         }))
     }

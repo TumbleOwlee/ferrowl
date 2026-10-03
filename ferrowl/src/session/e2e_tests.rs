@@ -20,6 +20,7 @@ use ferrowl_store::{CellKind, Memory, Range};
 
 use crate::app::LOG_SIZE;
 use crate::config::script::ScriptDef;
+use crate::lua::SharedRegisters;
 use crate::module::modbus::VirtualStore;
 use crate::module::ocpp::client::lua_sim::OcppFields;
 use crate::module::ocpp::client::lua_sim::ScopedActionQueue;
@@ -114,10 +115,18 @@ fn modbus_host(memory: Arc<RwLock<Memory<Key<SlaveKey>>>>, role: &'static str) -
     registers.insert("setpoint".to_string(), holding(0));
     registers.insert("power".to_string(), holding(1));
     registers.insert("counter".to_string(), holding(1));
+    modbus_host_with(memory, role, Arc::new(RwLock::new(registers)))
+}
+
+fn modbus_host_with(
+    memory: Arc<RwLock<Memory<Key<SlaveKey>>>>,
+    role: &'static str,
+    registers: SharedRegisters,
+) -> ModbusHost {
     ModbusHost {
         memory,
         virtual_store: Arc::new(tokio::sync::RwLock::new(HashMap::new())) as VirtualStore,
-        registers: Arc::new(registers),
+        registers,
         role,
     }
 }
@@ -237,6 +246,34 @@ fn it_ocpp_client_to_modbus_mirror() {
 
     assert!(wait_for(Duration::from_millis(500), || {
         read_register(&mem, 1) == 42
+    }));
+}
+
+#[test]
+/// SC-R-071 — a session `Register()` accessor sees a register added to the module while the sim runs.
+fn it_session_register_accessor_sees_runtime_add() {
+    let mem = evse_memory();
+    let mut map = HashMap::new();
+    map.insert("setpoint".to_string(), holding(0));
+    let shared: SharedRegisters = Arc::new(RwLock::new(map));
+    let registry = registry_from(vec![(
+        "evse",
+        Arc::new(modbus_host_with(mem.clone(), "client", shared.clone())) as Arc<dyn ModuleHost>,
+    )]);
+
+    let mut sim = SessionSim::new(as_directory(registry), log());
+    sim.set_interval(Duration::from_millis(20));
+    sim.set_scripts(vec![script(
+        "late",
+        r#"r = r or C_Module:Get("evse"):Register(); r:Set("setpoint", 1); if r:Has("extra") then r:Set("extra", 9) end"#,
+    )]);
+
+    assert!(wait_for(Duration::from_millis(500), || {
+        read_register(&mem, 0) == 1
+    }));
+    shared.write().insert("extra".to_string(), holding(1));
+    assert!(wait_for(Duration::from_millis(500), || {
+        read_register(&mem, 1) == 9
     }));
 }
 
