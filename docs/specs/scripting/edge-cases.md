@@ -97,3 +97,13 @@ Boundary behavior, error semantics, intentional or known constraints.
 ### A run-once (`e`) executes in an isolated Lua VM
 
 **SC-E-039** — The on-demand single-script execution (SC-R-035, `e` in the script-manager dialog) builds a **fresh** context on its own thread and shares no Lua state with the owner's running sim: sim globals are invisible to the run, the run's globals are discarded when its thread exits, `C_Time` restarts from zero. A script depending on state built over previous sim cycles behaves differently under `e`. The run touches the same shared register/charging-station state as a concurrent sim, serialized only by per-operation locks; a run-once and a sim cycle interleaving writes to the same register is possible and not prevented.
+
+### Runtime register and OCPP edits resolve live
+
+**SC-E-041** — Register renamed at runtime (SC-R-069): a running sim's next `C_Register:Get`/`Set` with the old name raises `unknown register '<old>'` (SC-E-006), and `Has` with the old name returns `false`. The sim keeps running.
+
+**SC-E-042** — Register deleted at runtime (SC-R-067): a running sim's next `C_Register:Get`/`Set` with its name raises `unknown register '<name>'` (SC-E-006), logged per SC-R-032, and `Has` returns `false`. The sim keeps running and its other scripts are unaffected.
+
+**SC-E-043** — Live resolution (SC-R-067, SC-R-072) applies per call. A value a script read before a register or OCPP edit and holds in a Lua global keeps its pre-edit value until the script calls `Get` again.
+
+**SC-E-044** — Besides script and interval edits (SC-R-024), only an OCPP role or version change (SC-R-076) and a Modbus `:reload` (SC-R-024) reset a module sim's Lua globals. A script that relies on state accumulated over earlier cycles starts again from scratch after either one, as after a script edit (SC-E-028).

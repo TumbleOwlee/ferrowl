@@ -46,7 +46,7 @@ In a Modbus module's sim, and via `C_Module:Get(name):Register()` from the sessi
 | `Set` | `Set(name, value)` | nothing | unknown name; type/range mismatch between `value` and the format (``## Type coercion on `C_Register:Set` ``); `nil` value; fixed-address write the store rejects as not writable | SC-R-019, SC-R-027, SC-R-028 |
 | `Has` | `Has(name)` | `boolean` — whether a register of that name is defined | never (missing name → `false`) | SC-R-019 |
 
-`name` is the configured register name, not an address. `Get`/`Set` exchange the **raw, unscaled** stored value (display resolution not applied), so a `Set` value round-trips through `Get` unchanged (SC-R-027).
+`name` is the configured register name, not an address, resolved against the module's register definitions current at each call, so runtime adds, edits and deletes take effect on the next call without a sim restart (SC-R-067, SC-R-068, SC-R-069, SC-R-070). `Get`/`Set` exchange the **raw, unscaled** stored value (display resolution not applied), so a `Set` value round-trips through `Get` unchanged (SC-R-027).
 
 Writes go to the in-memory store only; no Modbus command (`requirements.md` SC-R-028).
 
@@ -54,7 +54,7 @@ Writes go to the in-memory store only; no Modbus command (`requirements.md` SC-R
 
 ## `C_OCPP` — OCPP state access and action dispatch
 
-In an OCPP module's sim, and via `C_Module:Get(name):OCPP()` from the session-level sim. Three shapes depending on host module; all share the `Get`/`Set`/`<Action>` surface.
+In an OCPP module's sim, and via `C_Module:Get(name):OCPP()` from the session-level sim. Three shapes depending on host module; all share the `Get`/`Set`/`<Action>` surface. Every method resolves against the module's state current at each call; an in-place reconfiguration takes effect on the next call without a sim restart, a role or version change restarts the sim (SC-R-072, SC-R-073, SC-R-074, SC-R-075, SC-R-076).
 
 ### Shared surface (all shapes, and every `Accessor`)
 
@@ -104,7 +104,7 @@ Returned by `Connector(...)` / `ChargingStation(...)`. Not a global. Exposes exa
 
 ## `C_Module` — session-level module directory
 
-Session-level sim only. Resolves session modules by name, live: a handle re-resolves on every call, so a removed module starts erroring rather than returning stale state (SC-R-020).
+Session-level sim only. Resolves session modules by name, live: a handle re-resolves on every call, so a removed module starts erroring rather than returning stale state, an added module is found, and a held `Register()` accessor reaches a rebuilt module's current instance; a held `OCPP()` accessor follows only an in-place reconfiguration and raises once the instance behind its name changes (SC-R-020, SC-R-077, SC-R-078, SC-R-079, SC-R-080).
 
 | Method | Signature | Returns | Errors | Req |
 |---|---|---|---|---|
@@ -118,7 +118,7 @@ Session-level sim only. Resolves session modules by name, live: a handle re-reso
 | `Type` | `Type()` | module kind (`"modbus"` / `"ocpp"`) | raises `unknown module '<name>'` if removed after `Get` | SC-R-020 |
 | `Role` | `Role()` | role (`"client"` / `"server"`) | same staleness error | SC-R-020 |
 | `Register` | `Register()` | `C_Register`-shaped accessor | raises `module '<name>' is not a modbus module` for non-modbus; staleness error | SC-R-019, SC-R-020 |
-| `OCPP` | `OCPP()` | `C_OCPP`-shaped accessor (client or server shape) | raises `module '<name>' is not an ocpp module` for non-ocpp; staleness error | SC-R-019, SC-R-020 |
+| `OCPP` | `OCPP()` | `C_OCPP`-shaped accessor (client or server shape) | raises `module '<name>' is not an ocpp module` for non-ocpp; staleness error; calls on an accessor returned from an instance no longer behind the name (role/version change, close, close and reopen) raise `module '<name>' was replaced; call OCPP() again` | SC-R-019, SC-R-020, SC-R-080 |
 
 The accessor from `Register()` / `OCPP()` behaves exactly as ``## `C_Register` — Modbus register access`` / ``## `C_OCPP` — OCPP state access and action dispatch``.
 
