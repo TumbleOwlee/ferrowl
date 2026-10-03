@@ -103,7 +103,7 @@ status=<token> [file=<path>] [summary=<path>] [stage=s<n>] [issue=<n>] [question
 
 - `question` = one decision for the user, carried verbatim in `question=`; orchestrator relays the answer to the **same** agent (`SendMessage`), never respawns.
 - An agent returning more than the status line is told to move the rest into its file and answer again.
-- A status line naming a file the user must approve (`spec-diff.md`, `issue.md`, `pr.md`, the `summary=` path — `plan.summary.md`, `review.verdict.md`): orchestrator runs `sh .claude/scripts/show-file.sh <path>` before asking — opens it in a viewer outside the context and prints one line.
+- A status line naming a file the user must approve (`spec-diff.md`, `issue.md`, `pr.md`, the `summary=` path — `plan.summary.md`, `review.verdict.md`): orchestrator runs `sh .claude/scripts/show-file.sh <path> [<path> ...]` before asking — every file of one approval stop in a single call; it opens each outside the context and prints one line per file (marker and viewer behaviour: the script's header).
 - Approval prompt is one line: gate, slug, the status line's counts, the answers accepted. User pulls one heading of the full file with `extract-section.sh` for the *why*.
 
 Reviewer scope tokens: `plan` (gate 2), `stage s<n>`, `wave w<n>`, `branch` (gate 3).
@@ -134,7 +134,7 @@ Spawn `spec-planner` with: `artifacts/<slug>/spec-diff.md` path, affected area(s
 
 - `status=question` → relay, resume same agent.
 - `status=spec-gap` (approved text doesn't cover something the plan needs) → agent stays paused; run *Reconcile the spec*, resume the *same* planner.
-- `status=ready` → fresh `spec-reviewer`, scope `plan`. `clean`, or `findings` with `count=0` → show `plan.summary.md`, then `review.verdict.md` if it lists minors, and ask. `count>0` → resume planner with `review.md` path; re-review.
+- `status=ready` → fresh `spec-reviewer`, scope `plan`. `clean`, or `findings` with `count=0` → show `plan.summary.md`, plus `review.verdict.md` if it lists minors, in one `show-file.sh` call, and ask. `count>0` → resume planner with `review.md` path; re-review.
 
 The plan's dependency tree reads as waves: a stage is runnable once its dependencies merge.
 
