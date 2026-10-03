@@ -14,7 +14,7 @@ use ferrowl_modbus::{
     Address, Command, FunctionCode, Key, Operation, ServerCommand, SlaveKey, UnitId, Word,
 };
 use ferrowl_store::{CellKind, CellType, Memory, Range};
-use ferrowl_test_support::reserve_tcp_port;
+use ferrowl_test_support::{reserve_tcp_port, wait_until};
 use parking_lot::Mutex;
 use parking_lot::RwLock as MemLock;
 use tokio::sync::{RwLock, mpsc};
@@ -32,19 +32,6 @@ fn key(kind: RegKind) -> Key<SlaveKey> {
 /// A no-op log/status sink. `LogFn + Clone` is satisfied by a capture-free closure.
 fn sink() -> impl ferrowl_modbus::LogFn + Clone {
     |_s: String| async move {}
-}
-
-/// Polls a `ServerBuilder::spawn`-returned `BoundAddr` until the listener actually binds,
-/// instead of racing it with a fixed sleep (MB-R-130 companion — `spawn()` only guarantees the
-/// task was scheduled, not that its first bind attempt has run).
-async fn wait_bound_addr(bound_addr: &Arc<Mutex<Option<std::net::SocketAddr>>>) {
-    for _ in 0..50 {
-        if bound_addr.lock().is_some() {
-            return;
-        }
-        sleep(Duration::from_millis(20)).await;
-    }
-    panic!("listener did not bind within 1s");
 }
 
 /// A log sink that records every line, so a test can assert on what the client logged.
@@ -181,7 +168,13 @@ async fn tcp_client_polls_server_and_executes_commands() {
     .spawn(srv_rx, sink(), sink())
     .await
     .expect("server failed to start");
-    wait_bound_addr(&bound_addr).await;
+    wait_until(
+        "listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || *bound_addr.lock(),
+    )
+    .await;
 
     // Operations cover every read function code the client supports.
     let operations = Arc::new(RwLock::new(vec![
@@ -343,7 +336,13 @@ async fn tcp_client_handles_server_rejections() {
     .spawn(srv_rx, sink(), sink())
     .await
     .expect("server failed to start");
-    wait_bound_addr(&bound_addr).await;
+    wait_until(
+        "listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || *bound_addr.lock(),
+    )
+    .await;
 
     let operations = Arc::new(RwLock::new(vec![Operation {
         slave_id: UnitId(1),
@@ -453,7 +452,13 @@ async fn it_endpoint_ignores_the_other_roles_tls_policy() {
         .spawn(srv_rx, sink(), sink())
         .await
         .expect("server failed to start");
-        wait_bound_addr(&bound_addr).await;
+        wait_until(
+            "listener bind",
+            Duration::from_millis(20),
+            Duration::from_secs(10),
+            || *bound_addr.lock(),
+        )
+        .await;
 
         let mut cfg = config(port);
         cfg.tls = tcp::ModbusTlsConfig {
@@ -530,7 +535,13 @@ async fn it_endpoint_ignores_the_other_roles_tls_policy() {
         .spawn(srv_rx, sink(), sink())
         .await
         .expect("server failed to start");
-        wait_bound_addr(&bound_addr).await;
+        wait_until(
+            "listener bind",
+            Duration::from_millis(20),
+            Duration::from_secs(10),
+            || *bound_addr.lock(),
+        )
+        .await;
 
         let operations = Arc::new(RwLock::new(vec![Operation {
             slave_id: UnitId(1),
@@ -585,7 +596,13 @@ async fn tcp_server_serves_concurrent_clients() {
     .spawn(srv_rx, sink(), sink())
     .await
     .expect("server failed to start");
-    wait_bound_addr(&bound_addr).await;
+    wait_until(
+        "listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || *bound_addr.lock(),
+    )
+    .await;
 
     // Two independent clients connect at the same time and both read from the one server.
     let ops = || {
@@ -719,7 +736,13 @@ async fn tcp_client_reconnect_true_connects_once_a_listener_appears() {
     .spawn(srv_rx, sink(), sink())
     .await
     .expect("server failed to start");
-    wait_bound_addr(&bound_addr).await;
+    wait_until(
+        "listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || *bound_addr.lock(),
+    )
+    .await;
 
     // The 1s initial backoff plus poll delay must elapse before the client retries and reads.
     sleep(Duration::from_millis(2000)).await;
@@ -794,7 +817,13 @@ async fn tcp_client_operation_list_mutated_at_runtime() {
     .spawn(srv_rx, sink(), sink())
     .await
     .expect("server failed to start");
-    wait_bound_addr(&bound_addr).await;
+    wait_until(
+        "listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || *bound_addr.lock(),
+    )
+    .await;
 
     // Start with a single operation reading the holding registers.
     let operations = Arc::new(RwLock::new(vec![Operation {
@@ -871,7 +900,13 @@ async fn tcp_client_rereads_config_on_reconnect() {
     .spawn(srv_rx, sink(), sink())
     .await
     .expect("server failed to start");
-    wait_bound_addr(&bound_addr).await;
+    wait_until(
+        "listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || *bound_addr.lock(),
+    )
+    .await;
 
     let shared_cfg = Arc::new(RwLock::new(config(bad_port)));
     let operations = Arc::new(RwLock::new(vec![Operation {
@@ -950,7 +985,13 @@ async fn tcp_client_backoff_resets_after_successful_run() {
     .spawn(srv_rx, sink(), sink())
     .await
     .expect("server failed to start");
-    wait_bound_addr(&bound_addr).await;
+    wait_until(
+        "listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || *bound_addr.lock(),
+    )
+    .await;
 
     // Let the client connect and get at least one read through (marks the run successful).
     sleep(Duration::from_millis(2000)).await;
@@ -1028,7 +1069,13 @@ async fn tcp_client_addresses_operation_slave_id() {
     .spawn(srv_rx, sink(), sink())
     .await
     .expect("server failed to start");
-    wait_bound_addr(&bound_addr).await;
+    wait_until(
+        "listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || *bound_addr.lock(),
+    )
+    .await;
 
     // Client store keyed on slave 7 too; the operation targets slave 7.
     let mut cm = Memory::<Key<SlaveKey>>::default();
@@ -1086,7 +1133,13 @@ async fn tcp_client_delays_before_first_poll() {
     .spawn(srv_rx, sink(), sink())
     .await
     .expect("server failed to start");
-    wait_bound_addr(&bound_addr).await;
+    wait_until(
+        "listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || *bound_addr.lock(),
+    )
+    .await;
 
     // A long start delay: nothing should be read until it elapses.
     let cfg = tcp::Config {
@@ -1204,7 +1257,13 @@ async fn tcp_client_success_resets_retry_counter() {
     .spawn(srv_rx, sink(), sink())
     .await
     .expect("server failed to start");
-    wait_bound_addr(&bound_addr).await;
+    wait_until(
+        "listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || *bound_addr.lock(),
+    )
+    .await;
 
     let operations = Arc::new(RwLock::new(vec![Operation {
         slave_id: UnitId(1),
@@ -1345,13 +1404,13 @@ async fn it_missed_tick_delays_not_bursts() {
     // only shows up in the *third* read's gap from the second: `Delay` reschedules a fresh
     // 30ms-spaced tick from the catch-up point, where a catch-up burst would fire it right away
     // too.
-    tokio::time::timeout(Duration::from_secs(3), async {
-        while hits.lock().len() < 3 {
-            sleep(Duration::from_millis(5)).await;
-        }
-    })
-    .await
-    .expect("expected three successful reads within the bound");
+    wait_until(
+        "expected three successful reads within the bound",
+        Duration::from_millis(5),
+        Duration::from_secs(10),
+        || (hits.lock().len() >= 3).then_some(()),
+    )
+    .await;
 
     let recorded = hits.lock().clone();
     let gap = recorded[2].duration_since(recorded[1]);

@@ -125,6 +125,7 @@ mod tests {
     use super::{PHYSICAL_SERIAL, ServerBuilder, VERBOSE};
     use crate::tcp::Config;
     use crate::{Key, ServerCommand, SlaveKey};
+    use ferrowl_test_support::wait_until;
 
     /// MB-R-067 — the TCP server logs per-request outcomes exactly like every other transport.
     #[test]
@@ -173,15 +174,13 @@ mod tests {
         .await
         .expect("spawn always returns Ok");
 
-        let mut addr = None;
-        for _ in 0..50 {
-            addr = *bound_addr.lock();
-            if addr.is_some() {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        let addr = addr.expect("listener must have bound within 1s");
+        let addr = wait_until(
+            "listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || *bound_addr.lock(),
+        )
+        .await;
         assert_eq!(addr.ip().to_string(), "127.0.0.1");
         assert_ne!(addr.port(), 0, "the OS must have assigned a real port");
 

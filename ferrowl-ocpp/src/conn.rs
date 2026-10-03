@@ -364,6 +364,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ferrowl_test_support::wait_until;
     use std::pin::Pin;
     use std::task::{Context, Poll};
     use std::time::Duration;
@@ -446,10 +447,13 @@ mod tests {
             Duration::from_millis(500),
         );
 
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-        while tokio::time::Instant::now() < deadline && status_lines.lock().len() < 2 {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
+        wait_until(
+            "two status lines (framing error, websocket error)",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || (status_lines.lock().len() >= 2).then_some(()),
+        )
+        .await;
         connection.shutdown().await;
 
         assert!(
@@ -504,12 +508,13 @@ mod tests {
         let finished = tokio::spawn(async {});
         tasks.track(finished);
         // Give the trivial task a beat to actually finish before the next track() call.
-        for _ in 0..50 {
-            if tasks.inner.lock()[0].is_finished() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
+        wait_until(
+            "first handler task finished",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || tasks.inner.lock()[0].is_finished().then_some(()),
+        )
+        .await;
         let second = tokio::spawn(async {
             tokio::time::sleep(Duration::from_secs(30)).await;
         });

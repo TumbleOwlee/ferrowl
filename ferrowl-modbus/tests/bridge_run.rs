@@ -14,7 +14,7 @@ use ferrowl_codec::Kind as RegKind;
 use ferrowl_modbus::bridge::{BridgeConfig, BridgeEndpointKind, BridgeEndpointSpec};
 use ferrowl_modbus::{Key, ServerCommand, SlaveKey};
 use ferrowl_store::{CellKind, CellType, Memory, Range};
-use ferrowl_test_support::reserve_tcp_port;
+use ferrowl_test_support::{reserve_tcp_port, wait_until};
 use parking_lot::RwLock as MemLock;
 use rust_modbus::{Address, Client as RmClient, FrameTransport, Quantity, RegisterValue, UnitId};
 use std::sync::Arc;
@@ -24,19 +24,6 @@ use tokio::sync::mpsc;
 
 fn sink() -> impl ferrowl_modbus::LogFn + Clone {
     |_s: String| async move {}
-}
-
-/// Polls a `ServerBuilder::spawn`-returned `BoundAddr` until the listener actually binds,
-/// instead of racing it with a fixed sleep (MB-R-130 companion — `spawn()` only guarantees the
-/// task was scheduled, not that its first bind attempt has run).
-async fn wait_bound_addr(bound_addr: &Arc<parking_lot::Mutex<Option<std::net::SocketAddr>>>) {
-    for _ in 0..50 {
-        if bound_addr.lock().is_some() {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    panic!("listener did not bind within 1s");
 }
 
 fn tcp_config(port: u16) -> ferrowl_modbus::tcp::Config {
@@ -88,7 +75,13 @@ async fn it_bridge_run_wires_tcp_upstream_tcp_downstream() {
     .spawn(srv_rx, sink(), sink())
     .await
     .expect("downstream server failed to start");
-    wait_bound_addr(&bound_addr).await;
+    wait_until(
+        "listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || *bound_addr.lock(),
+    )
+    .await;
 
     let upstream_port = reserve_tcp_port().release();
     let config = BridgeConfig {
@@ -147,7 +140,13 @@ async fn it_bridge_run_wires_rtu_over_tcp_upstream_rtu_over_tcp_downstream() {
     .spawn(srv_rx, sink(), sink())
     .await
     .expect("downstream server failed to start");
-    wait_bound_addr(&bound_addr).await;
+    wait_until(
+        "listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || *bound_addr.lock(),
+    )
+    .await;
 
     let upstream_port = reserve_tcp_port().release();
     let config = BridgeConfig {
@@ -206,7 +205,13 @@ async fn it_bridge_run_wires_ascii_over_tcp_upstream_ascii_over_tcp_downstream()
     .spawn(srv_rx, sink(), sink())
     .await
     .expect("downstream server failed to start");
-    wait_bound_addr(&bound_addr).await;
+    wait_until(
+        "listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || *bound_addr.lock(),
+    )
+    .await;
 
     let upstream_port = reserve_tcp_port().release();
     let config = BridgeConfig {

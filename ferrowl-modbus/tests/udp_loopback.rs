@@ -15,7 +15,7 @@ use ferrowl_modbus::{
     Command, Error, FunctionCode, Key, Operation, ServerCommand, SlaveKey, TcpError, UnitId,
 };
 use ferrowl_store::{CellKind, CellType, Memory, Range};
-use ferrowl_test_support::reserve_udp_port;
+use ferrowl_test_support::{reserve_udp_port, wait_until};
 use parking_lot::RwLock as MemLock;
 use rust_modbus::{
     Address as RmAddress, Client as RmClient, Quantity as RmQuantity, RegisterValue, UdpConfig,
@@ -33,18 +33,6 @@ fn key(slave_id: UnitId, kind: RegKind) -> Key<SlaveKey> {
 /// A no-op log/status sink. `LogFn + Clone` is satisfied by a capture-free closure.
 fn sink() -> impl ferrowl_modbus::LogFn + Clone {
     |_s: String| async move {}
-}
-
-/// Polls a `ServerBuilder::spawn`-returned `BoundAddr` until the listener actually binds,
-/// instead of racing it with a fixed sleep.
-async fn wait_bound_addr(bound_addr: &Arc<parking_lot::Mutex<Option<SocketAddr>>>) {
-    for _ in 0..50 {
-        if bound_addr.lock().is_some() {
-            return;
-        }
-        sleep(Duration::from_millis(20)).await;
-    }
-    panic!("listener did not bind within 1s");
 }
 
 /// A log sink that records every line, so a test can assert on what the server logged.
@@ -155,33 +143,31 @@ async fn it_udp_server_survives_an_undecodable_datagram() {
             .spawn(srv_rx, log, sink())
             .await
             .expect("server failed to start");
-    wait_bound_addr(&bound_addr).await;
+    wait_until(
+        "listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || *bound_addr.lock(),
+    )
+    .await;
 
     let addr: SocketAddr = format!("{}:{}", cfg.ip, cfg.port).parse().unwrap();
     let garbage_socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     garbage_socket.send_to(&[0xFF; 7], addr).await.unwrap();
 
-    let mut waited = Duration::ZERO;
-    let step = Duration::from_millis(20);
-    while waited < Duration::from_secs(2) {
-        if captured
-            .lock()
-            .iter()
-            .any(|l| l.contains("Server processing failed."))
-        {
-            break;
-        }
-        sleep(step).await;
-        waited += step;
-    }
-    assert!(
-        captured
-            .lock()
-            .iter()
-            .any(|l| l.contains("Server processing failed.")),
-        "expected a logged failed-request line: {:?}",
-        captured.lock()
-    );
+    wait_until(
+        "a logged failed-request line",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || {
+            captured
+                .lock()
+                .iter()
+                .any(|l| l.contains("Server processing failed."))
+                .then_some(())
+        },
+    )
+    .await;
 
     let transport = connect_udp(addr, UdpConfig::default())
         .await
