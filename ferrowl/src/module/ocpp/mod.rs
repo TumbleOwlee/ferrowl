@@ -8,6 +8,7 @@ pub mod action_dialog;
 pub mod client;
 pub mod config;
 pub mod lock;
+pub(crate) mod replace;
 pub mod scope;
 pub mod server;
 pub mod setup;

@@ -41,8 +41,9 @@ use crate::module::ocpp::action_dialog::ActionDialog;
 use crate::module::ocpp::client::backend::{MsgHeader, MsgRow, OcppMessage, msg_row};
 use crate::module::ocpp::client::lua_sim::OcppFields;
 use crate::module::ocpp::config::device::{ConnectorRfids, OcppDeviceConfig};
-use crate::module::ocpp::config::session::{OcppModuleSpec, OcppSpec};
+use crate::module::ocpp::config::session::{OcppModuleSpec, OcppRole, OcppSpec};
 use crate::module::ocpp::lock::{with_state, with_state_mut};
+use crate::module::ocpp::replace::MergedCommand;
 use crate::module::ocpp::server::backend::{
     EventRx, EventTx, OcppServer, RfidLists, RfidStore, Scope,
 };
@@ -392,14 +393,23 @@ pub struct ServerView<V: ServerVersion> {
 enum PendingLifecycle {
     Stop,
     Restart,
-    ApplySetup(Box<SetupFollowUp>),
+    ApplySetup {
+        follow_up: Box<SetupFollowUp>,
+        /// UI-R-354 — a lifecycle command merged into the pending apply.
+        then: Option<MergedCommand>,
+    },
 }
 
-/// What an applied `:edit` still has to do once its deferred stop settles: swap the whole view
-/// (role or version changed), or adopt the new spec in place (the auto-bind block rebinds it on
-/// the next tick, gated on `want_running`).
+/// What an applied `:edit` still has to do once its deferred stop settles: build the view that
+/// replaces this one (role or version changed), or adopt the new spec in place (the auto-bind
+/// block rebinds it on the next tick, gated on `want_running`).
 enum SetupFollowUp {
-    Replace(Box<dyn ModuleView>),
+    Replace {
+        role: OcppRole,
+        spec: Box<OcppSpec>,
+        path: String,
+        device: Box<OcppDeviceConfig>,
+    },
     InPlace {
         spec: Box<OcppSpec>,
         path: String,
@@ -411,6 +421,12 @@ impl<V: ServerVersion> ServerView<V>
 where
     V::Action: Clone,
 {
+    /// UI-R-356 — leave the listener unbound until an explicit `:start`.
+    pub(crate) fn unbound(mut self) -> Self {
+        self.want_running = false;
+        self
+    }
+
     pub fn new(spec: OcppSpec, device_path: String, device: OcppDeviceConfig) -> Self {
         let (events_tx, events_rx) = tokio::sync::mpsc::unbounded_channel();
         let rfids: RfidLists = Arc::new(parking_lot::RwLock::new(rfid_store_from_device(&device)));

@@ -271,6 +271,7 @@ impl ModbusModuleView {
                 timing,
                 read_ranges: Box::new(values.read_ranges),
                 tls: Box::new(self.device.tls.clone()),
+                then: None,
             });
             return;
         }
@@ -284,6 +285,7 @@ impl ModbusModuleView {
                     timing,
                     read_ranges: Box::new(values.read_ranges),
                     tls: Box::new(self.device.tls.clone()),
+                    then: None,
                 });
             }
             // Nothing was running (Idle): run the follow-up inline — there is no in-flight task

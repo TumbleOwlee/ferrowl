@@ -814,10 +814,21 @@ pub struct ModbusMonitorModuleView {
     /// CL-R-057 — the settled outcome of the most recently completed `PendingLifecycle::Stop`,
     /// consumed by [`ModuleView::take_stop_outcome`] rather than re-derived from the log.
     last_stop_outcome: Option<StopOutcome>,
+    /// UI-R-357 — the pre-edit name of a module whose pending edit apply a `:reload` discarded,
+    /// logged as a Warning at the next settle.
+    discarded_edit: Option<String>,
     /// UI-R-350, MB-R-255 — a `:edit` confirmed by `confirm_edit` in the (synchronous) key
     /// handler, resolved but not yet acted on: `refresh` signals the deferred stop and the
     /// rebuild happens once it settles.
     pending_setup: Option<Box<(ModuleSpec, MonitorDeviceConfig)>>,
+}
+
+/// UI-R-354 — a lifecycle command merged into a pending `ApplyEdit`.
+#[derive(Clone, Copy)]
+enum MergedCommand {
+    Start,
+    Stop,
+    Restart,
 }
 
 /// UI-R-314/UI-R-315 — the follow-up state a deferred stop-bearing lifecycle command needs once
@@ -834,6 +845,7 @@ enum PendingLifecycle {
     ApplyEdit {
         spec: Box<ModuleSpec>,
         device: Box<MonitorDeviceConfig>,
+        then: Option<MergedCommand>,
     },
 }
 
@@ -860,6 +872,7 @@ impl ModbusMonitorModuleView {
             cached_messages_generation: 0,
             pending_lifecycle: None,
             last_stop_outcome: None,
+            discarded_edit: None,
             pending_setup: None,
         }
     }
@@ -1304,6 +1317,23 @@ impl ModuleView for ModbusMonitorModuleView {
             if self.pending_lifecycle.is_some()
                 && let Some(stop_result) = self.module.poll_stop().await
             {
+                // A `:reload` replaces the module and with it the log, so its discard warning is
+                // written after the swap instead.
+                let discarded = self.discarded_edit.take();
+                let discarded = if matches!(
+                    self.pending_lifecycle,
+                    Some(PendingLifecycle::Reload { .. })
+                ) {
+                    discarded
+                } else {
+                    if let Some(name) = discarded {
+                        self.log().write().await.write(
+                            Level::Warning,
+                            &format!("Edit to '{name}' discarded by :reload"),
+                        );
+                    }
+                    None
+                };
                 match self.pending_lifecycle.take() {
                     Some(PendingLifecycle::Stop) => {
                         let (level, msg) = match stop_result {
@@ -1336,6 +1366,12 @@ impl ModuleView for ModbusMonitorModuleView {
                         // new` defaults to a private one), so an in-progress conflict survives
                         // `:reload` instead of silently clearing.
                         self.module.set_serial_paths(self.serial_paths.clone());
+                        if let Some(name) = discarded {
+                            self.log().write().await.write(
+                                Level::Warning,
+                                &format!("Edit to '{name}' discarded by :reload"),
+                            );
+                        }
                         let (level, msg) = if let Err(e) = self
                             .module
                             .start(move |_s: String| async {}, move |_s: String| async {})
@@ -1347,7 +1383,7 @@ impl ModuleView for ModbusMonitorModuleView {
                         };
                         self.log().write().await.write(level, &msg);
                     }
-                    Some(PendingLifecycle::ApplyEdit { spec, device }) => {
+                    Some(PendingLifecycle::ApplyEdit { spec, device, then }) => {
                         self.spec = *spec;
                         let mut device = *device;
                         let placeholder = ModbusMonitorModule::new(&self.spec, &device);
@@ -1363,11 +1399,55 @@ impl ModuleView for ModbusMonitorModuleView {
                         // runtime-added interpretation never regresses to a stale on-disk snapshot.
                         device.definitions = self.module.definitions();
                         self.device = device;
+                        let stop_line = match &stop_result {
+                            Ok(()) => (Level::Info, "Stopped monitor".to_string()),
+                            Err(e) => (Level::Error, format!("Stop monitor failed: {e}")),
+                        };
                         let (level, msg) = match stop_result {
                             Ok(()) => (Level::Info, "Settings updated".to_string()),
                             Err(e) => (Level::Error, format!("Settings update: stop failed: {e}")),
                         };
                         self.log().write().await.write(level, &msg);
+                        let endpoint = self.spec.endpoint.to_string();
+                        let cmd_line = match then {
+                            None => None,
+                            Some(MergedCommand::Stop) => {
+                                self.last_stop_outcome = Some(match stop_line.0 {
+                                    Level::Error => StopOutcome::Failed(stop_line.1.clone()),
+                                    _ => StopOutcome::Clean,
+                                });
+                                Some(stop_line)
+                            }
+                            Some(MergedCommand::Start) => Some(
+                                match self
+                                    .module
+                                    .start(move |_s: String| async {}, move |_s: String| async {})
+                                    .await
+                                {
+                                    Ok(()) => {
+                                        (Level::Info, format!("Started monitor on {endpoint}"))
+                                    }
+                                    Err(e) => (Level::Error, format!("Start monitor failed: {e}")),
+                                },
+                            ),
+                            Some(MergedCommand::Restart) => Some(
+                                match self
+                                    .module
+                                    .start(move |_s: String| async {}, move |_s: String| async {})
+                                    .await
+                                {
+                                    Ok(()) => {
+                                        (Level::Info, format!("Restarted monitor on {endpoint}"))
+                                    }
+                                    Err(e) => {
+                                        (Level::Error, format!("Restart monitor failed: {e}"))
+                                    }
+                                },
+                            ),
+                        };
+                        if let Some((level, msg)) = cmd_line {
+                            self.log().write().await.write(level, &msg);
+                        }
                     }
                     None => unreachable!("outer condition checked pending_lifecycle.is_some()"),
                 }
@@ -1386,6 +1466,7 @@ impl ModuleView for ModbusMonitorModuleView {
                 self.pending_lifecycle = Some(PendingLifecycle::ApplyEdit {
                     spec: Box::new(spec),
                     device: Box::new(device),
+                    then: None,
                 });
             }
 
@@ -1497,6 +1578,11 @@ impl ModuleView for ModbusMonitorModuleView {
 
         match parsed {
             ModbusMonitorCmd::Start => Box::pin(async move {
+                if let Some(PendingLifecycle::ApplyEdit { then, .. }) = &mut self.pending_lifecycle
+                {
+                    *then = Some(MergedCommand::Start);
+                    return CommandResult::Handled(None);
+                }
                 let endpoint = self.spec.endpoint.to_string();
                 match self
                     .module
@@ -1515,6 +1601,12 @@ impl ModuleView for ModbusMonitorModuleView {
             }),
 
             ModbusMonitorCmd::Stop => Box::pin(async move {
+                if let Some(PendingLifecycle::ApplyEdit { then, .. }) = &mut self.pending_lifecycle
+                {
+                    *then = Some(MergedCommand::Stop);
+                    self.last_stop_outcome = None;
+                    return CommandResult::Handled(None);
+                }
                 // Monitor's `request_stop()` is infallible (unlike the full client/server
                 // module's, it has no "already idle" error to surface immediately) — always
                 // defer, exactly as UI-R-314 asks.
@@ -1525,6 +1617,11 @@ impl ModuleView for ModbusMonitorModuleView {
             }),
 
             ModbusMonitorCmd::Restart => Box::pin(async move {
+                if let Some(PendingLifecycle::ApplyEdit { then, .. }) = &mut self.pending_lifecycle
+                {
+                    *then = Some(MergedCommand::Restart);
+                    return CommandResult::Handled(None);
+                }
                 let _ = self.module.request_stop().await;
                 self.pending_lifecycle = Some(PendingLifecycle::Restart);
                 CommandResult::Handled(None)
@@ -1547,6 +1644,12 @@ impl ModuleView for ModbusMonitorModuleView {
                         )));
                     }
                 };
+                if matches!(
+                    self.pending_lifecycle,
+                    Some(PendingLifecycle::ApplyEdit { .. })
+                ) {
+                    self.discarded_edit = Some(self.spec.name.clone());
+                }
                 let _ = self.module.request_stop().await;
                 self.pending_lifecycle = Some(PendingLifecycle::Reload {
                     path,
@@ -3261,6 +3364,199 @@ mod tests {
             v.module.interpretations_for(UnitId(3)).len(),
             1,
             "an interpretation added at runtime must survive an applied edit"
+        );
+    }
+
+    struct PendingEdit {
+        v: ModbusMonitorModuleView,
+        endpoint: String,
+        _dir: Option<ferrowl_test_support::TempDirGuard>,
+        path: String,
+    }
+
+    /// Running monitor view whose edit (rename to `mon2`) is pending behind a deferred stop.
+    async fn pending_edit(with_device_file: bool) -> PendingEdit {
+        let mut device = device();
+        device.reconnect = Some(true);
+        let mut s = spec();
+        let mut guard = None;
+        let mut path = String::new();
+        if with_device_file {
+            let dir = reserve_temp_dir("ferrowl_modbus_monitor_view");
+            path = dir
+                .join("pending-edit.toml")
+                .to_str()
+                .expect("utf-8 temp path")
+                .to_string();
+            let mut writer = view();
+            let _ = writer.handle_command(&format!("write-device {path}")).await;
+            s.device = path.clone();
+            guard = Some(dir);
+        }
+        let module = ModbusMonitorModule::new(&s, &device);
+        let mut v = ModbusMonitorModuleView::new(module, s.clone(), device.clone());
+        v.module
+            .start(|_: String| async {}, |_: String| async {})
+            .await
+            .expect("start always succeeds for a valid transport");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let mut edited = s;
+        edited.name = "mon2".into();
+        let endpoint = edited.endpoint.to_string();
+        v.pending_setup = Some(Box::new((edited, device)));
+        v.refresh().await;
+        assert!(v.lifecycle_pending());
+        PendingEdit {
+            v,
+            endpoint,
+            _dir: guard,
+            path,
+        }
+    }
+
+    async fn settle(v: &mut ModbusMonitorModuleView) {
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
+    }
+
+    async fn log_lines(v: &ModbusMonitorModuleView) -> Vec<(Level, String)> {
+        v.log()
+            .read()
+            .await
+            .peek_n(crate::app::LOG_SIZE)
+            .into_iter()
+            .map(|(_, level, l)| (level, l))
+            .collect()
+    }
+
+    fn pos(lines: &[(Level, String)], level: Level, text: &str) -> usize {
+        lines
+            .iter()
+            .position(|(lv, l)| *lv == level && l == text)
+            .unwrap_or_else(|| panic!("missing {level:?} {text:?} in {lines:?}"))
+    }
+
+    /// UI-R-354, UI-R-356, UI-E-163, UI-R-358 — `:stop` during a pending edit apply merges into
+    /// it: the edit is installed, the monitor stays stopped, and `:start` runs the edited one.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_stop_during_pending_edit_keeps_edit_and_stays_stopped() {
+        let mut p = pending_edit(false).await;
+        assert!(matches!(
+            p.v.handle_command("stop").await,
+            CommandResult::Handled(None)
+        ));
+        assert_eq!(p.v.spec.name, "mon1");
+        settle(&mut p.v).await;
+
+        assert_eq!(p.v.spec.name, "mon2");
+        assert!(!p.v.module.is_running());
+        let lines = log_lines(&p.v).await;
+        assert!(
+            pos(&lines, Level::Info, "Settings updated")
+                < pos(&lines, Level::Info, "Stopped monitor")
+        );
+        assert!(matches!(p.v.take_stop_outcome(), Some(StopOutcome::Clean)));
+
+        assert!(matches!(
+            p.v.handle_command("start").await,
+            CommandResult::Handled(Some((Level::Info, _)))
+        ));
+        assert!(p.v.module.is_running());
+        assert_eq!(p.v.spec.name, "mon2");
+        let _ = p.v.module.request_stop().await;
+    }
+
+    /// UI-R-315, UI-R-355, UI-R-358 — `:start` during a pending edit apply is deferred and runs
+    /// the edited monitor exactly once.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_start_during_pending_edit_runs_edited_monitor_once() {
+        let mut p = pending_edit(false).await;
+        assert!(matches!(
+            p.v.handle_command("start").await,
+            CommandResult::Handled(None)
+        ));
+        settle(&mut p.v).await;
+
+        assert!(p.v.module.is_running());
+        assert_eq!(p.v.spec.name, "mon2");
+        let lines = log_lines(&p.v).await;
+        let started = format!("Started monitor on {}", p.endpoint);
+        assert_eq!(lines.iter().filter(|(_, l)| *l == started).count(), 1);
+        assert!(pos(&lines, Level::Info, "Settings updated") < pos(&lines, Level::Info, &started));
+        let _ = p.v.module.request_stop().await;
+    }
+
+    /// UI-R-355, UI-R-358 — `:restart` during a pending edit apply runs the edited monitor once.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_restart_during_pending_edit_runs_edited_monitor() {
+        let mut p = pending_edit(false).await;
+        assert!(matches!(
+            p.v.handle_command("restart").await,
+            CommandResult::Handled(None)
+        ));
+        settle(&mut p.v).await;
+
+        assert!(p.v.module.is_running());
+        assert_eq!(p.v.spec.name, "mon2");
+        let lines = log_lines(&p.v).await;
+        let restarted = format!("Restarted monitor on {}", p.endpoint);
+        assert_eq!(lines.iter().filter(|(_, l)| *l == restarted).count(), 1);
+        assert!(
+            pos(&lines, Level::Info, "Settings updated") < pos(&lines, Level::Info, &restarted)
+        );
+        let _ = p.v.module.request_stop().await;
+    }
+
+    /// UI-R-357, UI-E-164, UI-R-358 — `:reload` during a pending edit apply discards the edit
+    /// and logs a Warning before the reload line.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_reload_during_pending_edit_discards_edit_with_warning() {
+        let mut p = pending_edit(true).await;
+        let _ = p.v.handle_command("reload").await;
+        settle(&mut p.v).await;
+
+        assert_eq!(p.v.spec.name, "mon1");
+        let lines = log_lines(&p.v).await;
+        let done = format!(":reload done — '{}'", p.path);
+        assert!(
+            pos(
+                &lines,
+                Level::Warning,
+                "Edit to 'mon1' discarded by :reload"
+            ) < pos(&lines, Level::Info, &done)
+        );
+        let _ = p.v.module.request_stop().await;
+    }
+
+    /// UI-R-357, UI-R-358 — a `:stop` overwriting the discarding `:reload` still logs the
+    /// discard Warning.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_stop_after_reload_during_pending_edit_still_warns() {
+        let mut p = pending_edit(true).await;
+        let _ = p.v.handle_command("reload").await;
+        let _ = p.v.handle_command("stop").await;
+        settle(&mut p.v).await;
+
+        assert_eq!(p.v.spec.name, "mon1");
+        assert!(!p.v.module.is_running());
+        let lines = log_lines(&p.v).await;
+        assert!(
+            pos(
+                &lines,
+                Level::Warning,
+                "Edit to 'mon1' discarded by :reload"
+            ) < pos(&lines, Level::Info, "Stopped monitor")
         );
     }
 

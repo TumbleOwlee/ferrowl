@@ -72,12 +72,23 @@ pub struct ModbusModuleView {
     /// CL-R-057 — the settled outcome of the most recently completed `PendingLifecycle::Stop`,
     /// consumed by [`ModuleView::take_stop_outcome`] rather than re-derived from the log.
     last_stop_outcome: Option<StopOutcome>,
+    /// UI-R-357 — the pre-edit name of a module whose pending edit apply a `:reload` discarded,
+    /// logged as a Warning at the next settle.
+    discarded_edit: Option<String>,
     /// Whether this view (its content pane) currently has keyboard focus, set by the owning `Tab`.
     view_focused: bool,
     /// MB-R-150 — the session-wide serial-path registry attached via `set_serial_paths`, kept so
     /// a `:reload`-rebuilt `self.module` can be reattached to the same registry instead of
     /// silently falling back to a private default.
     serial_paths: super::SerialPathRegistry,
+}
+
+/// UI-R-354 — a lifecycle command merged into a pending `ApplySetup`.
+#[derive(Clone, Copy)]
+enum MergedCommand {
+    Start,
+    Stop,
+    Restart,
 }
 
 /// UI-R-314/UI-R-315 — the follow-up state a deferred stop-bearing lifecycle command needs once
@@ -100,6 +111,7 @@ enum PendingLifecycle {
         timing: Timing,
         read_ranges: Box<ReadRanges>,
         tls: Box<ferrowl_modbus::tcp::ModbusTlsConfig>,
+        then: Option<MergedCommand>,
     },
 }
 
@@ -129,6 +141,7 @@ impl ModbusModuleView {
             pending: None,
             pending_lifecycle: None,
             last_stop_outcome: None,
+            discarded_edit: None,
             view_focused: false,
             serial_paths: super::SerialPathRegistry::default(),
         }
@@ -516,6 +529,23 @@ impl ModuleView for ModbusModuleView {
             {
                 let role = self.spec.role.to_string();
                 let endpoint = self.spec.endpoint.to_string();
+                // A `:reload` replaces the module and with it the log, so its discard warning is
+                // written after the swap instead.
+                let discarded = self.discarded_edit.take();
+                let discarded = if matches!(
+                    self.pending_lifecycle,
+                    Some(PendingLifecycle::Reload { .. })
+                ) {
+                    discarded
+                } else {
+                    if let Some(name) = discarded {
+                        self.log().write().await.write(
+                            Level::Warning,
+                            &format!("Edit to '{name}' discarded by :reload"),
+                        );
+                    }
+                    None
+                };
                 match self.pending_lifecycle.take() {
                     Some(PendingLifecycle::Stop) => {
                         let (level, msg) = match stop_result {
@@ -564,6 +594,12 @@ impl ModuleView for ModbusModuleView {
                             .collect();
                         self.table.set_definitions(defs);
                         self.sort = None;
+                        if let Some(name) = discarded {
+                            self.log().write().await.write(
+                                Level::Warning,
+                                &format!("Edit to '{name}' discarded by :reload"),
+                            );
+                        }
                         let (level, msg) = if let Err(e) = self.module.start().await {
                             (Level::Error, format!(":reload start error: {e}"))
                         } else {
@@ -587,7 +623,12 @@ impl ModuleView for ModbusModuleView {
                         timing,
                         read_ranges,
                         tls,
+                        then,
                     }) => {
+                        let stop_line = match &stop_result {
+                            Ok(()) => (Level::Info, format!("Stopped {new_role}")),
+                            Err(e) => (Level::Error, format!("Stop {new_role} failed: {e}")),
+                        };
                         let stop_err = stop_result.err().filter(|e| !e.is_not_running());
                         // UI-E-161 — the edited name/endpoint/role/device path are only adopted
                         // here, once the deferred stop has actually settled, not back when the
@@ -598,7 +639,76 @@ impl ModuleView for ModbusModuleView {
                         self.spec.endpoint = new_endpoint.clone();
                         let role = new_role.to_string();
                         let endpoint = new_endpoint.to_string();
-                        if let Err(e) = self
+                        if let Some(cmd) = then {
+                            if let Some(e) = stop_err {
+                                self.log().write().await.write(
+                                    Level::Error,
+                                    &format!("Settings update: stop failed: {e}"),
+                                );
+                            }
+                            let reconfigured = self
+                                .module
+                                .reconfigure(&new_endpoint, new_role, timing, *read_ranges, *tls)
+                                .await;
+                            let lines = match reconfigured {
+                                Err(e) => {
+                                    let cmd_line = match cmd {
+                                        MergedCommand::Stop => stop_line.clone(),
+                                        MergedCommand::Start => (
+                                            Level::Error,
+                                            format!("Start {role} failed: reconfigure failed"),
+                                        ),
+                                        MergedCommand::Restart => (
+                                            Level::Error,
+                                            format!("Restart {role} failed: reconfigure failed"),
+                                        ),
+                                    };
+                                    vec![
+                                        (Level::Error, format!("Reconfigure failed: {e}")),
+                                        cmd_line,
+                                    ]
+                                }
+                                Ok(()) => {
+                                    let apply = (Level::Info, "Settings updated".to_string());
+                                    let cmd_line = match cmd {
+                                        MergedCommand::Stop => {
+                                            self.last_stop_outcome = Some(match stop_line.0 {
+                                                Level::Error => {
+                                                    StopOutcome::Failed(stop_line.1.clone())
+                                                }
+                                                _ => StopOutcome::Clean,
+                                            });
+                                            stop_line.clone()
+                                        }
+                                        MergedCommand::Start => match self.module.start().await {
+                                            Ok(()) => (
+                                                Level::Info,
+                                                format!("Started {role} on {endpoint}"),
+                                            ),
+                                            Err(e) => {
+                                                (Level::Error, format!("Start {role} failed: {e}"))
+                                            }
+                                        },
+                                        MergedCommand::Restart => match self.module.start().await {
+                                            Ok(()) => (
+                                                Level::Info,
+                                                format!("Restarted {role} on {endpoint}"),
+                                            ),
+                                            Err(e) => (
+                                                Level::Error,
+                                                format!("Restart {role} failed: {e}"),
+                                            ),
+                                        },
+                                    };
+                                    vec![apply, cmd_line]
+                                }
+                            };
+                            let log = self.log();
+                            let mut log = log.write().await;
+                            for (level, msg) in lines {
+                                log.write(level, &msg);
+                            }
+                        } else if let Err(e) = self
                             .module
                             .reconfigure(&new_endpoint, new_role, timing, *read_ranges, *tls)
                             .await
@@ -682,6 +792,11 @@ impl ModuleView for ModbusModuleView {
 
         match parsed {
             ModbusCmd::Start => Box::pin(async move {
+                if let Some(PendingLifecycle::ApplySetup { then, .. }) = &mut self.pending_lifecycle
+                {
+                    *then = Some(MergedCommand::Start);
+                    return CommandResult::Handled(None);
+                }
                 let role = self.spec.role.to_string();
                 let endpoint = self.spec.endpoint.to_string();
                 match self.module.start().await {
@@ -697,6 +812,12 @@ impl ModuleView for ModbusModuleView {
             }),
 
             ModbusCmd::Stop => Box::pin(async move {
+                if let Some(PendingLifecycle::ApplySetup { then, .. }) = &mut self.pending_lifecycle
+                {
+                    *then = Some(MergedCommand::Stop);
+                    self.last_stop_outcome = None;
+                    return CommandResult::Handled(None);
+                }
                 let role = self.spec.role.to_string();
                 // A stop-bearing command is already in flight (its own request_stop already
                 // signalled the instance): overwrite the follow-up rather than re-requesting a
@@ -728,6 +849,11 @@ impl ModuleView for ModbusModuleView {
             }),
 
             ModbusCmd::Restart => Box::pin(async move {
+                if let Some(PendingLifecycle::ApplySetup { then, .. }) = &mut self.pending_lifecycle
+                {
+                    *then = Some(MergedCommand::Restart);
+                    return CommandResult::Handled(None);
+                }
                 // See `ModbusCmd::Stop` above: a stop already in flight is overwritten with the
                 // new follow-up rather than re-requested.
                 if self.pending_lifecycle.is_some() {
@@ -777,6 +903,12 @@ impl ModuleView for ModbusModuleView {
                 // See `ModbusCmd::Stop` above: a stop already in flight is overwritten with the
                 // new follow-up rather than re-requested.
                 if self.pending_lifecycle.is_some() {
+                    if matches!(
+                        self.pending_lifecycle,
+                        Some(PendingLifecycle::ApplySetup { .. })
+                    ) {
+                        self.discarded_edit = Some(self.spec.name.clone());
+                    }
                     self.pending_lifecycle = Some(PendingLifecycle::Reload {
                         path,
                         device: Box::new(device),
@@ -3177,6 +3309,231 @@ mod tests {
             "the earlier stop's own outcome must not be logged once overwritten: {lines:?}"
         );
 
+        view.module.stop().await.expect("cleanup stop");
+    }
+
+    struct PendingApply {
+        view: ModbusModuleView,
+        pre_name: String,
+        port: u16,
+        endpoint: String,
+        device_path: String,
+        _dir: Option<ferrowl_test_support::TempDirGuard>,
+    }
+
+    /// Running server view whose edit (rename + new port) is pending behind a deferred stop.
+    async fn pending_apply(with_device_file: bool) -> PendingApply {
+        let mut device = empty_device();
+        device.timeout_ms = Some(200);
+        let mut device_path = String::new();
+        let mut guard = None;
+        if with_device_file {
+            let dir = reserve_temp_dir("ferrowl_modbus_view");
+            let path = dir.join("pending-apply.toml");
+            device_path = path.to_str().expect("utf-8 temp path").to_string();
+            let mut writer = new_view();
+            let _ = writer
+                .handle_command(&format!("write-device {device_path}"))
+                .await;
+            guard = Some(dir);
+        }
+        let spec = ModuleSpec {
+            name: "test module".into(),
+            device: device_path.clone(),
+            role: Role::Server,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 0,
+            },
+        };
+        let module = super::super::ModbusModule::new(&spec, &device);
+        let mut view = ModbusModuleView::new(module, spec.clone(), device);
+        view.module.start().await.expect("start");
+        let port = reserve_tcp_port().release();
+        let endpoint = Endpoint::Tcp {
+            ip: "127.0.0.1".into(),
+            port,
+        };
+        let values = SetupValues {
+            name: "edited module".into(),
+            config_path: device_path.clone(),
+            role: Role::Server,
+            endpoint: endpoint.clone(),
+            timeout_ms: Some(200),
+            delay_ms: None,
+            interval_ms: None,
+            reconnect: None,
+            read_ranges: Default::default(),
+            tls: Default::default(),
+        };
+        view.apply_setup(values).await;
+        assert!(view.lifecycle_pending());
+        PendingApply {
+            view,
+            pre_name: spec.name,
+            port,
+            endpoint: endpoint.to_string(),
+            device_path,
+            _dir: guard,
+        }
+    }
+
+    async fn settle(view: &mut ModbusModuleView) {
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !view.lifecycle_pending() {
+                    return Some(());
+                }
+                view.refresh().await;
+                None
+            },
+        )
+        .await;
+    }
+
+    async fn wait_bound(view: &ModbusModuleView, port: u16) {
+        wait_until_async(
+            "edited port bound",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || (view.module.bound_addr().map(|a| a.port()) == Some(port)).then_some(()),
+        )
+        .await;
+    }
+
+    async fn log_lines(view: &ModbusModuleView) -> Vec<(Level, String)> {
+        view.log()
+            .read()
+            .await
+            .peek_n(crate::app::LOG_SIZE)
+            .into_iter()
+            .map(|(_, level, l)| (level, l))
+            .collect()
+    }
+
+    fn pos(lines: &[(Level, String)], level: Level, text: &str) -> usize {
+        lines
+            .iter()
+            .position(|(lv, l)| *lv == level && l == text)
+            .unwrap_or_else(|| panic!("missing {level:?} {text:?} in {lines:?}"))
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// UI-R-354, UI-R-356, UI-E-163, UI-R-358 — `:stop` during a pending apply merges into it:
+    /// the edit is installed, the module stays stopped, and `:start` binds the edited port.
+    async fn ut_stop_during_pending_apply_keeps_edit_and_stays_stopped() {
+        let mut p = pending_apply(false).await;
+        assert!(matches!(
+            p.view.handle_command("stop").await,
+            CommandResult::Handled(None)
+        ));
+        assert_eq!(p.view.spec.name, p.pre_name);
+        settle(&mut p.view).await;
+
+        assert_eq!(p.view.spec.name, "edited module");
+        assert_eq!(p.view.spec.endpoint.to_string(), p.endpoint);
+        assert!(!p.view.module.is_instance_active());
+        let lines = log_lines(&p.view).await;
+        assert!(
+            pos(&lines, Level::Info, "Settings updated")
+                < pos(&lines, Level::Info, "Stopped Server")
+        );
+        assert!(matches!(
+            p.view.take_stop_outcome(),
+            Some(StopOutcome::Clean)
+        ));
+
+        let _ = p.view.handle_command("start").await;
+        wait_bound(&p.view, p.port).await;
+        p.view.module.stop().await.expect("cleanup stop");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// UI-R-315, UI-R-355, UI-R-358 — `:start` during a pending apply is deferred and starts
+    /// the edited module exactly once.
+    async fn ut_start_during_pending_apply_is_deferred_and_starts_once() {
+        let mut p = pending_apply(false).await;
+        assert!(matches!(
+            p.view.handle_command("start").await,
+            CommandResult::Handled(None)
+        ));
+        settle(&mut p.view).await;
+
+        wait_bound(&p.view, p.port).await;
+        assert!(p.view.module.is_instance_active());
+        let lines = log_lines(&p.view).await;
+        let started = format!("Started Server on {}", p.endpoint);
+        assert_eq!(lines.iter().filter(|(_, l)| *l == started).count(), 1);
+        assert!(pos(&lines, Level::Info, "Settings updated") < pos(&lines, Level::Info, &started));
+        p.view.module.stop().await.expect("cleanup stop");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// UI-R-355, UI-R-358 — `:restart` during a pending apply starts the edited module once.
+    async fn ut_restart_during_pending_apply_starts_edited_once() {
+        let mut p = pending_apply(false).await;
+        assert!(matches!(
+            p.view.handle_command("restart").await,
+            CommandResult::Handled(None)
+        ));
+        settle(&mut p.view).await;
+
+        let lines = log_lines(&p.view).await;
+        let restarted = format!("Restarted Server on {}", p.endpoint);
+        assert_eq!(lines.iter().filter(|(_, l)| *l == restarted).count(), 1);
+        assert!(!lines.iter().any(|(_, l)| l.starts_with("Started ")));
+        assert!(
+            pos(&lines, Level::Info, "Settings updated") < pos(&lines, Level::Info, &restarted)
+        );
+        wait_bound(&p.view, p.port).await;
+        p.view.module.stop().await.expect("cleanup stop");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// UI-R-357, UI-E-164, UI-R-358 — `:reload` during a pending apply discards the edit and
+    /// logs a Warning before the reload line.
+    async fn ut_reload_during_pending_apply_discards_edit_with_warning() {
+        let mut p = pending_apply(true).await;
+        let _ = p.view.handle_command("reload").await;
+        settle(&mut p.view).await;
+
+        assert_eq!(p.view.spec.name, p.pre_name);
+        let lines = log_lines(&p.view).await;
+        let warn = format!("Edit to '{}' discarded by :reload", p.pre_name);
+        let done = format!(":reload done — '{}'", p.device_path);
+        assert!(pos(&lines, Level::Warning, &warn) < pos(&lines, Level::Info, &done));
+        let _ = p.view.module.stop().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// UI-R-357, UI-R-358 — a `:stop` overwriting the discarding `:reload` still logs the
+    /// discard Warning.
+    async fn ut_stop_after_reload_during_pending_apply_still_warns() {
+        let mut p = pending_apply(true).await;
+        let _ = p.view.handle_command("reload").await;
+        let _ = p.view.handle_command("stop").await;
+        settle(&mut p.view).await;
+
+        assert_eq!(p.view.spec.name, p.pre_name);
+        assert!(!p.view.module.is_instance_active());
+        let lines = log_lines(&p.view).await;
+        let warn = format!("Edit to '{}' discarded by :reload", p.pre_name);
+        assert!(pos(&lines, Level::Warning, &warn) < pos(&lines, Level::Info, "Stopped Server"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// UI-R-315 — `:start` with no pending apply keeps its immediate result.
+    async fn ut_start_without_pending_apply_keeps_immediate_result() {
+        let mut view = new_view();
+        match view.handle_command("start").await {
+            CommandResult::Handled(Some((Level::Info, msg))) => {
+                assert!(msg.starts_with("Started Server on"), "unexpected: {msg}");
+            }
+            _ => panic!(":start should return its immediate Info result"),
+        }
         view.module.stop().await.expect("cleanup stop");
     }
 
