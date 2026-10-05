@@ -657,7 +657,7 @@ impl<S: DrawSurface> App<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ferrowl_test_support::reserve_temp_dir;
+    use ferrowl_test_support::{reserve_temp_dir, wait_until_async};
     use std::io::Read;
 
     #[test]
@@ -1040,13 +1040,19 @@ mod tests {
         let _ = app.tabs.titles[1].view.handle_command("stop").await;
         // UI-R-314/UI-R-315 — `:stop` now signals the task and returns immediately; the claim is
         // only released once `refresh()` observes the deferred stop actually complete.
-        for _ in 0..200 {
-            if !app.tabs.titles[1].view.lifecycle_pending() {
-                break;
-            }
-            app.tabs.titles[1].view.refresh().await;
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
+        wait_until_async(
+            "lifecycle settles",
+            Duration::from_millis(5),
+            Duration::from_secs(10),
+            async || {
+                if !app.tabs.titles[1].view.lifecycle_pending() {
+                    return Some(());
+                }
+                app.tabs.titles[1].view.refresh().await;
+                None
+            },
+        )
+        .await;
 
         // MB-R-150's own registry (App::serial_paths) drives this, not each tab's log content —
         // the shared registry is the single source of truth for "who's still claiming the path".

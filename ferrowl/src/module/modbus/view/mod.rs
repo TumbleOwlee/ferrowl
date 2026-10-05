@@ -1237,7 +1237,7 @@ mod tests {
     use ferrowl_modbus::UnitId;
     use ferrowl_modbus::{Key, SlaveKey};
     use ferrowl_store::{CellKind, Memory, Range};
-    use ferrowl_test_support::{reserve_tcp_port, reserve_temp_dir};
+    use ferrowl_test_support::{reserve_tcp_port, reserve_temp_dir, wait_until, wait_until_async};
     use ferrowl_ui::EventResult;
     use ratatui::Frame;
     use ratatui::buffer::Buffer;
@@ -1491,26 +1491,22 @@ mod tests {
 
         let area = Rect::new(0, 0, 220, 48);
         let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(220, 48)).unwrap();
-        let mut text = String::new();
-        for _ in 0..100 {
-            view.refresh().await;
-            term.draw(|f: &mut Frame| view.render_overlay(f, area))
-                .unwrap();
-            text = buffer_text(term.backend().buffer());
-            if text.contains("ui-r-088-out")
-                && text.contains("ui-r-088-log")
-                && text.contains("ui-r-088-boom")
-            {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-        assert!(
-            text.contains("ui-r-088-out")
-                && text.contains("ui-r-088-log")
-                && text.contains("ui-r-088-boom"),
-            "expected all three markers in the rendered dialog:\n{text}"
-        );
+        wait_until_async(
+            "all three markers in the rendered dialog",
+            std::time::Duration::from_millis(50),
+            std::time::Duration::from_secs(10),
+            async || {
+                view.refresh().await;
+                term.draw(|f: &mut Frame| view.render_overlay(f, area))
+                    .unwrap();
+                let text = buffer_text(term.backend().buffer());
+                (text.contains("ui-r-088-out")
+                    && text.contains("ui-r-088-log")
+                    && text.contains("ui-r-088-boom"))
+                .then_some(text)
+            },
+        )
+        .await;
     }
 
     #[test]
@@ -2357,19 +2353,17 @@ mod tests {
 
         let area = Rect::new(0, 0, 120, 24);
         let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 24)).unwrap();
-        let mut text = String::new();
-        for _ in 0..100 {
-            term.draw(|f: &mut Frame| view.render(f, area)).unwrap();
-            text = buffer_text(term.backend().buffer());
-            if text.contains("RECONNECTING") {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        assert!(
-            text.contains("RECONNECTING"),
-            "missing status line:\n{text}"
-        );
+        wait_until(
+            "RECONNECTING status line",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || {
+                term.draw(|f: &mut Frame| view.render(f, area)).unwrap();
+                let text = buffer_text(term.backend().buffer());
+                text.contains("RECONNECTING").then_some(text)
+            },
+        )
+        .await;
 
         view.module.stop().await.expect("cleanup stop");
     }
@@ -2402,19 +2396,17 @@ mod tests {
 
         let area = Rect::new(0, 0, 120, 24);
         let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 24)).unwrap();
-        let mut text = String::new();
-        for _ in 0..100 {
-            term.draw(|f: &mut Frame| view.render(f, area)).unwrap();
-            text = buffer_text(term.backend().buffer());
-            if text.contains("RECONNECTING") {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        assert!(
-            text.contains("RECONNECTING"),
-            "missing status line:\n{text}"
-        );
+        wait_until(
+            "RECONNECTING status line",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || {
+                term.draw(|f: &mut Frame| view.render(f, area)).unwrap();
+                let text = buffer_text(term.backend().buffer());
+                text.contains("RECONNECTING").then_some(text)
+            },
+        )
+        .await;
 
         view.module.stop().await.expect("cleanup stop");
     }
@@ -2456,14 +2448,19 @@ mod tests {
         assert!(view.lifecycle_pending());
 
         // Drive the deferred stop to completion so the test doesn't leak a background task.
-        for _ in 0..200 {
-            if !view.lifecycle_pending() {
-                break;
-            }
-            view.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!view.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !view.lifecycle_pending() {
+                    return Some(());
+                }
+                view.refresh().await;
+                None
+            },
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -2476,14 +2473,19 @@ mod tests {
         let result = view.handle_command("stop").await;
         assert!(matches!(result, CommandResult::Handled(None)));
 
-        for _ in 0..200 {
-            if !view.lifecycle_pending() {
-                break;
-            }
-            view.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!view.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !view.lifecycle_pending() {
+                    return Some(());
+                }
+                view.refresh().await;
+                None
+            },
+        )
+        .await;
 
         let lines = view
             .log()
@@ -2512,14 +2514,19 @@ mod tests {
         let result = view.handle_command("stop").await;
         assert!(matches!(result, CommandResult::Handled(None)));
 
-        for _ in 0..200 {
-            if !view.lifecycle_pending() {
-                break;
-            }
-            view.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!view.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !view.lifecycle_pending() {
+                    return Some(());
+                }
+                view.refresh().await;
+                None
+            },
+        )
+        .await;
 
         assert!(
             matches!(view.take_stop_outcome(), Some(StopOutcome::Clean)),
@@ -2557,14 +2564,19 @@ mod tests {
         assert!(matches!(result, CommandResult::Handled(None)));
         assert!(view.lifecycle_pending());
 
-        for _ in 0..200 {
-            if !view.lifecycle_pending() {
-                break;
-            }
-            view.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!view.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !view.lifecycle_pending() {
+                    return Some(());
+                }
+                view.refresh().await;
+                None
+            },
+        )
+        .await;
         assert!(
             view.module.is_instance_active(),
             "the follow-up start must have run once the deferred stop settled"
@@ -2612,17 +2624,19 @@ mod tests {
             "the follow-up must still be pending, not dropped"
         );
 
-        for _ in 0..200 {
-            if !view.lifecycle_pending() {
-                break;
-            }
-            view.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(
-            !view.lifecycle_pending(),
-            "a stop overwritten with a restart must still settle, not latch forever"
-        );
+        wait_until_async(
+            "a stop overwritten with a restart must still settle, not latch forever",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !view.lifecycle_pending() {
+                    return Some(());
+                }
+                view.refresh().await;
+                None
+            },
+        )
+        .await;
         assert!(
             view.module.is_instance_active(),
             "the restart's follow-up start must have run, not the stale stop's no-op"
@@ -2708,13 +2722,19 @@ mod tests {
             tls: Default::default(),
         };
         view.apply_setup(values).await;
-        for _ in 0..200 {
-            if !view.lifecycle_pending() {
-                break;
-            }
-            view.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !view.lifecycle_pending() {
+                    return Some(());
+                }
+                view.refresh().await;
+                None
+            },
+        )
+        .await;
         assert_eq!(view.device.reconnect, Some(false));
     }
 
@@ -2764,14 +2784,19 @@ mod tests {
         view.apply_setup(values).await;
         assert!(view.lifecycle_pending());
 
-        for _ in 0..200 {
-            if !view.lifecycle_pending() {
-                break;
-            }
-            view.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!view.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !view.lifecycle_pending() {
+                    return Some(());
+                }
+                view.refresh().await;
+                None
+            },
+        )
+        .await;
 
         view.module.stop().await.expect("cleanup stop");
     }
@@ -2844,14 +2869,19 @@ mod tests {
             "UI-E-161: the device config path must keep rendering the pre-edit value while the stop is pending"
         );
 
-        for _ in 0..200 {
-            if !view.lifecycle_pending() {
-                break;
-            }
-            view.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!view.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !view.lifecycle_pending() {
+                    return Some(());
+                }
+                view.refresh().await;
+                None
+            },
+        )
+        .await;
         assert_eq!(
             view.name(),
             "post-edit name",
@@ -2978,14 +3008,19 @@ mod tests {
         let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 24)).unwrap();
         term.draw(|f: &mut Frame| view.render(f, area)).unwrap();
 
-        for _ in 0..200 {
-            if !view.lifecycle_pending() {
-                break;
-            }
-            view.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!view.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !view.lifecycle_pending() {
+                    return Some(());
+                }
+                view.refresh().await;
+                None
+            },
+        )
+        .await;
         assert_eq!(
             view.module.connection_status(),
             crate::view::status_bar::ConnStatus::Connected,
@@ -3046,19 +3081,16 @@ mod tests {
             "an inline apply must adopt the edited role immediately, not defer it"
         );
 
-        let mut status = view.module.connection_status();
-        for _ in 0..100 {
-            status = view.module.connection_status();
-            if status == crate::view::status_bar::ConnStatus::Connected {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert_eq!(
-            status,
-            crate::view::status_bar::ConnStatus::Connected,
-            "apply against a stopped module must start it inline"
-        );
+        wait_until(
+            "apply against a stopped module must start it inline",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            || {
+                (view.module.connection_status() == crate::view::status_bar::ConnStatus::Connected)
+                    .then_some(())
+            },
+        )
+        .await;
 
         view.module.stop().await.expect("cleanup stop");
     }
@@ -3112,17 +3144,19 @@ mod tests {
             "the follow-up must still be pending, not dropped"
         );
 
-        for _ in 0..200 {
-            if !view.lifecycle_pending() {
-                break;
-            }
-            view.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(
-            !view.lifecycle_pending(),
-            "a stop overwritten with an apply must still settle, not latch forever"
-        );
+        wait_until_async(
+            "a stop overwritten with an apply must still settle, not latch forever",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !view.lifecycle_pending() {
+                    return Some(());
+                }
+                view.refresh().await;
+                None
+            },
+        )
+        .await;
 
         let lines = view
             .log()
@@ -3379,24 +3413,24 @@ mod tests {
         let (spec, device, _dir) = counter_device_file("ferrowl_view_reloadsim").await;
         let module = super::super::ModbusModule::new(&spec, &device);
         let mut view = ModbusModuleView::new(module, spec, device);
-        for _ in 0..300 {
-            if marker_of(&view) >= 5 {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-        assert!(marker_of(&view) >= 5, "counter never reached 5");
+        wait_until(
+            "counter never reached 5",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(10),
+            || (marker_of(&view) >= 5).then_some(()),
+        )
+        .await;
         let _ = view.handle_command("reload").await;
-        let mut first = None;
-        for _ in 0..300 {
-            let v = marker_of(&view);
-            if v > 0 {
-                first = Some(v);
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
-        }
-        let first = first.expect("reloaded sim never wrote the marker");
+        let first = wait_until(
+            "reloaded sim never wrote the marker",
+            std::time::Duration::from_millis(2),
+            std::time::Duration::from_secs(10),
+            || {
+                let v = marker_of(&view);
+                (v > 0).then_some(v)
+            },
+        )
+        .await;
         assert!(
             first < 5,
             "globals survived the reload: first value {first}"

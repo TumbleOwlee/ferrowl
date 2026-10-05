@@ -598,7 +598,7 @@ impl<T: KeyParams> Instance<T> {
 mod tests {
     use super::*;
     use ferrowl_modbus::UnitId;
-    use ferrowl_test_support::{reserve_tcp_port, reserve_udp_port};
+    use ferrowl_test_support::{reserve_tcp_port, reserve_udp_port, wait_until, wait_until_async};
 
     use std::sync::Arc;
 
@@ -829,13 +829,13 @@ mod tests {
             .await
             .expect("spawn succeeds; the open error surfaces from the task");
 
-        for _ in 0..50 {
-            if !instance.active() {
-                break;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
-        }
-        assert!(!instance.active());
+        wait_until(
+            "instance task ends",
+            tokio::time::Duration::from_millis(20),
+            tokio::time::Duration::from_secs(10),
+            || (!instance.active()).then_some(()),
+        )
+        .await;
     }
 
     /// MB-R-123, MB-R-130 — an Ascii server instance's `start` always succeeds (the serial-open
@@ -855,13 +855,13 @@ mod tests {
             .await
             .expect("spawn always returns Ok; the open error surfaces from the task");
 
-        for _ in 0..50 {
-            if !instance.active() {
-                break;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
-        }
-        assert!(!instance.active());
+        wait_until(
+            "instance task ends",
+            tokio::time::Duration::from_millis(20),
+            tokio::time::Duration::from_secs(10),
+            || (!instance.active()).then_some(()),
+        )
+        .await;
     }
 
     /// MB-R-126 — an AsciiOverTcp client instance starts, connects, and stops exactly like a
@@ -930,13 +930,13 @@ mod tests {
             .send_command(Command::Terminate)
             .await
             .expect("send terminate");
-        for _ in 0..50 {
-            if !instance.active() {
-                break;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
-        }
-        assert!(!instance.active());
+        wait_until(
+            "instance task ends",
+            tokio::time::Duration::from_millis(20),
+            tokio::time::Duration::from_secs(10),
+            || (!instance.active()).then_some(()),
+        )
+        .await;
 
         // `stop()` on an already-finished task still tears down bookkeeping cleanly.
         instance.stop().await.expect("stop after natural finish");
@@ -970,15 +970,13 @@ mod tests {
 
         instance.start(sink(), sink()).await.expect("start");
 
-        let mut addr = None;
-        for _ in 0..50 {
-            addr = instance.bound_addr();
-            if addr.is_some() {
-                break;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
-        }
-        let addr = addr.expect("listener must have bound within 1s");
+        let addr = wait_until(
+            "listener bind",
+            tokio::time::Duration::from_millis(20),
+            tokio::time::Duration::from_secs(10),
+            || instance.bound_addr(),
+        )
+        .await;
         assert_ne!(addr.port(), 0, "the OS must have assigned a real port");
 
         instance.stop().await.expect("stop");
@@ -1124,12 +1122,13 @@ mod tests {
             before.elapsed()
         );
 
-        loop {
-            if instance.poll_stop().await.is_some() {
-                break;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
-        }
+        let _ = wait_until_async(
+            "stop settles",
+            tokio::time::Duration::from_millis(5),
+            tokio::time::Duration::from_secs(10),
+            async || instance.poll_stop().await,
+        )
+        .await;
     }
 
     /// UI-R-314 — a second `request_stop()` while already `Stopping` errors with `NotRunning`
@@ -1151,12 +1150,13 @@ mod tests {
             "the handle must still be tracked, not dropped, after the repeat request"
         );
 
-        loop {
-            if instance.poll_stop().await.is_some() {
-                break;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
-        }
+        let _ = wait_until_async(
+            "stop settles",
+            tokio::time::Duration::from_millis(5),
+            tokio::time::Duration::from_secs(10),
+            async || instance.poll_stop().await,
+        )
+        .await;
         assert_eq!(instance.connection_status(), ConnStatus::Disconnected);
     }
 
@@ -1173,12 +1173,13 @@ mod tests {
             "poll_stop() must report nothing before the grace period or task completion"
         );
 
-        let result = loop {
-            if let Some(res) = instance.poll_stop().await {
-                break res;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
-        };
+        let result = wait_until_async(
+            "stop settles",
+            tokio::time::Duration::from_millis(5),
+            tokio::time::Duration::from_secs(10),
+            async || instance.poll_stop().await,
+        )
+        .await;
         assert!(result.is_ok());
         assert!(!instance.active());
         assert!(
@@ -1205,12 +1206,13 @@ mod tests {
             "must not report Disconnected until poll_stop reaps the task"
         );
 
-        loop {
-            if instance.poll_stop().await.is_some() {
-                break;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
-        }
+        let _ = wait_until_async(
+            "stop settles",
+            tokio::time::Duration::from_millis(5),
+            tokio::time::Duration::from_secs(10),
+            async || instance.poll_stop().await,
+        )
+        .await;
         assert_eq!(instance.connection_status(), ConnStatus::Disconnected);
     }
 }

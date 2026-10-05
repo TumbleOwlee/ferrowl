@@ -112,7 +112,7 @@ pub async fn run(args: &BridgeArgs) -> i32 {
 mod tests {
     use super::*;
     use crate::cli::BridgeArgs;
-    use ferrowl_test_support::{reserve_tcp_port, reserve_temp_dir};
+    use ferrowl_test_support::{reserve_tcp_port, reserve_temp_dir, wait_until, wait_until_async};
 
     fn base_args() -> BridgeArgs {
         BridgeArgs {
@@ -222,39 +222,14 @@ mod tests {
         )
         .await
         .expect("downstream server failed to start");
-        wait_bound(&bound_addr).await;
+        wait_until(
+            "downstream listener bind",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || *bound_addr.lock(),
+        )
+        .await;
         (sender, handle)
-    }
-
-    /// `ServerBuilder::spawn` returns before the listener binds.
-    async fn wait_bound(
-        bound_addr: &std::sync::Arc<parking_lot::Mutex<Option<std::net::SocketAddr>>>,
-    ) {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-        while bound_addr.lock().is_none() {
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "downstream server did not bind within 10s"
-            );
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    }
-
-    async fn wait_accepting(port: u16) {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-        loop {
-            if tokio::net::TcpStream::connect(("127.0.0.1", port))
-                .await
-                .is_ok()
-            {
-                return;
-            }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "bridge upstream did not accept within 10s"
-            );
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
     }
 
     fn descriptor(port: u16) -> String {
@@ -343,25 +318,42 @@ mod tests {
         };
 
         let bridge = tokio::spawn(async move { run(&args).await });
-        wait_accepting(upstream_port).await;
+        wait_until_async(
+            "bridge upstream accepts",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            async || {
+                tokio::net::TcpStream::connect(("127.0.0.1", upstream_port))
+                    .await
+                    .ok()
+                    .map(|_| ())
+            },
+        )
+        .await;
         let mem = client_mem();
         let (_client_tx, _client) = poll_upstream(upstream_port, mem.clone()).await;
 
         use ferrowl_store::{CellType, Range};
-        loop {
-            let got = mem
-                .read()
-                .read(client_key(), &CellType::Register, &Range::new(0, 1))
-                .unwrap();
-            if got == vec![77] {
-                break;
-            }
-            assert!(
-                !bridge.is_finished(),
-                "bridge run returned before [77] was relayed"
-            );
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+        wait_until(
+            "relayed [77]",
+            Duration::from_millis(20),
+            Duration::from_secs(10),
+            || {
+                let got = mem
+                    .read()
+                    .read(client_key(), &CellType::Register, &Range::new(0, 1))
+                    .unwrap();
+                if got == vec![77] {
+                    return Some(());
+                }
+                assert!(
+                    !bridge.is_finished(),
+                    "bridge run returned before [77] was relayed"
+                );
+                None
+            },
+        )
+        .await;
         assert_eq!(
             mem.read()
                 .read(client_key(), &CellType::Register, &Range::new(0, 1))
