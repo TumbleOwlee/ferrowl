@@ -10,15 +10,14 @@ use ferrowl_ocpp::ConnectorScope;
 use ferrowl_ocpp::csms::ConnectionId;
 
 use crate::app::Level;
-use crate::module::ocpp::client::build_client_view;
 use crate::module::ocpp::client::lua_sim::merge_overrides;
 use crate::module::ocpp::config::device::OcppDeviceConfig;
 use crate::module::ocpp::config::session::OcppRole;
 use crate::module::ocpp::lock::{with_state, with_state_mut};
+use crate::module::ocpp::replace::{MergedCommand, build_replacement};
 use crate::module::ocpp::server::backend::{
     Scope, ServerEvent, TlsBinding, inbound_messages, with_rfids, with_rfids_mut,
 };
-use crate::module::ocpp::server::build_server_view;
 use crate::module::ocpp::server::lua::{run_server_script_once, run_server_sim};
 use crate::module::view::{CommandFuture, CommandResult, RefreshFuture, parse_command};
 
@@ -106,12 +105,18 @@ where
     /// inline because nothing was running.
     async fn apply_setup_follow_up(&mut self, follow_up: SetupFollowUp) -> bool {
         if self.pending_lifecycle.is_some() {
-            self.pending_lifecycle = Some(PendingLifecycle::ApplySetup(Box::new(follow_up)));
+            self.pending_lifecycle = Some(PendingLifecycle::ApplySetup {
+                follow_up: Box::new(follow_up),
+                then: None,
+            });
             return true;
         }
         match self.backend.request_stop().await {
             Ok(()) => {
-                self.pending_lifecycle = Some(PendingLifecycle::ApplySetup(Box::new(follow_up)));
+                self.pending_lifecycle = Some(PendingLifecycle::ApplySetup {
+                    follow_up: Box::new(follow_up),
+                    then: None,
+                });
                 true
             }
             // Nothing was running: no in-flight task for `poll_stop()` to ever resolve, so the
@@ -122,8 +127,14 @@ where
                 self.cs_configs.clear();
                 self.clear_lua_states();
                 match follow_up {
-                    SetupFollowUp::Replace(view) => {
-                        self.deferred.replacement = Some(view);
+                    SetupFollowUp::Replace {
+                        role,
+                        spec,
+                        path,
+                        device,
+                    } => {
+                        self.deferred.replacement =
+                            Some(build_replacement(role, *spec, path, *device, None, None).await);
                     }
                     SetupFollowUp::InPlace { spec, path, device } => {
                         self.spec = *spec;
@@ -614,7 +625,12 @@ where
                         };
                         self.log.write().await.write(level, &msg);
                     }
-                    Some(PendingLifecycle::ApplySetup(follow_up)) => {
+                    Some(PendingLifecycle::ApplySetup { follow_up, then }) => {
+                        let stop_error = stop_result.as_ref().err().map(ToString::to_string);
+                        let stop_line = match &stop_result {
+                            Ok(()) => (Level::Info, "CSMS server stopped".to_string()),
+                            Err(e) => (Level::Error, format!("CSMS server stop failed: {e}")),
+                        };
                         // OC-R-102 — a stop failure logs at Error, same as the sibling `Stop` and
                         // `Restart` arms above.
                         if let Err(e) = stop_result {
@@ -624,8 +640,16 @@ where
                                 .write(Level::Error, &format!("Settings update: stop failed: {e}"));
                         }
                         match *follow_up {
-                            SetupFollowUp::Replace(view) => {
-                                self.deferred.replacement = Some(view);
+                            SetupFollowUp::Replace {
+                                role,
+                                spec,
+                                path,
+                                device,
+                            } => {
+                                self.deferred.replacement = Some(
+                                    build_replacement(role, *spec, path, *device, then, stop_error)
+                                        .await,
+                                );
                             }
                             SetupFollowUp::InPlace { spec, path, device } => {
                                 self.spec = *spec;
@@ -635,6 +659,40 @@ where
                                     .write()
                                     .await
                                     .write(Level::Info, "Settings updated");
+                                match then {
+                                    None => {}
+                                    Some(MergedCommand::Stop) => {
+                                        self.log.write().await.write(stop_line.0, &stop_line.1);
+                                        self.last_stop_outcome = Some(match stop_line.0 {
+                                            Level::Error => {
+                                                crate::module::view::StopOutcome::Failed(
+                                                    stop_line.1,
+                                                )
+                                            }
+                                            _ => crate::module::view::StopOutcome::Clean,
+                                        });
+                                    }
+                                    Some(cmd @ (MergedCommand::Start | MergedCommand::Restart)) => {
+                                        self.want_running = true;
+                                        let verb = if cmd == MergedCommand::Start {
+                                            "started"
+                                        } else {
+                                            "restarted"
+                                        };
+                                        let handler =
+                                            V::handler(self.events_tx.clone(), self.rfids.clone());
+                                        let (level, msg) =
+                                            match self.backend.start(&self.spec, handler).await {
+                                                Ok(binding) => {
+                                                    (Level::Info, started_message(binding, verb))
+                                                }
+                                                Err(e) => {
+                                                    (Level::Error, format!("listen failed: {e}"))
+                                                }
+                                            };
+                                        self.log.write().await.write(level, &msg);
+                                    }
+                                }
                             }
                         }
                     }
@@ -655,18 +713,26 @@ where
                     // Stop the listener first: dropping `Server<V>` only detaches its accept task,
                     // leaving the port bound, so the swapped-in view could never rebind — the
                     // replacement now waits for the settle rather than for a blocking stop.
-                    let replacement = build_client_view(spec, path, device);
-                    self.apply_setup_follow_up(SetupFollowUp::Replace(replacement))
-                        .await;
+                    self.apply_setup_follow_up(SetupFollowUp::Replace {
+                        role: OcppRole::Client,
+                        spec: Box::new(spec),
+                        path,
+                        device: Box::new(device),
+                    })
+                    .await;
                     return;
                 }
                 if spec.version != self.spec.version {
                     // A version change must swap the whole view: `ServerView<V>`/`OcppServer<V>` are
                     // generic over the *old* version and would rebind with the old subprotocol,
                     // rejecting the (now-different-version) client handshake with a 400.
-                    let replacement = build_server_view(spec, path, device);
-                    self.apply_setup_follow_up(SetupFollowUp::Replace(replacement))
-                        .await;
+                    self.apply_setup_follow_up(SetupFollowUp::Replace {
+                        role: OcppRole::Server,
+                        spec: Box::new(spec),
+                        path,
+                        device: Box::new(device),
+                    })
+                    .await;
                     return;
                 }
                 // Rebind on the (possibly changed) endpoint: the backend builds its listener
@@ -752,6 +818,12 @@ where
             match parsed {
                 OcppServerCmd::Start => {
                     self.want_running = true;
+                    if let Some(PendingLifecycle::ApplySetup { then, .. }) =
+                        &mut self.pending_lifecycle
+                    {
+                        *then = Some(MergedCommand::Start);
+                        return CommandResult::Handled(None);
+                    }
                     let handler = V::handler(self.events_tx.clone(), self.rfids.clone());
                     match self.backend.start(&self.spec, handler).await {
                         Ok(binding) => CommandResult::Handled(Some((
@@ -769,6 +841,13 @@ where
                     // and logs the outcome. A stop already pending overwrites the follow-up in
                     // place instead of re-requesting one against a backend already `Stopping`.
                     self.want_running = false;
+                    if let Some(PendingLifecycle::ApplySetup { then, .. }) =
+                        &mut self.pending_lifecycle
+                    {
+                        *then = Some(MergedCommand::Stop);
+                        self.last_stop_outcome = None;
+                        return CommandResult::Handled(None);
+                    }
                     if self.pending_lifecycle.is_some() {
                         self.pending_lifecycle = Some(PendingLifecycle::Stop);
                         self.last_stop_outcome = None;
@@ -791,6 +870,12 @@ where
                 }
                 OcppServerCmd::Restart => {
                     // See `OcppServerCmd::Stop` above.
+                    if let Some(PendingLifecycle::ApplySetup { then, .. }) =
+                        &mut self.pending_lifecycle
+                    {
+                        *then = Some(MergedCommand::Restart);
+                        return CommandResult::Handled(None);
+                    }
                     if self.pending_lifecycle.is_some() {
                         self.pending_lifecycle = Some(PendingLifecycle::Restart);
                         return CommandResult::Handled(None);
@@ -1383,6 +1468,246 @@ mod tests {
         );
     }
 
+    struct PendingApply {
+        v: ServerView<V1_6>,
+        old_port: u16,
+        edited: OcppSpec,
+    }
+
+    /// Bound CSMS view whose edit (new port, optional switch) is pending behind a deferred stop.
+    async fn pending_apply(switch: impl FnOnce(&mut OcppSpec)) -> PendingApply {
+        let old_port = ferrowl_test_support::reserve_tcp_port().release();
+        let mut v = server_view(old_port);
+        wait_until_async(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            async || {
+                v.refresh().await;
+                v.backend.is_online().then_some(())
+            },
+        )
+        .await;
+        let mut edited = v.spec.clone();
+        edited.port = ferrowl_test_support::reserve_tcp_port().release();
+        switch(&mut edited);
+        v.deferred.setup = Some((edited.clone(), String::new(), Vec::new()));
+        v.refresh().await;
+        assert!(v.lifecycle_pending());
+        PendingApply {
+            v,
+            old_port,
+            edited,
+        }
+    }
+
+    async fn settle_view(v: &mut dyn ModuleView) {
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
+    }
+
+    async fn refresh_n(v: &mut dyn ModuleView, n: usize) {
+        for _ in 0..n {
+            v.refresh().await;
+        }
+    }
+
+    /// Refreshes over a bounded window; fails if the view ever binds `port`. The bind runs in a
+    /// spawned task, so a single check right after a refresh could pass for a bound view.
+    async fn assert_never_bound(v: &mut dyn ModuleView, port: u16) {
+        for _ in 0..30 {
+            v.refresh().await;
+            assert!(!can_connect(port), "listener bound on {port}");
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }
+
+    fn can_connect(port: u16) -> bool {
+        std::net::TcpStream::connect(("127.0.0.1", port)).is_ok()
+    }
+
+    async fn lines_of(log: &crate::module::view::SharedLog) -> Vec<(Level, String)> {
+        log.read()
+            .await
+            .peek_n(crate::app::LOG_SIZE)
+            .into_iter()
+            .map(|(_, level, l)| (level, l))
+            .collect()
+    }
+
+    fn pos(lines: &[(Level, String)], text: &str) -> usize {
+        lines
+            .iter()
+            .position(|(_, l)| l == text)
+            .unwrap_or_else(|| panic!("missing {text:?} in {lines:?}"))
+    }
+
+    fn count(lines: &[(Level, String)], text: &str) -> usize {
+        lines.iter().filter(|(_, l)| l == text).count()
+    }
+
+    /// UI-R-354, UI-R-356, UI-E-163, UI-R-358 — `:stop` during a pending edit apply merges into
+    /// it: the edit is installed, the CSMS stays unbound, and `:start` binds the edited port.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_stop_during_pending_apply_keeps_edit_and_stays_unbound() {
+        let mut p = pending_apply(|_| {}).await;
+        assert!(matches!(
+            p.v.handle_command("stop").await,
+            CommandResult::Handled(None)
+        ));
+        assert_eq!(p.v.spec.port, p.old_port);
+        settle_view(&mut p.v).await;
+        assert_never_bound(&mut p.v, p.edited.port).await;
+
+        assert_eq!(p.v.spec.port, p.edited.port);
+        assert!(!p.v.backend.is_online());
+        let lines = lines_of(&p.v.log).await;
+        assert!(pos(&lines, "Settings updated") < pos(&lines, "CSMS server stopped"));
+        assert!(matches!(
+            p.v.take_stop_outcome(),
+            Some(crate::module::view::StopOutcome::Clean)
+        ));
+
+        p.v.handle_command("start").await;
+        let port = p.edited.port;
+        wait_until_async(
+            "edited port bound",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(10),
+            async || can_connect(port).then_some(()),
+        )
+        .await;
+        let _ = p.v.handle_command("stop").await;
+        settle_view(&mut p.v).await;
+    }
+
+    /// UI-R-315, UI-R-355, UI-R-358 — `:start` during a pending edit apply is deferred and binds
+    /// the edited listener exactly once.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_start_during_pending_apply_binds_edited_once() {
+        let mut p = pending_apply(|_| {}).await;
+        assert!(matches!(
+            p.v.handle_command("start").await,
+            CommandResult::Handled(None)
+        ));
+        settle_view(&mut p.v).await;
+        refresh_n(&mut p.v, 3).await;
+
+        let port = p.edited.port;
+        wait_until_async(
+            "edited port bound",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(10),
+            async || can_connect(port).then_some(()),
+        )
+        .await;
+        let lines = lines_of(&p.v.log).await;
+        assert_eq!(count(&lines, "CSMS server started"), 1);
+        assert!(pos(&lines, "Settings updated") < pos(&lines, "CSMS server started"));
+        let _ = p.v.handle_command("stop").await;
+        settle_view(&mut p.v).await;
+    }
+
+    /// UI-R-355, UI-R-358 — `:restart` during a pending edit apply binds the edited listener
+    /// once.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_restart_during_pending_apply_binds_edited_once() {
+        let mut p = pending_apply(|_| {}).await;
+        assert!(matches!(
+            p.v.handle_command("restart").await,
+            CommandResult::Handled(None)
+        ));
+        settle_view(&mut p.v).await;
+        refresh_n(&mut p.v, 3).await;
+
+        let port = p.edited.port;
+        wait_until_async(
+            "edited port bound",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(10),
+            async || can_connect(port).then_some(()),
+        )
+        .await;
+        let lines = lines_of(&p.v.log).await;
+        assert_eq!(count(&lines, "CSMS server restarted"), 1);
+        assert_eq!(count(&lines, "CSMS server started"), 0);
+        assert!(pos(&lines, "Settings updated") < pos(&lines, "CSMS server restarted"));
+        let _ = p.v.handle_command("stop").await;
+        settle_view(&mut p.v).await;
+    }
+
+    /// UI-R-356 — a view built unbound never auto-binds on refresh.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_unbound_server_view_never_auto_binds() {
+        let port = ferrowl_test_support::reserve_tcp_port().release();
+        let mut v = server_view(port).unbound();
+        assert_never_bound(&mut v, port).await;
+        assert!(!v.backend.is_online());
+    }
+
+    /// UI-R-354, UI-R-356, UI-R-358 — `:stop` during a pending version switch leaves the
+    /// replacement CSMS unbound.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_stop_during_pending_version_switch_leaves_csms_unbound() {
+        let mut p = pending_apply(|s| s.version = OcppVersion::V2_0_1).await;
+        let _ = p.v.handle_command("stop").await;
+        settle_view(&mut p.v).await;
+        let mut r = p.v.take_replacement().expect("replacement installed");
+        assert_never_bound(r.as_mut(), p.edited.port).await;
+
+        let lines = lines_of(&r.log()).await;
+        assert!(pos(&lines, "Settings updated") < pos(&lines, "CSMS server stopped"));
+    }
+
+    /// UI-R-355, UI-R-358 — `:start` during a pending version switch binds the replacement CSMS
+    /// once.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_start_during_pending_version_switch_binds_once() {
+        let mut p = pending_apply(|s| s.version = OcppVersion::V2_0_1).await;
+        let _ = p.v.handle_command("start").await;
+        settle_view(&mut p.v).await;
+        let mut r = p.v.take_replacement().expect("replacement installed");
+        refresh_n(r.as_mut(), 3).await;
+
+        let port = p.edited.port;
+        wait_until_async(
+            "edited port bound",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(10),
+            async || can_connect(port).then_some(()),
+        )
+        .await;
+        let lines = lines_of(&r.log()).await;
+        assert!(pos(&lines, "Settings updated") < pos(&lines, "CSMS server started"));
+        assert_eq!(count(&lines, "CSMS server started"), 1);
+        let _ = r.handle_command("stop").await;
+        settle_view(r.as_mut()).await;
+    }
+
+    /// UI-R-354, UI-R-358 — `:stop` during a pending role switch writes the apply line, then
+    /// the disconnect line, to the replacement charging station's log.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_stop_during_pending_role_switch_leaves_station_stopped() {
+        let mut p = pending_apply(|s| s.role = OcppRole::Client).await;
+        let _ = p.v.handle_command("stop").await;
+        settle_view(&mut p.v).await;
+        let r = p.v.take_replacement().expect("replacement installed");
+
+        let lines = lines_of(&r.log()).await;
+        assert!(pos(&lines, "Settings updated") < pos(&lines, "Disconnected"));
+    }
+
     /// UI-R-350 — a role switch (server → client) confirmed against a running CSMS signals the
     /// stop and defers `take_replacement()` until that deferred stop settles.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1494,7 +1819,10 @@ mod tests {
             "the follow-up must be deferred, not applied inline"
         );
         assert!(
-            matches!(v.pending_lifecycle, Some(PendingLifecycle::ApplySetup(_))),
+            matches!(
+                v.pending_lifecycle,
+                Some(PendingLifecycle::ApplySetup { .. })
+            ),
             "the follow-up must overwrite the pending stop in place"
         );
 

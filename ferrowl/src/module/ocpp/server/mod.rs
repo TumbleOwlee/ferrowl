@@ -29,3 +29,23 @@ pub fn build_server_view(
         OcppVersion::V2_1 => Box::new(view::ServerView::<V2_1>::new(spec, device_path, device)),
     }
 }
+
+/// Like [`build_server_view`], but the listener stays unbound until an explicit `:start`
+/// (UI-R-356).
+pub fn build_server_view_unbound(
+    spec: OcppSpec,
+    device_path: String,
+    device: OcppDeviceConfig,
+) -> Box<dyn ModuleView> {
+    match spec.version {
+        OcppVersion::V1_6 => {
+            Box::new(view::ServerView::<V1_6>::new(spec, device_path, device).unbound())
+        }
+        OcppVersion::V2_0_1 => {
+            Box::new(view::ServerView::<V2_0_1>::new(spec, device_path, device).unbound())
+        }
+        OcppVersion::V2_1 => {
+            Box::new(view::ServerView::<V2_1>::new(spec, device_path, device).unbound())
+        }
+    }
+}
