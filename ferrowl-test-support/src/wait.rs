@@ -53,6 +53,15 @@ pub fn wait_until_blocking<T>(
     }
 }
 
+/// Bounds a whole test body so a hang panics on the test's own thread (libtest
+/// names the test) instead of running until an outer timeout. It fires only at
+/// an await point, so it cannot preempt a thread blocked synchronously.
+pub async fn within<F: Future>(limit: Duration, body: F) -> F::Output {
+    tokio::time::timeout(limit, body)
+        .await
+        .unwrap_or_else(|_| panic!("test body exceeded {limit:?}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,5 +131,25 @@ mod tests {
     #[should_panic(expected = "flag: not reached within 50ms")]
     fn ut_wait_until_blocking_panics_after_deadline() {
         wait_until_blocking("flag", MS(1), MS(50), || None::<u8>);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ut_within_returns_body_output() {
+        let v = within(Duration::from_secs(5), async {
+            tokio::time::sleep(MS(4_900)).await;
+            9u8
+        })
+        .await;
+        assert_eq!(v, 9);
+    }
+
+    #[tokio::test(start_paused = true)]
+    #[should_panic(expected = "test body exceeded 2s")]
+    async fn ut_within_panics_after_limit() {
+        within(
+            Duration::from_secs(2),
+            tokio::time::sleep(Duration::from_secs(3)),
+        )
+        .await;
     }
 }
