@@ -77,11 +77,11 @@ Spec change after filing (planner or implementer `spec-gap`, reconcile): update 
 
 ## Draft PR — `pr.md`, draft form (after gate 2)
 
-Inputs: `issue.md`, `plan.summary.md` — both already approved; add nothing they don't say. Line 1 = `issue.md`'s line 1. Body: `## Why` (from `issue.md`), `## Plan` (the stages, one line each, from `plan.summary.md`), then one closing line: `Draft — stages land as commits; review inline, replies come back on each thread.` No Verification section yet.
+Inputs: `issue.md`, `plan.summary.md` — both already approved; add nothing they don't say. Line 1 = `issue.md`'s line 1. Body: `## Why` (from `issue.md`), `## Plan` (the stages as a task list, one unchecked `- [ ] s<n> — <one line>` each, from `plan.summary.md`; the orchestrator ticks each as it lands), then one closing line: `Draft — stages land as commits; review inline, replies come back on each thread.` No Verification section yet.
 
 ## Gate 4 — `pr.md`, full form
 
-Inputs: `spec-diff.md`, `plan.md`, `review.md`, `gauntlet.log` (its coverage line, if the project has a floor), `git log main..HEAD --oneline` in the worktree. Rewrite the file to the template below, dropping a section only when genuinely inapplicable. Why: requirement IDs and motivation, one paragraph. What changed: a ≤ 12-word gloss per ID, or "None — no behavior change.". Approach: how resolved, structure it omitted. Verification: coverage line first where there is a floor, then what actually ran, following the repo's PR template if one exists. Omit the issue-closing line — orchestrator appends it.
+Inputs: `spec-diff.md`, `plan.md`, `review.md`, `gauntlet.log` (its coverage line, if the project has a floor), `git log main..HEAD --oneline` in the worktree. Rewrite the file to the template below, dropping a section only when genuinely inapplicable. Why: requirement IDs and motivation, one paragraph. What changed: a ≤ 12-word gloss per ID, or "None — no behavior change.". Approach: how resolved, structure it omitted. Plan: the draft form's checklist carried over verbatim, every box ticked. Verification: coverage line first where there is a floor, then what actually ran, following the repo's PR template if one exists. Omit the issue-closing line — orchestrator appends it.
 
 ```
 # <title>
@@ -94,6 +94,8 @@ Inputs: `spec-diff.md`, `plan.md`, `review.md`, `gauntlet.log` (its coverage lin
 |---|---|---|
 Full normative text: the tracking issue and its spec-gate comments.
 ## Approach
+## Plan
+- [x] s<n> — <line> (<short sha>)
 ## Verification
 ```
 
