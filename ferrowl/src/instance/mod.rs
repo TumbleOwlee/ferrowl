@@ -569,12 +569,13 @@ impl<T: KeyParams> Instance<T> {
     #[cfg(test)]
     pub async fn stop(&mut self) -> Result<(), Error> {
         self.request_stop().await?;
-        loop {
-            if let Some(res) = self.poll_stop().await {
-                return res;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
-        }
+        ferrowl_test_support::wait_until_async(
+            "stop settles",
+            tokio::time::Duration::from_millis(5),
+            tokio::time::Duration::from_secs(10),
+            async || self.poll_stop().await,
+        )
+        .await
     }
 
     /// Forwards a write/terminate command to a running client. Errors if no
