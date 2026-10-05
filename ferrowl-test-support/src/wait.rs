@@ -1,8 +1,9 @@
 use std::time::Duration;
 
 /// Evaluates `ready` immediately, retries every `poll`, and panics naming
-/// `what` once `deadline` has elapsed. The deadline is wall-clock so it must
-/// leave room for coverage-instrumented builds on a loaded machine.
+/// `what` once `deadline` has elapsed. The async variants measure the deadline on the tokio
+/// clock and the blocking variant on std time; leave room for coverage-instrumented builds on a
+/// loaded machine.
 pub async fn wait_until<T>(
     what: &str,
     poll: Duration,
