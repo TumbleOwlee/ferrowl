@@ -30,7 +30,7 @@ published independently.
 | `ferrowl-syntax` | Syntax highlighting for the in-TUI code editor (Lua, JSON, Markdown and Diff). |
 | `ferrowl-ring` | Fixed-capacity ring buffer generic over the element type; backs each module's log pane. |
 | `ferrowl-util` | Shared helpers with two or more consumers: the exponential-backoff retry driver (`backoff`) consumed by `ferrowl-modbus`'s client and all six server transports and by `ferrowl-ocpp`'s CS and CSMS reconnect loops, `~` expansion plus base-directory resolution and relativization for file-relative path fields (`path`), and the shared TLS policy enums (`tls`), which resolve and relativize their own PEM paths through `path`. A helper with a single consumer lives in that consumer instead. |
-| `ferrowl-test-support` | Dev-only test fixtures: held-port guards (`reserve_tcp_port`/`reserve_udp_port`), per-run temp directories (`reserve_temp_dir`), and bounded polling for a condition (`wait_until`, `wait_until_async`, `wait_until_blocking`). `publish = false`, a dev-dependency of the crates that test against sockets or the filesystem; no production code depends on it. |
+| `ferrowl-test-support` | Dev-only test fixtures: held-port guards (`reserve_tcp_port`/`reserve_udp_port`), per-run temp directories (`reserve_temp_dir`), bounded polling for a condition (`wait_until`, `wait_until_async`, `wait_until_blocking`), and a wall-clock bound on a whole test body (`within`). `publish = false`, a dev-dependency of the crates that test against sockets or the filesystem; no production code depends on it. |
 
 Grouped by concern: **Modbus** (`ferrowl-codec`, `ferrowl-store`, `ferrowl-modbus`),
 **OCPP** (`ferrowl-ocpp`), **Lua** (`ferrowl-lua`, `ferrowl-lua-derive`, `ferrowl-templates`),
