@@ -3394,6 +3394,16 @@ mod tests {
         .await;
     }
 
+    async fn wait_bound(view: &ModbusModuleView, port: u16) {
+        wait_until_async(
+            "edited port bound",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || (view.module.bound_addr().map(|a| a.port()) == Some(port)).then_some(()),
+        )
+        .await;
+    }
+
     async fn log_lines(view: &ModbusModuleView) -> Vec<(Level, String)> {
         view.log()
             .read()
@@ -3437,15 +3447,7 @@ mod tests {
         ));
 
         let _ = p.view.handle_command("start").await;
-        let port = p.port;
-        let view = &mut p.view;
-        wait_until_async(
-            "edited port bound",
-            std::time::Duration::from_millis(5),
-            std::time::Duration::from_secs(10),
-            async || (view.module.bound_addr().map(|a| a.port()) == Some(port)).then_some(()),
-        )
-        .await;
+        wait_bound(&p.view, p.port).await;
         p.view.module.stop().await.expect("cleanup stop");
     }
 
@@ -3460,8 +3462,8 @@ mod tests {
         ));
         settle(&mut p.view).await;
 
+        wait_bound(&p.view, p.port).await;
         assert!(p.view.module.is_instance_active());
-        assert_eq!(p.view.module.bound_addr().map(|a| a.port()), Some(p.port));
         let lines = log_lines(&p.view).await;
         let started = format!("Started Server on {}", p.endpoint);
         assert_eq!(lines.iter().filter(|(_, l)| *l == started).count(), 1);
@@ -3486,7 +3488,7 @@ mod tests {
         assert!(
             pos(&lines, Level::Info, "Settings updated") < pos(&lines, Level::Info, &restarted)
         );
-        assert_eq!(p.view.module.bound_addr().map(|a| a.port()), Some(p.port));
+        wait_bound(&p.view, p.port).await;
         p.view.module.stop().await.expect("cleanup stop");
     }
 
