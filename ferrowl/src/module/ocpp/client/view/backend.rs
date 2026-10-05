@@ -675,7 +675,7 @@ impl<V: ClientVersion> ClientView<V> {
 mod tests {
     use std::sync::Arc;
 
-    use ferrowl_test_support::reserve_tcp_port;
+    use ferrowl_test_support::{reserve_tcp_port, wait_until, wait_until_async};
     use parking_lot::Mutex;
     use tokio::sync::Notify;
 
@@ -687,30 +687,6 @@ mod tests {
     /// No-op log sink for the CSMS side, mirroring `ferrowl-ocpp/tests/ws_loopback_v16.rs::sink`.
     fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
         |_s: String| async move {}
-    }
-
-    /// Poll until the CSMS listener has bound (`spawn` retries the bind in the background).
-    async fn bound_addr<V: ferrowl_ocpp::Version>(
-        server: &csms::Server<V>,
-    ) -> std::net::SocketAddr {
-        for _ in 0..50 {
-            if let Some(addr) = server.local_addr() {
-                return addr;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        panic!("CSMS listener never bound");
-    }
-
-    /// Poll until `flag` is set (e.g. the CS backend reports `is_online()`).
-    async fn wait_for(flag: impl Fn() -> bool) {
-        for _ in 0..100 {
-            if flag() {
-                return;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        panic!("condition never became true");
     }
 
     fn client_view<V: ClientVersion>(version: OcppVersion, port: u16) -> ClientView<V> {
@@ -830,17 +806,13 @@ mod tests {
             .await
             .expect("start must not fail synchronously against an unreachable CSMS");
 
-        for _ in 0..100 {
-            if v.backend.connection_status() == ConnStatus::Reconnecting {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        assert_eq!(
-            v.backend.connection_status(),
-            ConnStatus::Reconnecting,
-            "task must be backing off, never Connected, against an unreachable CSMS"
-        );
+        wait_until(
+            "task backs off in Reconnecting, never Connected, against an unreachable CSMS",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || (v.backend.connection_status() == ConnStatus::Reconnecting).then_some(()),
+        )
+        .await;
 
         let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
         terminal
@@ -922,14 +894,19 @@ mod tests {
         assert!(matches!(result, CommandResult::Handled(None)));
         assert!(v.lifecycle_pending());
 
-        for _ in 0..200 {
-            if !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!v.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
     }
 
     /// UI-R-315 — once `refresh()` settles a deferred stop, the outcome lands in the log as an
@@ -951,14 +928,19 @@ mod tests {
         let result = v.handle_command("stop").await;
         assert!(matches!(result, CommandResult::Handled(None)));
 
-        for _ in 0..200 {
-            if !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!v.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
 
         let lines = v
             .log
@@ -997,14 +979,19 @@ mod tests {
         let result = v.handle_command("stop").await;
         assert!(matches!(result, CommandResult::Handled(None)));
 
-        for _ in 0..200 {
-            if !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!v.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
 
         assert!(
             matches!(
@@ -1048,17 +1035,19 @@ mod tests {
             "the follow-up must still be pending, not dropped"
         );
 
-        for _ in 0..200 {
-            if !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(
-            !v.lifecycle_pending(),
-            "a stop overwritten with a restart must still settle, not latch forever"
-        );
+        wait_until_async(
+            "a stop overwritten with a restart must still settle, not latch forever",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
 
         v.backend.stop().await.expect("cleanup stop");
     }
@@ -1099,14 +1088,19 @@ mod tests {
             "the pre-edit spec must still render until the deferred stop settles"
         );
 
-        for _ in 0..200 {
-            if !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!v.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
         assert_eq!(
             v.spec.port, edited.port,
             "the edited spec must be adopted at settle"
@@ -1156,14 +1150,19 @@ mod tests {
         v.refresh().await;
         assert!(v.lifecycle_pending());
 
-        for _ in 0..200 {
-            if !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!v.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
         assert_eq!(
             v.spec.timeout_ms, edited.timeout_ms,
             "the edited spec must be adopted once the abandoned in-flight attempt settles"
@@ -1204,14 +1203,19 @@ mod tests {
             "the replacement must not be installed while the stop is still pending"
         );
 
-        for _ in 0..200 {
-            if !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!v.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
         assert!(
             v.take_replacement().is_some(),
             "the replacement must be installed once the deferred stop settles"
@@ -1274,17 +1278,19 @@ mod tests {
             "the follow-up must still be pending, not dropped"
         );
 
-        for _ in 0..200 {
-            if !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(
-            !v.lifecycle_pending(),
-            "a stop overwritten with an apply must still settle, not latch forever"
-        );
+        wait_until_async(
+            "a stop overwritten with an apply must still settle, not latch forever",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
         assert_eq!(
             v.spec.timeout_ms, edited.timeout_ms,
             "the overwritten follow-up must be the apply, not the original stop"
@@ -1380,7 +1386,13 @@ mod tests {
         )
         .await
         .expect("server failed to bind");
-        let addr = bound_addr(&server).await;
+        let addr = wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || server.local_addr(),
+        )
+        .await;
 
         let mut v = client_view::<ferrowl_ocpp::V1_6>(OcppVersion::V1_6, addr.port());
         let handler = v.make_handler();
@@ -1388,7 +1400,13 @@ mod tests {
             .start(&v.spec, &v.device, &v.log, handler)
             .await
             .expect("start");
-        wait_for(|| v.backend.is_online()).await;
+        wait_until(
+            "client comes online",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || v.backend.is_online().then_some(()),
+        )
+        .await;
 
         let scope = Scope::connector(1);
         let payload = v.state_payload("StartTransaction", scope);
@@ -1472,7 +1490,13 @@ mod tests {
         )
         .await
         .expect("server failed to bind");
-        let addr = bound_addr(&server).await;
+        let addr = wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || server.local_addr(),
+        )
+        .await;
 
         let mut v = client_view::<ferrowl_ocpp::V2_0_1>(OcppVersion::V2_0_1, addr.port());
         let handler = v.make_handler();
@@ -1480,7 +1504,13 @@ mod tests {
             .start(&v.spec, &v.device, &v.log, handler)
             .await
             .expect("start");
-        wait_for(|| v.backend.is_online()).await;
+        wait_until(
+            "client comes online",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || v.backend.is_online().then_some(()),
+        )
+        .await;
 
         let scope = Scope::evse(1, None);
         v.dispatch_lua_action(scope, "StartTransaction", serde_json::json!({}));
@@ -1542,12 +1572,13 @@ mod tests {
             port,
             r#"n = (n or 0) + 1; C_OCPP:Set("Model", tostring(n)); C_OCPP:Get("Vendor")"#,
         );
-        for _ in 0..300 {
-            if model_of(&v).is_some_and(|m| m >= 3) {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
+        wait_until(
+            "counter reaches 3",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(10),
+            || model_of(&v).is_some_and(|m| m >= 3).then_some(()),
+        )
+        .await;
         let before = model_of(&v).unwrap_or(0);
         assert!(before >= 3, "counter never reached 3");
 
@@ -1597,15 +1628,19 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
         v.conn_input.state.set_input("5".into());
         v.add_connector();
-        let mut got = None;
-        for _ in 0..300 {
-            got = with_state(&v.state, |s| s.conn_get(5, "Power"));
-            if matches!(got, Some(ferrowl_lua::module::ValueType::Float(f)) if f == 11.0) {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-        assert!(matches!(got, Some(ferrowl_lua::module::ValueType::Float(f)) if f == 11.0));
+        wait_until(
+            "connector 5 Power set to 11.0 by the running sim",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(10),
+            || {
+                matches!(
+                    with_state(&v.state, |s| s.conn_get(5, "Power")),
+                    Some(ferrowl_lua::module::ValueType::Float(f)) if f == 11.0
+                )
+                .then_some(())
+            },
+        )
+        .await;
     }
 
     /// SC-R-076, SC-E-044 — a version change stops the old sim and starts a fresh one (globals
@@ -1620,16 +1655,13 @@ mod tests {
             port,
             r#"n = (n or 0) + 1; C_OCPP:Set("Model", tostring(n)); print(n)"#,
         );
-        for _ in 0..300 {
-            if model_of(&v).is_some_and(|m| m >= 5) {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-        assert!(
-            model_of(&v).is_some_and(|m| m >= 5),
-            "counter never reached 5"
-        );
+        wait_until(
+            "counter reaches 5",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(10),
+            || model_of(&v).is_some_and(|m| m >= 5).then_some(()),
+        )
+        .await;
         let old_log = v.script_log.clone();
 
         let mut edited = v.spec.clone();
@@ -1656,16 +1688,16 @@ mod tests {
             .expect("accessor")
             .expect("ocpp module");
         lua.globals().set("o", ud).expect("set");
-        let mut first = None;
-        for _ in 0..300 {
-            let m: String = lua.load("return o:Get('Model')").eval().expect("get");
-            if let Ok(v) = m.parse::<u32>() {
-                first = Some(v);
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
-        }
-        let first = first.expect("fresh sim never wrote Model");
+        let first = wait_until(
+            "fresh sim writes Model",
+            std::time::Duration::from_millis(2),
+            std::time::Duration::from_secs(10),
+            || {
+                let m: String = lua.load("return o:Get('Model')").eval().expect("get");
+                m.parse::<u32>().ok()
+            },
+        )
+        .await;
         assert!(
             first < 5,
             "globals survived the version change: first value {first}"

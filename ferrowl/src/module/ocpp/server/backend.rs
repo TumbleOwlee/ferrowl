@@ -380,6 +380,7 @@ mod tests {
 
     use crate::module::ocpp::config::device::OcppSecurityConfig;
     use crate::module::ocpp::config::session::OcppProtocol;
+    use ferrowl_test_support::{wait_until, wait_until_async};
 
     /// A handler that never receives a Call in this test — `start()` binds an occupied port, so
     /// no connection is ever accepted.
@@ -465,13 +466,13 @@ mod tests {
             .await
             .expect("start must succeed");
 
-        for _ in 0..50 {
-            if backend.bound_addr().is_some() {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        assert!(backend.bound_addr().is_some(), "listener must have bound");
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || backend.bound_addr().is_some().then_some(()),
+        )
+        .await;
 
         backend.request_stop().await.expect("request_stop");
         assert!(
@@ -479,12 +480,13 @@ mod tests {
             "bound_addr must stay readable while the stop is in flight"
         );
 
-        let result = loop {
-            if let Some(res) = backend.poll_stop().await {
-                break res;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        };
+        let result = wait_until_async(
+            "stop settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || backend.poll_stop().await,
+        )
+        .await;
         assert!(result.is_ok());
         assert!(backend.bound_addr().is_none());
     }

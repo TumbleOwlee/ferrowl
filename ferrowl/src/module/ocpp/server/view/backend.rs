@@ -922,6 +922,7 @@ mod tests {
     use crate::module::ocpp::config::session::{OcppProtocol, OcppRole, OcppSpec, OcppVersion};
     use crate::module::view::ModuleView;
     use ferrowl_ocpp::V1_6;
+    use ferrowl_test_support::{wait_until, wait_until_async};
 
     fn server_view(port: u16) -> ServerView<V1_6> {
         let spec = OcppSpec {
@@ -1019,17 +1020,6 @@ mod tests {
         let _: OcppDeviceConfig = Converter::load(path, FileType::Toml).expect("load");
     }
 
-    /// Poll until the CSMS listener has bound (`start` retries the bind in the background).
-    async fn wait_bound(v: &ServerView<V1_6>) {
-        for _ in 0..100 {
-            if v.backend.bound_addr().is_some() {
-                return;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        panic!("CSMS listener never bound");
-    }
-
     /// UI-R-314 — `:stop` against a CSMS whose listener task is genuinely alive signals
     /// termination and returns without waiting for the accept loop (and every connection) to end.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1038,7 +1028,13 @@ mod tests {
 
         let mut v = server_view(port);
         v.handle_command("start").await;
-        wait_bound(&v).await;
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || v.backend.bound_addr(),
+        )
+        .await;
 
         let before = std::time::Instant::now();
         let result = v.handle_command("stop").await;
@@ -1050,14 +1046,19 @@ mod tests {
         assert!(matches!(result, CommandResult::Handled(None)));
         assert!(v.lifecycle_pending());
 
-        for _ in 0..200 {
-            if !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!v.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
     }
 
     /// UI-R-315 — once `refresh()` settles a deferred stop, the outcome lands in the log as an
@@ -1069,21 +1070,32 @@ mod tests {
 
         let mut v = server_view(port);
         v.handle_command("start").await;
-        wait_bound(&v).await;
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || v.backend.bound_addr(),
+        )
+        .await;
         v.entry_index("cp-1", Scope::CS, None);
 
         let result = v.handle_command("stop").await;
         assert!(matches!(result, CommandResult::Handled(None)));
         assert_eq!(v.entries.len(), 1, "row must survive until the stop lands");
 
-        for _ in 0..200 {
-            if !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!v.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
         assert!(
             v.entries.is_empty(),
             "row must be cleared once the stop lands"
@@ -1115,19 +1127,30 @@ mod tests {
 
         let mut v = server_view(port);
         v.handle_command("start").await;
-        wait_bound(&v).await;
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || v.backend.bound_addr(),
+        )
+        .await;
 
         let result = v.handle_command("stop").await;
         assert!(matches!(result, CommandResult::Handled(None)));
 
-        for _ in 0..200 {
-            if !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!v.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
 
         assert!(
             matches!(
@@ -1147,7 +1170,13 @@ mod tests {
 
         let mut v = server_view(port);
         v.handle_command("start").await;
-        wait_bound(&v).await;
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || v.backend.bound_addr(),
+        )
+        .await;
 
         assert!(matches!(
             v.handle_command("stop").await,
@@ -1164,18 +1193,26 @@ mod tests {
             "the follow-up must still be pending, not dropped"
         );
 
-        for _ in 0..200 {
-            if !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(
-            !v.lifecycle_pending(),
-            "a stop overwritten with a restart must still settle, not latch forever"
-        );
-        wait_bound(&v).await;
+        wait_until_async(
+            "a stop overwritten with a restart must still settle, not latch forever",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || v.backend.bound_addr(),
+        )
+        .await;
     }
 
     /// UI-R-314/UI-R-315 — the reverse order: a `:stop` issued while a `:restart` is still
@@ -1187,7 +1224,13 @@ mod tests {
 
         let mut v = server_view(port);
         v.handle_command("start").await;
-        wait_bound(&v).await;
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || v.backend.bound_addr(),
+        )
+        .await;
 
         assert!(matches!(
             v.handle_command("restart").await,
@@ -1208,17 +1251,19 @@ mod tests {
             "the follow-up must still be pending, not dropped"
         );
 
-        for _ in 0..200 {
-            if !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(
-            !v.lifecycle_pending(),
-            "a restart overwritten with a stop must still settle, not latch forever"
-        );
+        wait_until_async(
+            "a restart overwritten with a stop must still settle, not latch forever",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
         assert!(
             v.backend.bound_addr().is_none(),
             "the stop's follow-up must win: no rebind behind a later stop"
@@ -1232,7 +1277,13 @@ mod tests {
 
         let mut v = server_view(port);
         v.handle_command("start").await;
-        wait_bound(&v).await;
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || v.backend.bound_addr(),
+        )
+        .await;
 
         let mut edited = v.spec.clone();
         edited.port = ferrowl_test_support::reserve_tcp_port().release();
@@ -1247,14 +1298,19 @@ mod tests {
         );
         assert!(v.lifecycle_pending());
 
-        for _ in 0..200 {
-            if !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!v.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
     }
 
     /// UI-R-350, UI-E-161 — the new endpoint is not bound while the deferred stop is still
@@ -1267,7 +1323,13 @@ mod tests {
 
         let mut v = server_view(port);
         v.handle_command("start").await;
-        wait_bound(&v).await;
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || v.backend.bound_addr(),
+        )
+        .await;
 
         let pre_edit_port = v.spec.port;
         let mut edited = v.spec.clone();
@@ -1281,20 +1343,31 @@ mod tests {
             "the pre-edit spec must still render until the deferred stop settles"
         );
 
-        for _ in 0..200 {
-            if !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!v.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
         assert_eq!(
             v.spec.port, edited.port,
             "the edited spec must be adopted at settle"
         );
 
-        wait_bound(&v).await;
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || v.backend.bound_addr(),
+        )
+        .await;
 
         let lines = v
             .log
@@ -1318,7 +1391,13 @@ mod tests {
 
         let mut v = server_view(port);
         v.handle_command("start").await;
-        wait_bound(&v).await;
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || v.backend.bound_addr(),
+        )
+        .await;
 
         let mut edited = v.spec.clone();
         edited.role = OcppRole::Client;
@@ -1330,14 +1409,19 @@ mod tests {
             "the replacement must not be installed while the stop is still pending"
         );
 
-        for _ in 0..200 {
-            if !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!v.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
         assert!(
             v.take_replacement().is_some(),
             "the replacement must be installed once the deferred stop settles"
@@ -1376,7 +1460,13 @@ mod tests {
 
         let mut v = server_view(port);
         v.handle_command("start").await;
-        wait_bound(&v).await;
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || v.backend.bound_addr(),
+        )
+        .await;
 
         assert!(matches!(
             v.handle_command("stop").await,
@@ -1408,17 +1498,19 @@ mod tests {
             "the follow-up must overwrite the pending stop in place"
         );
 
-        for _ in 0..200 {
-            if !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(
-            !v.lifecycle_pending(),
-            "a stop overwritten with an apply must still settle, not latch forever"
-        );
+        wait_until_async(
+            "a stop overwritten with an apply must still settle, not latch forever",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
         assert_eq!(
             v.spec.port, edited.port,
             "the overwritten follow-up must be the apply, not the original stop"
@@ -1487,12 +1579,13 @@ mod tests {
                 .next_back()
                 .unwrap_or(0)
         }
-        for _ in 0..300 {
-            if last(&v).await >= 3 {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
+        wait_until_async(
+            "counter reaches 3",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(10),
+            async || (last(&v).await >= 3).then_some(()),
+        )
+        .await;
         let before = last(&v).await;
         assert!(before >= 3, "counter never reached 3");
 

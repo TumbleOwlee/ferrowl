@@ -488,6 +488,7 @@ fn key_value(c: &super::state::ConfigKey) -> KeyValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ferrowl_test_support::wait_until;
     use serde_json::json;
 
     #[test]
@@ -647,30 +648,6 @@ mod tests {
         |_s: String| async move {}
     }
 
-    /// Poll until the CSMS listener has bound (`spawn` retries the bind in the background).
-    async fn bound_addr(server: &ferrowl_ocpp::csms::Server<V1_6>) -> std::net::SocketAddr {
-        for _ in 0..50 {
-            if let Some(addr) = server.local_addr() {
-                return addr;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        panic!("CSMS listener never bound");
-    }
-
-    /// Wait until the server registry reports at least one connection, then return its id.
-    async fn first_connection(
-        server: &ferrowl_ocpp::csms::Server<V1_6>,
-    ) -> ferrowl_ocpp::csms::ConnectionId {
-        for _ in 0..50 {
-            if let Some(id) = server.registry().connection_ids().first().copied() {
-                return id;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        panic!("no CS connected in time");
-    }
-
     /// CSMS handler answering `StartTransaction`/`StatusNotification`, recording the ordered list
     /// of Call names it receives into `calls` and notifying `notify` once it sees
     /// `StatusNotification`. Any other action is left unanswered by `notify`, letting a caller
@@ -743,7 +720,13 @@ mod tests {
         use crate::module::ocpp::config::device::OcppDeviceConfig;
         use crate::module::ocpp::config::session::{OcppProtocol, OcppRole, OcppSpec, OcppVersion};
 
-        let addr = bound_addr(server).await;
+        let addr = wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || server.local_addr(),
+        )
+        .await;
         let spec = OcppSpec {
             name: "cs".into(),
             version: OcppVersion::V1_6,
@@ -771,13 +754,14 @@ mod tests {
             .start(&spec, &device, &log, handler)
             .await
             .expect("client failed to connect");
-        for _ in 0..100 {
-            if client.is_online() {
-                return client;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        panic!("client never came online");
+        wait_until(
+            "client comes online",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || client.is_online().then_some(()),
+        )
+        .await;
+        client
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -792,7 +776,13 @@ mod tests {
         let state = Arc::new(RwLock::new(two_connectors()));
         let mut client = connected_client(&server, state.clone()).await;
 
-        let conn = first_connection(&server).await;
+        let conn = wait_until(
+            "CS connection",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || server.registry().connection_ids().first().copied(),
+        )
+        .await;
         let remote_start = Action16::RemoteStartTransaction(
             serde_json::from_value(json!({ "connectorId": 1, "idTag": "T" })).unwrap(),
         );
@@ -844,7 +834,13 @@ mod tests {
         let state = Arc::new(RwLock::new(two_connectors()));
         let mut client = connected_client(&server, state.clone()).await;
 
-        let conn = first_connection(&server).await;
+        let conn = wait_until(
+            "CS connection",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || server.registry().connection_ids().first().copied(),
+        )
+        .await;
         let remote_start = Action16::RemoteStartTransaction(
             serde_json::from_value(json!({ "idTag": "T" })).unwrap(),
         );
@@ -921,7 +917,13 @@ mod tests {
         let state = Arc::new(RwLock::new(two_connectors()));
         let mut client = connected_client(&server, state.clone()).await;
 
-        let conn = first_connection(&server).await;
+        let conn = wait_until(
+            "CS connection",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || server.registry().connection_ids().first().copied(),
+        )
+        .await;
         let remote_start = Action16::RemoteStartTransaction(
             serde_json::from_value(json!({ "connectorId": 1, "idTag": "T" })).unwrap(),
         );
