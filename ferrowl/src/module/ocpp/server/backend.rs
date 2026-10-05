@@ -300,14 +300,7 @@ where
     }
 
     /// Terminate the server task and every connection, if running.
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "blocking teardown kept for tests only now that refresh_impl \
-            routes every apply/stop through request_stop()/poll_stop()"
-        )
-    )]
+    #[cfg(test)]
     pub async fn stop(&mut self) -> Result<(), Error> {
         if matches!(self.server, CsmsState::Idle) {
             return Ok(());
@@ -315,12 +308,13 @@ where
         if matches!(self.server, CsmsState::Running(_)) {
             self.request_stop().await?;
         }
-        loop {
-            if let Some(res) = self.poll_stop().await {
-                return res;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
-        }
+        ferrowl_test_support::wait_until_async(
+            "stop settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || self.poll_stop().await,
+        )
+        .await
     }
 
     /// The bound local address (`host:port`) when running, for the status line. `None` both
