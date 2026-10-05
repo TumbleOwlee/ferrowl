@@ -12,6 +12,7 @@ use std::time::Duration;
 use ferrowl_ocpp::cs::{self, CsActionHandler};
 use ferrowl_ocpp::csms::{self, CsmsActionHandler};
 use ferrowl_ocpp::{Action16, CallError, CallErrorCode, Response16, V1_6};
+use ferrowl_test_support::wait_until;
 use serde_json::json;
 use tokio::time::sleep;
 
@@ -34,19 +35,6 @@ fn recording_log() -> (
         }
     };
     (log, lines)
-}
-
-/// Poll until the CSMS listener has bound: `spawn` binds asynchronously, retrying a
-/// failed bind with backoff (OC-R-083), so `local_addr()` is `None` until the first
-/// successful bind lands.
-async fn bound_addr<V: ferrowl_ocpp::Version>(server: &csms::Server<V>) -> std::net::SocketAddr {
-    for _ in 0..50 {
-        if let Some(addr) = server.local_addr() {
-            return addr;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    panic!("CSMS listener never bound");
 }
 
 /// CSMS handler answering the three CS-initiated actions used by this test.
@@ -116,17 +104,6 @@ async fn start_server() -> csms::Server<V1_6> {
     .expect("server failed to bind")
 }
 
-/// Wait until the server registry reports at least one connection, then return its id.
-async fn first_connection(server: &csms::Server<V1_6>) -> csms::ConnectionId {
-    for _ in 0..50 {
-        if let Some(id) = server.registry().connection_ids().first().copied() {
-            return id;
-        }
-        sleep(Duration::from_millis(20)).await;
-    }
-    panic!("no CS connected in time");
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 /// OC-R-014 — the 1.6 connection is full-duplex: CS and CSMS each originate Calls on the same socket.
 /// OC-R-043 — the CS dials the full websocket URL advertising its version's subprotocol token (the CSMS only accepts it because the token matches).
@@ -137,7 +114,16 @@ async fn first_connection(server: &csms::Server<V1_6>) -> csms::ConnectionId {
 /// OC-R-056 — the CSMS handler is told which connection each Call arrived on (its `ConnectionId` argument).
 async fn cs_calls_csms_and_csms_calls_cs() {
     let server = start_server().await;
-    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "ws://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            Duration::from_millis(20),
+            Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
 
     let remote_start_seen = Arc::new(AtomicBool::new(false));
     let client = cs::ClientBuilder::<V1_6>::new(
@@ -199,7 +185,13 @@ async fn cs_calls_csms_and_csms_calls_cs() {
     ));
 
     // CSMS -> CS: server-initiated RemoteStartTransaction (reverse direction).
-    let conn = first_connection(&server).await;
+    let conn = wait_until(
+        "CS connection",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || server.registry().connection_ids().first().copied(),
+    )
+    .await;
     let remote_start = Action16::RemoteStartTransaction(
         serde_json::from_value(json!({ "idTag": "TAG1" })).unwrap(),
     );
@@ -245,7 +237,16 @@ impl CsActionHandler<V1_6> for SlowCs {
 /// it, so terminate() cannot be made to hang by a slow (or stuck) handler.
 async fn terminate_does_not_block_on_in_flight_handler() {
     let server = start_server().await;
-    let url = format!("ws://{}/ocpp/CS002", bound_addr(&server).await);
+    let url = format!(
+        "ws://{}/ocpp/CS002",
+        wait_until(
+            "CSMS listener bind",
+            Duration::from_millis(20),
+            Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
 
     let started = Arc::new(tokio::sync::Notify::new());
     let client = cs::ClientBuilder::<V1_6>::new(
@@ -269,7 +270,13 @@ async fn terminate_does_not_block_on_in_flight_handler() {
     .await
     .expect("client failed to connect");
 
-    let conn = first_connection(&server).await;
+    let conn = wait_until(
+        "CS connection",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || server.registry().connection_ids().first().copied(),
+    )
+    .await;
     let remote_start = Action16::RemoteStartTransaction(
         serde_json::from_value(json!({ "idTag": "TAG1" })).unwrap(),
     );
@@ -302,7 +309,16 @@ async fn malformed_call_with_recoverable_id_gets_call_error() {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
     let server = start_server().await;
-    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "ws://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            Duration::from_millis(20),
+            Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
     let mut request = url.into_client_request().expect("bad url");
     request
         .headers_mut()
@@ -390,7 +406,16 @@ async fn raw_connect(
 /// OC-R-025 — a handler rejecting an inbound Call sends a CallError back and leaves the connection intact (a later Call still succeeds).
 async fn handler_rejection_is_call_error_and_keeps_connection() {
     let server = start_server().await;
-    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "ws://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            Duration::from_millis(20),
+            Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             extra_headers: Vec::new(),
@@ -435,7 +460,16 @@ async fn bad_payload_is_formation_violation() {
     use tokio_tungstenite::tungstenite::Message;
 
     let server = start_server().await;
-    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "ws://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            Duration::from_millis(20),
+            Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
     let mut ws = raw_connect(&url).await;
 
     // Valid frame + valid action name, but the payload is missing BootNotification's required fields.
@@ -463,7 +497,16 @@ async fn malformed_and_binary_frames_do_not_tear_down() {
     use tokio_tungstenite::tungstenite::Message;
 
     let server = start_server().await;
-    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "ws://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            Duration::from_millis(20),
+            Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
     let mut ws = raw_connect(&url).await;
 
     // Unrecoverable text (not JSON) — logged and skipped, no reply, no teardown.
@@ -511,7 +554,16 @@ async fn awaited_call_times_out() {
     )
     .await
     .expect("server failed to bind");
-    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "ws://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            Duration::from_millis(20),
+            Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
 
     // Short client timeout: the slow (700ms) handler cannot answer before it fires.
     let client = cs::ClientBuilder::<V1_6>::new(
@@ -568,7 +620,16 @@ async fn fire_and_forget_delivers_without_blocking_reads() {
     )
     .await
     .expect("server failed to bind");
-    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "ws://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            Duration::from_millis(20),
+            Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             extra_headers: Vec::new(),
@@ -620,7 +681,16 @@ async fn csms_requires_and_echoes_subprotocol() {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
     let server = start_server().await;
-    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "ws://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            Duration::from_millis(20),
+            Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
 
     // No Sec-WebSocket-Protocol header → the upgrade is rejected.
     let bare = url.clone().into_client_request().expect("bad url");
@@ -651,7 +721,13 @@ async fn csms_requires_and_echoes_subprotocol() {
 /// OC-R-051 — each accepted connection gets an opaque, monotonically increasing id from 1; the charge-point identity is kept as metadata, not the key, so duplicate identities never collide.
 async fn connection_ids_are_monotonic_and_identity_is_metadata() {
     let server = start_server().await;
-    let addr = bound_addr(&server).await;
+    let addr = wait_until(
+        "CSMS listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || server.local_addr(),
+    )
+    .await;
 
     // Two clients dialing the *same* charge-point identity path.
     let make_client = || async {
@@ -680,12 +756,13 @@ async fn connection_ids_are_monotonic_and_identity_is_metadata() {
     let c2 = make_client().await;
 
     // Wait for both to register.
-    for _ in 0..50 {
-        if server.registry().connection_ids().len() >= 2 {
-            break;
-        }
-        sleep(Duration::from_millis(20)).await;
-    }
+    wait_until(
+        "two CS connections",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || (server.registry().connection_ids().len() >= 2).then_some(()),
+    )
+    .await;
     let mut ids = server.registry().connection_ids();
     ids.sort();
     assert_eq!(
@@ -714,7 +791,13 @@ async fn csms_broadcast_and_disconnect() {
     let seen_a = Arc::new(AtomicBool::new(false));
     let seen_b = Arc::new(AtomicBool::new(false));
     let server = start_server().await;
-    let addr = bound_addr(&server).await;
+    let addr = wait_until(
+        "CSMS listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || server.local_addr(),
+    )
+    .await;
 
     let mk = |flag: Arc<AtomicBool>| async move {
         cs::ClientBuilder::<V1_6>::new(
@@ -741,12 +824,13 @@ async fn csms_broadcast_and_disconnect() {
     let ca = mk(seen_a.clone()).await;
     let cb = mk(seen_b.clone()).await;
 
-    for _ in 0..50 {
-        if server.registry().connection_ids().len() >= 2 {
-            break;
-        }
-        sleep(Duration::from_millis(20)).await;
-    }
+    wait_until(
+        "two CS connections",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || (server.registry().connection_ids().len() >= 2).then_some(()),
+    )
+    .await;
 
     // Broadcast a server-initiated RemoteStartTransaction to every connected CS.
     let remote_start = Action16::RemoteStartTransaction(
@@ -766,15 +850,13 @@ async fn csms_broadcast_and_disconnect() {
         .send(Command::DisconnectConnection(ids[0]))
         .await
         .expect("disconnect");
-    let mut deregistered = false;
-    for _ in 0..50 {
-        if !server.registry().connection_ids().contains(&ids[0]) {
-            deregistered = true;
-            break;
-        }
-        sleep(Duration::from_millis(20)).await;
-    }
-    assert!(deregistered, "disconnected connection was not deregistered");
+    wait_until(
+        "disconnected connection is deregistered",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || (!server.registry().connection_ids().contains(&ids[0])).then_some(()),
+    )
+    .await;
 
     let _ = ca.terminate().await;
     cb.terminate().await.expect("terminate cb");
@@ -785,7 +867,16 @@ async fn csms_broadcast_and_disconnect() {
 /// OC-R-055 — a command addressing an unknown connection id fails that command alone (an awaited Call is rejected) and the server keeps running.
 async fn command_to_unknown_connection_fails_alone() {
     let server = start_server().await;
-    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "ws://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            Duration::from_millis(20),
+            Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
     let client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             extra_headers: Vec::new(),
@@ -806,7 +897,13 @@ async fn command_to_unknown_connection_fails_alone() {
     )
     .await
     .expect("client connect");
-    let conn = first_connection(&server).await;
+    let conn = wait_until(
+        "CS connection",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || server.registry().connection_ids().first().copied(),
+    )
+    .await;
 
     // An awaited Call to a nonexistent id is rejected, but the server stays up.
     let remote_start = Action16::RemoteStartTransaction(
@@ -831,7 +928,13 @@ async fn command_to_unknown_connection_fails_alone() {
 /// OC-R-053 — terminating a CSMS ends the accept loop, so no further connections are accepted.
 async fn terminated_csms_stops_accepting() {
     let server = start_server().await;
-    let addr = bound_addr(&server).await;
+    let addr = wait_until(
+        "CSMS listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || server.local_addr(),
+    )
+    .await;
     server.terminate().await.expect("server terminate");
 
     // After termination the listener is gone: `spawn` still succeeds (OC-R-048/OC-R-105: the
@@ -873,7 +976,13 @@ async fn terminated_csms_stops_accepting() {
 /// binds an OS-assigned port that a restarted server can't be pointed back at.)
 async fn cs_stays_disconnected_when_reconnect_is_disabled() {
     let server = start_server().await;
-    let addr = bound_addr(&server).await;
+    let addr = wait_until(
+        "CSMS listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || server.local_addr(),
+    )
+    .await;
     let mut client = cs::ClientBuilder::<V1_6>::new(
         std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
             extra_headers: Vec::new(),
@@ -931,7 +1040,16 @@ async fn peer_close_ends_connection_and_fires_disconnect_hook() {
     let connected = Arc::new(AtomicBool::new(false));
     let disconnected = Arc::new(AtomicBool::new(false));
     let server = start_server().await;
-    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "ws://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            Duration::from_millis(20),
+            Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
     let (log, log_lines) = recording_log();
     let (status, status_lines) = recording_log();
     let client = cs::ClientBuilder::<V1_6>::new(
@@ -957,46 +1075,37 @@ async fn peer_close_ends_connection_and_fires_disconnect_hook() {
     .expect("client connect");
 
     // The connect hook fired on establishment.
-    for _ in 0..50 {
-        if connected.load(Ordering::SeqCst) {
-            break;
-        }
-        sleep(Duration::from_millis(20)).await;
-    }
-    assert!(
-        connected.load(Ordering::SeqCst),
-        "connect hook did not fire"
-    );
+    wait_until(
+        "connect hook did not fire",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || connected.load(Ordering::SeqCst).then_some(()),
+    )
+    .await;
 
     // The CSMS closes: the connection ends and the disconnect hook fires.
     server.terminate().await.expect("server terminate");
-    let mut fired = false;
-    for _ in 0..50 {
-        if disconnected.load(Ordering::SeqCst) {
-            fired = true;
-            break;
-        }
-        sleep(Duration::from_millis(20)).await;
-    }
-    assert!(fired, "disconnect hook did not fire on peer close");
+    wait_until(
+        "disconnect hook did not fire on peer close",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || disconnected.load(Ordering::SeqCst).then_some(()),
+    )
+    .await;
 
-    let mut dropped = false;
-    for _ in 0..50 {
-        if status_lines
-            .lock()
-            .iter()
-            .any(|l| l == "Connection dropped.")
-        {
-            dropped = true;
-            break;
-        }
-        sleep(Duration::from_millis(20)).await;
-    }
-    assert!(
-        dropped,
-        "expected a 'Connection dropped.' line on the status sink, got: {:?}",
-        status_lines.lock()
-    );
+    wait_until(
+        "a 'Connection dropped.' line on the status sink",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || {
+            status_lines
+                .lock()
+                .iter()
+                .any(|l| l == "Connection dropped.")
+                .then_some(())
+        },
+    )
+    .await;
     assert!(
         !log_lines.lock().iter().any(|l| l == "Connection dropped."),
         "the dropped-connection reason must not land on the message sink, got: {:?}",
@@ -1013,7 +1122,16 @@ async fn ws_client_ignores_configured_tls_material() {
     use ferrowl_util::tls::ClientTlsPolicy;
 
     let server = start_server().await; // plain ws:// CSMS
-    let url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
+    let url = format!(
+        "ws://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            Duration::from_millis(20),
+            Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
 
     // TLS material is configured, but the ws:// scheme means it must be ignored and the connection
     // made in plaintext. If it were honored, a TLS handshake over the plain socket would fail.

@@ -667,7 +667,7 @@ mod tests {
     use crate::module::ocpp::config::session::{OcppProtocol, OcppRole, OcppVersion};
     use crate::module::ocpp::server::backend::ServerEvent;
     use ferrowl_ocpp::V1_6;
-    use ferrowl_test_support::{reserve_tcp_port, reserve_temp_dir};
+    use ferrowl_test_support::{reserve_tcp_port, reserve_temp_dir, wait_until, wait_until_async};
 
     #[test]
     fn ut_rfid_store_device_roundtrip() {
@@ -740,21 +740,6 @@ mod tests {
         assert_eq!(v["device"], "dev.toml");
     }
 
-    /// Poll until the CSMS listener has bound: `start()` binds asynchronously, retrying
-    /// a failed bind with backoff (OC-R-083), so `bound_addr()` is `None` until the first
-    /// successful bind lands.
-    async fn poll_bound_addr(
-        backend: &crate::module::ocpp::server::backend::OcppServer<V1_6>,
-    ) -> Option<String> {
-        for _ in 0..50 {
-            if let Some(addr) = backend.bound_addr() {
-                return Some(addr);
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        None
-    }
-
     // Applying a resolved `:edit` updates the view's spec — the single source the backend binds
     // from on every `start(&spec, ..)` — and stops the running listener, so the next start rebinds
     // with the edited endpoint and security. Hence the wss + Basic Auth edit below: the rebind
@@ -769,23 +754,31 @@ mod tests {
         edited.security.password = Some("password".into());
         v.deferred.setup = Some((edited.clone(), String::new(), Vec::new()));
         v.refresh_impl().await;
-        for _ in 0..200 {
-            if !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh_impl().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!v.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh_impl().await;
+                None
+            },
+        )
+        .await;
         assert_eq!(v.spec, edited);
         assert!(v.spec.csms_self_signed_fallback());
         // The settle loop stops the old listener and rebinds from the edited spec (want_running
         // is on by default); OC-R-083's bind is async, so poll rather than asserting `is_online()`
         // synchronously.
-        assert!(
-            poll_bound_addr(&v.backend).await.is_some(),
-            "edit must rebind the listener"
-        );
+        wait_until(
+            "edit must rebind the listener",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || v.backend.bound_addr(),
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -799,14 +792,19 @@ mod tests {
         let headers = vec![ferrowl_ocpp::HeaderDef::new("X-Tenant", "acme-1").unwrap()];
         v.deferred.setup = Some((edited, String::new(), headers.clone()));
         v.refresh_impl().await;
-        for _ in 0..200 {
-            if !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh_impl().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!v.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh_impl().await;
+                None
+            },
+        )
+        .await;
         assert_eq!(v.device.extra_headers, headers);
     }
 
@@ -1113,10 +1111,13 @@ mod tests {
             "a plain listener must not report a self-signed certificate, got: {msg}"
         );
         // OC-R-083: `start()` binds the listener asynchronously — poll until it is bound.
-        assert!(
-            poll_bound_addr(&v.backend).await.is_some(),
-            "the listener must bind promptly against a free port"
-        );
+        wait_until(
+            "the listener must bind promptly against a free port",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || v.backend.bound_addr(),
+        )
+        .await;
 
         // Edit the endpoint's security to wss (no certs → self-signed fallback), then restart.
         // The rebound listener must reflect the *current* spec, not the stale plain copy.
@@ -1129,14 +1130,19 @@ mod tests {
 
         // UI-R-314/UI-R-315: restart's outcome is deferred until `refresh` settles the stop.
         let mut msg = None;
-        for _ in 0..200 {
-            if !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh_impl().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!v.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh_impl().await;
+                None
+            },
+        )
+        .await;
         for (_, _, line) in v.log.read().await.peek_n(crate::app::LOG_SIZE) {
             if line.contains("self-signed") {
                 msg = Some(line);
@@ -1161,23 +1167,31 @@ mod tests {
         assert!(!v.entries.is_empty(), "the observed entry must be recorded");
 
         v.handle_command_impl("restart").await;
-        for _ in 0..200 {
-            if !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh_impl().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!v.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh_impl().await;
+                None
+            },
+        )
+        .await;
         assert!(
             v.entries.is_empty(),
             "restart must discard every observed charging-station entry"
         );
         // OC-R-083: the listener binds asynchronously — poll until it is bound.
-        assert!(
-            poll_bound_addr(&v.backend).await.is_some(),
-            "restart must start a new instance"
-        );
+        wait_until(
+            "restart must start a new instance",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || v.backend.bound_addr(),
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -1198,17 +1212,13 @@ mod tests {
         v.spec.reconnect = Some(true);
         v.refresh_impl().await;
 
-        for _ in 0..100 {
-            if v.backend.connection_status() == ConnStatus::Reconnecting {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        assert_eq!(
-            v.backend.connection_status(),
-            ConnStatus::Reconnecting,
-            "task must be backing off, never Connected, against an occupied port"
-        );
+        wait_until(
+            "task backs off in Reconnecting, never Connected, against an occupied port",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || (v.backend.connection_status() == ConnStatus::Reconnecting).then_some(()),
+        )
+        .await;
 
         let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
         terminal

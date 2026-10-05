@@ -1105,6 +1105,7 @@ mod tests {
     use crate::SlaveKey;
     use ferrowl_codec::Kind as RegKind;
     use ferrowl_store::CellKind;
+    use ferrowl_test_support::wait_until;
     use rust_modbus::{
         Address, Ascii, Client as RmClient, DiagnosticSubFunction, FileNumber, FileRecordRead,
         FileRecordWrite, FrameTransport, Mask, MeiRequest, ReadDeviceIdCode, RecordLength,
@@ -1230,16 +1231,17 @@ mod tests {
             !activity.load(std::sync::atomic::Ordering::Relaxed),
             "must start false"
         );
-        for _ in 0..50 {
-            if activity.load(std::sync::atomic::Ordering::Relaxed) {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-        assert!(
-            activity.load(std::sync::atomic::Ordering::Relaxed),
-            "on_connect must set activity for ResetOn::Connect"
-        );
+        wait_until(
+            "on_connect must set activity for ResetOn::Connect",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || {
+                activity
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    .then_some(())
+            },
+        )
+        .await;
 
         handle.shutdown().await;
         let _ = serving.await;
@@ -1277,16 +1279,17 @@ mod tests {
             .read_holding_registers(UnitId(9), Address(0), Quantity(1))
             .await;
 
-        for _ in 0..50 {
-            if activity.load(std::sync::atomic::Ordering::Relaxed) {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-        assert!(
-            activity.load(std::sync::atomic::Ordering::Relaxed),
-            "a refused request must still set activity for ResetOn::Request"
-        );
+        wait_until(
+            "a refused request must still set activity for ResetOn::Request",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || {
+                activity
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    .then_some(())
+            },
+        )
+        .await;
 
         handle.shutdown().await;
         let _ = serving.await;
@@ -1338,18 +1341,19 @@ mod tests {
                 kind: RegKind::HoldingRegister,
             },
         };
-        let mut applied = Vec::new();
-        for _ in 0..50 {
-            applied = mem
-                .read()
-                .read(key.clone(), &CellType::Register, &Range::new(0, 2))
-                .unwrap();
-            if applied == vec![10, 0x1234] {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-        assert_eq!(applied, vec![10, 0x1234]);
+        wait_until(
+            "broadcast applied",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || {
+                let applied = mem
+                    .read()
+                    .read(key.clone(), &CellType::Register, &Range::new(0, 2))
+                    .unwrap();
+                (applied == vec![10, 0x1234]).then_some(())
+            },
+        )
+        .await;
 
         // The next exchange lines up, so the broadcast put no frame on the wire.
         let registers = client

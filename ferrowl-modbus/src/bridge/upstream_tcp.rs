@@ -100,7 +100,7 @@ mod tests {
     use crate::bridge::spawn_tcp_downstream;
     use ferrowl_codec::Kind as RegKind;
     use ferrowl_store::{CellKind, CellType, Memory, Range};
-    use ferrowl_test_support::reserve_tcp_port;
+    use ferrowl_test_support::{reserve_tcp_port, wait_until};
     use parking_lot::RwLock as MemLock;
     use rust_modbus::{Address, Client as RmClient, FrameTransport, Quantity, RegisterValue};
     use std::sync::Arc;
@@ -110,19 +110,6 @@ mod tests {
 
     fn sink() -> impl LogFn + Clone {
         |_s: String| async move {}
-    }
-
-    /// Polls a `ServerBuilder::spawn`-returned `BoundAddr` until the listener actually binds,
-    /// instead of racing it with a fixed sleep (MB-R-130 companion — `spawn()` only guarantees
-    /// the task was scheduled, not that its first bind attempt has run).
-    async fn wait_bound_addr(bound_addr: &crate::server_core::BoundAddr) {
-        for _ in 0..50 {
-            if bound_addr.lock().is_some() {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        panic!("listener did not bind within 1s");
     }
 
     fn config(port: u16) -> Config {
@@ -187,7 +174,13 @@ mod tests {
         .spawn(srv_rx, sink(), sink())
         .await
         .expect("downstream server failed to start");
-        wait_bound_addr(&downstream_bound_addr).await;
+        wait_until(
+            "listener bind",
+            Duration::from_millis(20),
+            Duration::from_secs(10),
+            || *downstream_bound_addr.lock(),
+        )
+        .await;
 
         let downstream = spawn_tcp_downstream(config(downstream_port), sink());
         tokio::time::sleep(Duration::from_millis(50)).await;

@@ -921,6 +921,9 @@ dependencies = [
 [[package]]
 name = "ferrowl-test-support"
 version = "0.6.1"
+dependencies = [
+ "tokio",
+]
 
 [[package]]
 name = "ferrowl-ui"

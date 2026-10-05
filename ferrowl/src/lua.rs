@@ -328,6 +328,7 @@ mod tests {
     use ferrowl_modbus::SlaveKey;
     use ferrowl_modbus::UnitId;
     use ferrowl_store::{CellKind, CellType, Memory};
+    use ferrowl_test_support::wait_until_blocking;
     use parking_lot::RwLock as MemLock;
     use tokio::sync::RwLock;
 
@@ -576,20 +577,6 @@ mod tests {
         );
     }
 
-    /// Polls `cond` up to `timeout`, sleeping in small steps (mirrors `session_sim`'s helper).
-    fn wait_for(timeout: Duration, mut cond: impl FnMut() -> bool) -> bool {
-        let step = Duration::from_millis(10);
-        let mut waited = Duration::ZERO;
-        while waited < timeout {
-            if cond() {
-                return true;
-            }
-            std::thread::sleep(step);
-            waited += step;
-        }
-        cond()
-    }
-
     fn script_log() -> ModuleLog {
         Arc::new(tokio::sync::RwLock::new(crate::app::LogRing::init()))
     }
@@ -622,21 +609,27 @@ mod tests {
             no_sink(),
         );
 
-        assert!(wait_for(Duration::from_secs(2), || {
-            memory
-                .read()
-                .read(
-                    Key {
-                        id: SlaveKey {
-                            slave_id: UnitId(1),
-                            kind: Kind::HoldingRegister,
+        wait_until_blocking(
+            "register written by the run-once script",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || {
+                (memory
+                    .read()
+                    .read(
+                        Key {
+                            id: SlaveKey {
+                                slave_id: UnitId(1),
+                                kind: Kind::HoldingRegister,
+                            },
                         },
-                    },
-                    &CellType::Register,
-                    &Range::new(1, 1),
-                )
-                .is_ok_and(|v| v == vec![7])
-        }));
+                        &CellType::Register,
+                        &Range::new(1, 1),
+                    )
+                    .is_ok_and(|v| v == vec![7]))
+                .then_some(())
+            },
+        );
     }
 
     #[test]
@@ -654,9 +647,17 @@ mod tests {
             no_sink(),
         );
 
-        assert!(wait_for(Duration::from_secs(2), || {
-            log_lines(&log).iter().any(|l| l.contains("[run]"))
-        }));
+        wait_until_blocking(
+            "error logged with the [run] prefix",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || {
+                log_lines(&log)
+                    .iter()
+                    .any(|l| l.contains("[run]"))
+                    .then_some(())
+            },
+        );
         assert!(!log_lines(&log).iter().any(|l| l.contains("[sim]")));
     }
 
@@ -677,9 +678,17 @@ mod tests {
             no_sink(),
         );
 
-        assert!(wait_for(Duration::from_secs(2), || {
-            log_lines(&log).iter().any(|l| l.contains("time-ok:"))
-        }));
+        wait_until_blocking(
+            "time-ok line logged by the sim script",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || {
+                log_lines(&log)
+                    .iter()
+                    .any(|l| l.contains("time-ok:"))
+                    .then_some(())
+            },
+        );
         let lines = log_lines(&log);
         assert!(
             lines.iter().any(|l| l.contains("os-nil")),
@@ -1039,7 +1048,12 @@ mod tests {
         );
 
         drop(guard); // release: the contended write now completes
-        assert!(wait_for(Duration::from_secs(2), || done.load(Ordering::Relaxed)));
+        wait_until_blocking(
+            "contended bridge write completed after lock release",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || done.load(Ordering::Relaxed).then_some(()),
+        );
         writer.join().unwrap();
 
         // The value the Lua write applied is the one now in shared host memory.

@@ -637,7 +637,7 @@ mod tests {
 
     use crate::module::ocpp::config::device::OcppSecurityConfig;
     use crate::module::ocpp::config::session::OcppProtocol;
-    use ferrowl_test_support::reserve_tcp_port;
+    use ferrowl_test_support::{reserve_tcp_port, wait_until, wait_until_async};
 
     /// A handler that never receives a Call in these tests — `start()` never completes a
     /// handshake against a closed port.
@@ -797,17 +797,13 @@ mod tests {
         // The task is running but never completes a handshake against a closed port: it must
         // settle on Reconnecting, never Connected, and never fall back to Disconnected while the
         // task itself stays alive.
-        for _ in 0..100 {
-            if backend.connection_status() == ConnStatus::Reconnecting {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        assert_eq!(
-            backend.connection_status(),
-            ConnStatus::Reconnecting,
-            "a running task that never completes a handshake must report Reconnecting"
-        );
+        wait_until(
+            "running task without a handshake reports Reconnecting",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || (backend.connection_status() == ConnStatus::Reconnecting).then_some(()),
+        )
+        .await;
 
         tokio::time::timeout(std::time::Duration::from_secs(2), backend.stop())
             .await
@@ -851,13 +847,13 @@ mod tests {
             .await
             .expect("start must not fail synchronously against an unreachable CSMS");
 
-        for _ in 0..100 {
-            if backend.connection_status() == ConnStatus::Reconnecting {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        assert_eq!(backend.connection_status(), ConnStatus::Reconnecting);
+        wait_until(
+            "client enters Reconnecting",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || (backend.connection_status() == ConnStatus::Reconnecting).then_some(()),
+        )
+        .await;
 
         let before = std::time::Instant::now();
         backend.request_stop().await.expect("request_stop");
@@ -867,12 +863,13 @@ mod tests {
             "must not report Disconnected until poll_stop reaps the task"
         );
 
-        loop {
-            if backend.poll_stop().await.is_some() {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
+        let _ = wait_until_async(
+            "stop settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || backend.poll_stop().await,
+        )
+        .await;
         assert!(
             before.elapsed() < std::time::Duration::from_millis(500),
             "request_stop + poll_stop took {:?}",
@@ -908,22 +905,20 @@ mod tests {
             .await
             .expect("start must not fail synchronously");
 
-        // Poll for the disconnect line rather than a fixed sleep: the client task's single
-        // failed dial + status invocation should land well inside this window.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        let mut found = false;
-        while std::time::Instant::now() < deadline {
-            let lines = log.write().await.peek_n(crate::app::LOG_SIZE);
-            if lines.iter().any(|(_, _, line)| line.contains("disconnect")) {
-                found = true;
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        assert!(
-            found,
-            "the module log must receive a 'disconnect' status line once the client task ends"
-        );
+        wait_until_async(
+            "the module log must receive a 'disconnect' status line once the client task ends",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            async || {
+                log.write()
+                    .await
+                    .peek_n(crate::app::LOG_SIZE)
+                    .iter()
+                    .any(|(_, _, line)| line.contains("disconnect"))
+                    .then_some(())
+            },
+        )
+        .await;
 
         let messages = backend.messages_snapshot().await;
         assert!(
@@ -961,23 +956,20 @@ mod tests {
             .await
             .expect("start must not fail synchronously");
 
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        let mut found = false;
-        while std::time::Instant::now() < deadline {
-            let lines = log.write().await.peek_n(crate::app::LOG_SIZE);
-            if lines
-                .iter()
-                .any(|(_, _, line)| line.contains("Reconnecting in"))
-            {
-                found = true;
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        assert!(
-            found,
-            "the module log must receive a 'Reconnecting in' status line while backing off"
-        );
+        wait_until_async(
+            "the module log must receive a 'Reconnecting in' status line while backing off",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            async || {
+                log.write()
+                    .await
+                    .peek_n(crate::app::LOG_SIZE)
+                    .iter()
+                    .any(|(_, _, line)| line.contains("Reconnecting in"))
+                    .then_some(())
+            },
+        )
+        .await;
 
         let messages = backend.messages_snapshot().await;
         assert!(
@@ -1052,17 +1044,6 @@ mod tests {
         }
     }
 
-    /// Poll until the CSMS listener has bound (`spawn` binds asynchronously).
-    async fn bound_addr(server: &ferrowl_ocpp::csms::Server<ferrowl_ocpp::V1_6>) -> String {
-        for _ in 0..50 {
-            if let Some(addr) = server.local_addr() {
-                return addr.to_string();
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        panic!("CSMS listener never bound");
-    }
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     /// (infra, required for OC-R-070) — a sender captured via `OcppClient::sender()` **before**
     /// `start()` (exactly how `CsStateHandler` will hold one, since it is built and handed into
@@ -1084,7 +1065,14 @@ mod tests {
         .spawn(HeartbeatCsms, sink())
         .await
         .expect("server failed to bind");
-        let addr = bound_addr(&server).await;
+        let addr = wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || server.local_addr(),
+        )
+        .await
+        .to_string();
 
         let spec = OcppSpec {
             name: "cs".to_owned(),
@@ -1113,14 +1101,13 @@ mod tests {
             .await
             .expect("start must not fail synchronously");
 
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        while !connected.load(Ordering::Relaxed) && std::time::Instant::now() < deadline {
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        assert!(
-            connected.load(Ordering::Relaxed),
-            "client never completed the handshake"
-        );
+        wait_until(
+            "client completes the handshake",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || connected.load(Ordering::Relaxed).then_some(()),
+        )
+        .await;
 
         let action = ferrowl_ocpp::V1_6::default_action("Heartbeat").expect("Heartbeat is known");
         let resp = sender.send_scoped(action, Scope::CS).await;

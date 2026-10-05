@@ -396,12 +396,13 @@ impl ModbusMonitorModule {
     #[cfg(test)]
     pub async fn stop(&mut self) -> Result<(), Error> {
         self.request_stop().await?;
-        loop {
-            if let Some(res) = self.poll_stop().await {
-                return res;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
-        }
+        ferrowl_test_support::wait_until_async(
+            "stop settles",
+            tokio::time::Duration::from_millis(5),
+            tokio::time::Duration::from_secs(10),
+            async || self.poll_stop().await,
+        )
+        .await
     }
 }
 
@@ -421,7 +422,7 @@ pub(crate) fn network_log_level(s: &str) -> crate::app::Level {
 mod tests {
     use super::*;
     use crate::config::Role;
-    use ferrowl_test_support::reserve_temp_dir;
+    use ferrowl_test_support::{reserve_temp_dir, wait_until, wait_until_async};
 
     fn spec(endpoint: Endpoint) -> ModuleSpec {
         ModuleSpec {
@@ -689,12 +690,13 @@ mod tests {
             "request_stop() alone must not release the claim yet"
         );
 
-        loop {
-            if module.poll_stop().await.is_some() {
-                break;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
-        }
+        let _ = wait_until_async(
+            "stop settles",
+            tokio::time::Duration::from_millis(5),
+            tokio::time::Duration::from_secs(10),
+            async || module.poll_stop().await,
+        )
+        .await;
         assert_eq!(
             registry.conflict("B", &path),
             None,
@@ -724,12 +726,13 @@ mod tests {
             "a repeat request_stop() must not push the grace deadline back out"
         );
 
-        loop {
-            if module.poll_stop().await.is_some() {
-                break;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
-        }
+        let _ = wait_until_async(
+            "stop settles",
+            tokio::time::Duration::from_millis(5),
+            tokio::time::Duration::from_secs(10),
+            async || module.poll_stop().await,
+        )
+        .await;
     }
 
     /// MB-R-252 — a receive task that never reacts to the `Terminate` sent by `request_stop`
@@ -745,12 +748,13 @@ mod tests {
 
         module.request_stop().await.expect("request_stop");
         let before = tokio::time::Instant::now();
-        let result = loop {
-            if let Some(result) = module.poll_stop().await {
-                break result;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
-        };
+        let result = wait_until_async(
+            "stop settles",
+            tokio::time::Duration::from_millis(5),
+            tokio::time::Duration::from_secs(10),
+            async || module.poll_stop().await,
+        )
+        .await;
         assert!(
             before.elapsed() >= tokio::time::Duration::from_millis(90),
             "must wait out the grace period before aborting, took {:?}",
@@ -802,13 +806,19 @@ mod tests {
             .start(|_: String| async {}, |_: String| async {})
             .await
             .expect("start always succeeds for a valid transport");
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            while module.task.as_ref().is_some_and(|h| !h.is_finished()) {
-                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .expect("task should end promptly, not retry, with reconnect disabled");
+        wait_until(
+            "task should end promptly, not retry, with reconnect disabled",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || {
+                module
+                    .task
+                    .as_ref()
+                    .is_none_or(|h| h.is_finished())
+                    .then_some(())
+            },
+        )
+        .await;
     }
 
     /// Editing a running monitor's setup must not reset its accumulated

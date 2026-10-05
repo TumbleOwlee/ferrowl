@@ -857,6 +857,7 @@ mod tests {
     use super::*;
     use crate::{ConnectedCell, SlaveKey};
     use ferrowl_store::Range;
+    use ferrowl_test_support::wait_until;
     use rust_modbus::{FrameTransport, Rtu};
     use tokio::io::{AsyncReadExt, DuplexStream};
 
@@ -1201,12 +1202,13 @@ mod tests {
             .await
         });
 
-        let mut waited = 0;
-        while !connected.get() && waited < 100 {
-            tokio::time::sleep(Duration::from_millis(5)).await;
-            waited += 1;
-        }
-        assert!(connected.get(), "connected once the run() loop is active");
+        wait_until(
+            "connected once the run() loop is active",
+            Duration::from_millis(5),
+            Duration::from_secs(10),
+            || connected.get().then_some(()),
+        )
+        .await;
 
         tx.send(Command::Terminate).await.unwrap();
         let result = handle.await.unwrap();

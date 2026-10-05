@@ -13,26 +13,13 @@ use std::time::Duration;
 use ferrowl_ocpp::cs::{self, CsActionHandler};
 use ferrowl_ocpp::csms::{self, CsmsActionHandler};
 use ferrowl_ocpp::{Action16, CallError, CallErrorCode, Response16, V1_6};
-use ferrowl_test_support::reserve_tcp_port;
+use ferrowl_test_support::{reserve_tcp_port, wait_until};
 use tokio::sync::RwLock;
 use tokio::time::sleep;
 
 /// No-op log/status sink. `LogFn + Clone` is satisfied by a capture-free closure.
 fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
     |_s: String| async move {}
-}
-
-/// Poll until the CSMS listener has bound: `spawn` binds asynchronously, retrying a
-/// failed bind with backoff (OC-R-083), so `local_addr()` is `None` until the first
-/// successful bind lands.
-async fn bound_addr<V: ferrowl_ocpp::Version>(server: &csms::Server<V>) -> std::net::SocketAddr {
-    for _ in 0..50 {
-        if let Some(addr) = server.local_addr() {
-            return addr;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    panic!("CSMS listener never bound");
 }
 
 /// CSMS handler answering the single action these tests exercise.
@@ -176,7 +163,16 @@ async fn cs_config_reread_on_every_dial() {
     .spawn(TestCsms, sink())
     .await
     .expect("server failed to bind");
-    shared_config.write().await.url = format!("ws://{}/ocpp/CS001", bound_addr(&server).await);
+    shared_config.write().await.url = format!(
+        "ws://{}/ocpp/CS001",
+        wait_until(
+            "CSMS listener bind",
+            Duration::from_millis(20),
+            Duration::from_secs(10),
+            || server.local_addr()
+        )
+        .await
+    );
 
     // The 1s initial backoff plus a margin must elapse before the re-read connect succeeds.
     sleep(Duration::from_millis(1500)).await;
@@ -209,7 +205,13 @@ async fn it_action_sent_during_dial_is_delivered_after_connect() {
     .spawn(TestCsms, sink())
     .await
     .expect("server failed to bind");
-    let addr = bound_addr(&server).await;
+    let addr = wait_until(
+        "CSMS listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || server.local_addr(),
+    )
+    .await;
 
     let client = cs::ClientBuilder::<V1_6>::new(
         config(format!("ws://{addr}/ocpp/CS001"), true),

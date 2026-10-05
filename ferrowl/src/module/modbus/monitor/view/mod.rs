@@ -1769,7 +1769,7 @@ mod tests {
     use super::*;
     use crate::config::{Endpoint, Role};
     use ferrowl_modbus::UnitId;
-    use ferrowl_test_support::reserve_temp_dir;
+    use ferrowl_test_support::{reserve_temp_dir, wait_until_async};
     use ferrowl_ui::traits::SetFocus;
     use ferrowl_ui::widgets::TableEntry as TableEntryTrait;
 
@@ -2058,14 +2058,19 @@ mod tests {
         assert!(matches!(result, CommandResult::Handled(None)));
         assert!(v.lifecycle_pending());
 
-        for _ in 0..200 {
-            if v.pending_setup.is_none() && !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!v.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2085,14 +2090,19 @@ mod tests {
         let result = v.handle_command("stop").await;
         assert!(matches!(result, CommandResult::Handled(None)));
 
-        for _ in 0..200 {
-            if v.pending_setup.is_none() && !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!v.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
 
         let lines = v
             .log()
@@ -3008,13 +3018,19 @@ mod tests {
         // UI-R-314/UI-R-315 — `:reload` now signals a stop and returns immediately; the rebuild
         // (and its registry reattachment) only happens once `refresh()` observes the deferred
         // stop complete.
-        for _ in 0..200 {
-            if v.pending_setup.is_none() && !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
         assert_eq!(
             registry.conflict("B", serial_path),
             Some("A".to_string()),
@@ -3053,14 +3069,19 @@ mod tests {
             "the first refresh() after confirm must leave the apply's stop pending"
         );
 
-        for _ in 0..200 {
-            if v.pending_setup.is_none() && !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
-        assert!(!v.lifecycle_pending());
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
     }
 
     /// MB-R-252, MB-R-255, UI-R-350 — a receive task that ends on its own `Terminate` well
@@ -3088,18 +3109,17 @@ mod tests {
         // structurally, never by a wall-clock ceiling over the polling loop, which flakes under a
         // loaded runner.
         let mut polls = 0;
-        loop {
-            v.refresh().await;
-            polls += 1;
-            if v.pending_setup.is_none() && !v.lifecycle_pending() {
-                break;
-            }
-            assert!(
-                polls < 200,
-                "the deferred stop never settled within 200 polls"
-            );
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
+        wait_until_async(
+            "the deferred stop settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                v.refresh().await;
+                polls += 1;
+                (v.pending_setup.is_none() && !v.lifecycle_pending()).then_some(())
+            },
+        )
+        .await;
         assert!(!v.lifecycle_pending());
         // The abort-after-grace fallback can only fire once the 100 ms grace period has fully
         // elapsed; settling in only a few polls is a structural stand-in for "ended on its own",
@@ -3165,13 +3185,19 @@ mod tests {
             "the pre-edit name must still drive the tab name while the stop is pending, not yet settled"
         );
 
-        for _ in 0..200 {
-            if v.pending_setup.is_none() && !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
         assert_eq!(v.name(), "renamed");
     }
 
@@ -3201,13 +3227,19 @@ mod tests {
         crate::dialog::widgets::set_input(&mut dialog.name, "renamed");
         v.confirm_edit();
 
-        for _ in 0..200 {
-            if v.pending_setup.is_none() && !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
 
         assert_eq!(
             v.spec.name, "renamed",
@@ -3249,13 +3281,19 @@ mod tests {
         v.handle_command("edit").await;
         v.confirm_edit();
 
-        for _ in 0..200 {
-            if v.pending_setup.is_none() && !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
 
         assert!(
             !v.module.is_running(),
@@ -3320,13 +3358,19 @@ mod tests {
              still be rejected as a conflict"
         );
 
-        for _ in 0..200 {
-            if v.pending_setup.is_none() && !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
         assert_eq!(
             registry.conflict("B", &serial_path),
             None,
@@ -3360,13 +3404,19 @@ mod tests {
         v.overlay =
             MonitorOverlay::EditSetup(Box::new(MonitorSetupDialog::edit(&s.name, &s, &device())));
         v.confirm_edit();
-        for _ in 0..200 {
-            if v.pending_setup.is_none() && !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
         let _ = v.handle_command("start").await;
 
         assert_eq!(
@@ -3439,13 +3489,19 @@ mod tests {
         v.confirm_edit();
         assert!(matches!(v.overlay, MonitorOverlay::None));
 
-        for _ in 0..200 {
-            if v.pending_setup.is_none() && !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
         assert_eq!(v.spec.name, "renamed");
     }
 
@@ -3473,13 +3529,19 @@ mod tests {
                 continue;
             }
 
-            for _ in 0..200 {
-                if v.pending_setup.is_none() && !v.lifecycle_pending() {
-                    break;
-                }
-                v.refresh().await;
-                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-            }
+            wait_until_async(
+                "lifecycle settles",
+                std::time::Duration::from_millis(5),
+                std::time::Duration::from_secs(10),
+                async || {
+                    if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                        return Some(());
+                    }
+                    v.refresh().await;
+                    None
+                },
+            )
+            .await;
             assert_eq!(
                 v.spec.device,
                 before
@@ -3543,13 +3605,19 @@ mod tests {
         crate::dialog::widgets::set_input(&mut dialog.name, "renamed");
         v.confirm_edit();
 
-        for _ in 0..200 {
-            if v.pending_setup.is_none() && !v.lifecycle_pending() {
-                break;
-            }
-            v.refresh().await;
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        }
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if v.pending_setup.is_none() && !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
         assert!(
             std::sync::Arc::ptr_eq(&table_before, &v.module.table()),
             "table must be the same shared instance across an edit-confirm"

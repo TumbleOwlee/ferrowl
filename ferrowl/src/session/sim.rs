@@ -159,6 +159,7 @@ mod tests {
     use super::*;
     use crate::app::LOG_SIZE;
     use ferrowl_lua::module::{Has, ModuleHost, OcppGuard, Read, RegisterAccess, ValueType, Write};
+    use ferrowl_test_support::wait_until_blocking;
     use mlua::{AnyUserData, Lua, Result as LuaResult};
     use std::collections::HashMap;
     use std::sync::Mutex;
@@ -248,20 +249,6 @@ mod tests {
         }
     }
 
-    /// Polls `cond` up to `timeout`, sleeping in small steps. Bounded, no raw sleep-as-sync.
-    fn wait_for(timeout: Duration, mut cond: impl FnMut() -> bool) -> bool {
-        let step = Duration::from_millis(10);
-        let mut waited = Duration::ZERO;
-        while waited < timeout {
-            if cond() {
-                return true;
-            }
-            std::thread::sleep(step);
-            waited += step;
-        }
-        cond()
-    }
-
     #[test]
     /// SC-R-011 — an enabled session script starts the session sim with no explicit start call.
     fn ut_enabled_script_runs_without_explicit_start() {
@@ -275,9 +262,12 @@ mod tests {
             r#"C_Module:Get("m"):Register():Set("x", 1)"#,
         )]);
 
-        assert!(wait_for(Duration::from_millis(500), || {
-            matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::Int(1)))
-        }));
+        wait_until_blocking(
+            "enabled script runs without explicit start",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::Int(1))).then_some(()),
+        );
     }
 
     #[test]
@@ -321,9 +311,12 @@ mod tests {
             r#"C_Module:Get("m"):Register():Set("x", 1)"#,
         )]);
         assert!(sim.handle.is_some());
-        assert!(wait_for(Duration::from_millis(500), || {
-            matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::Int(1)))
-        }));
+        wait_until_blocking(
+            "toggle scripts starts and stops",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::Int(1))).then_some(()),
+        );
 
         sim.set_scripts(vec![ScriptDef {
             name: "s".into(),
@@ -371,17 +364,23 @@ mod tests {
             "s",
             r#"C_Module:Get("m"):Register():Set("x", 1)"#,
         )]);
-        assert!(wait_for(Duration::from_millis(500), || {
-            matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::Int(1)))
-        }));
+        wait_until_blocking(
+            "x set to 1 by the first script",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::Int(1))).then_some(()),
+        );
 
         sim.set_scripts(vec![script(
             "s",
             r#"C_Module:Get("m"):Register():Set("x", 2)"#,
         )]);
-        assert!(wait_for(Duration::from_millis(500), || {
-            matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::Int(2)))
-        }));
+        wait_until_blocking(
+            "x set to 2 by the replaced script",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::Int(2))).then_some(()),
+        );
     }
 
     #[test]
@@ -397,15 +396,21 @@ mod tests {
             r#"C_Log:Info("x"); C_Module:Get("nope"):Register()"#,
         )]);
 
-        assert!(wait_for(Duration::from_millis(500), || {
-            let lines: Vec<String> = log
-                .blocking_read()
-                .peek_n(LOG_SIZE)
-                .into_iter()
-                .map(|(_, _, l)| l)
-                .collect();
-            lines.iter().any(|l| l.contains("[sim]")) && lines.iter().any(|l| l == "x")
-        }));
+        wait_until_blocking(
+            "script error logged with sim prefix and print logged",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || {
+                let lines: Vec<String> = log
+                    .blocking_read()
+                    .peek_n(LOG_SIZE)
+                    .into_iter()
+                    .map(|(_, _, l)| l)
+                    .collect();
+                (lines.iter().any(|l| l.contains("[sim]")) && lines.iter().any(|l| l == "x"))
+                    .then_some(())
+            },
+        );
     }
 
     #[test]
@@ -421,9 +426,12 @@ mod tests {
             script("good", r#"C_Module:Get("m"):Register():Set("x", 9)"#),
         ]);
 
-        assert!(wait_for(Duration::from_millis(500), || {
-            matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::Int(9)))
-        }));
+        wait_until_blocking(
+            "unknown module error does not stop loop",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::Int(9))).then_some(()),
+        );
     }
 
     #[test]
@@ -445,9 +453,12 @@ mod tests {
             r#"C_Module:Get("m"):Register():Set("x", 5)"#.to_string(),
         );
 
-        assert!(wait_for(Duration::from_secs(2), || {
-            matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::Int(5)))
-        }));
+        wait_until_blocking(
+            "run once executes disabled script without sim",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::Int(5))).then_some(()),
+        );
         assert!(sim.handle.is_none(), "run_once must not start a sim thread");
     }
 
@@ -467,11 +478,11 @@ mod tests {
             code: r#"C_Module:Get("m"):Register():Set("x", 99)"#.into(),
             enabled: true,
         }]);
-        assert!(
-            wait_for(Duration::from_millis(500), || {
-                matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::Int(99)))
-            }),
-            "positive control: the enabled decoy in the owner's list must actually run once"
+        wait_until_blocking(
+            "positive control: the enabled decoy in the owner's list must actually run once",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::Int(99))).then_some(()),
         );
 
         sim.run_once(
@@ -479,9 +490,12 @@ mod tests {
             r#"C_Module:Get("m"):Register():Set("x", 5)"#.to_string(),
         );
 
-        assert!(wait_for(Duration::from_secs(2), || {
-            matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::Int(5)))
-        }));
+        wait_until_blocking(
+            "run once loads only the passed script not the owners list entry",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::Int(5))).then_some(()),
+        );
     }
 
     #[test]
@@ -502,9 +516,12 @@ mod tests {
                 .to_string(),
         );
 
-        assert!(wait_for(Duration::from_secs(2), || {
-            matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::Int(1)))
-        }));
+        wait_until_blocking(
+            "run once calls the script exactly once",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::Int(1))).then_some(()),
+        );
         std::thread::sleep(Duration::from_millis(200));
         assert!(
             matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::Int(1))),
@@ -533,11 +550,13 @@ mod tests {
         );
         let call_elapsed = start.elapsed();
 
-        assert!(
-            wait_for(Duration::from_secs(5), || {
-                matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::String(s)) if s == "done")
-            }),
-            "the busy script never finished"
+        wait_until_blocking(
+            "the busy script never finished",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || {
+                (matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::String(s)) if s == "done")).then_some(())
+            },
         );
         let total_elapsed = start.elapsed();
 
@@ -563,19 +582,17 @@ mod tests {
             r#"C_Module:Get("m"):Register():Set("x", C_Time:GetMs())"#.to_string(),
         );
 
-        assert!(
-            wait_for(Duration::from_secs(2), || {
+        wait_until_blocking(
+            "x set to a number",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || {
                 matches!(
                     rw.store.lock().unwrap().get("x"),
                     Some(ValueType::Float(_)) | Some(ValueType::Int(_))
                 )
-            }),
-            "log: {:?}",
-            l.blocking_read()
-                .peek_n(LOG_SIZE)
-                .into_iter()
-                .map(|(_, _, l)| l)
-                .collect::<Vec<_>>()
+                .then_some(())
+            },
         );
     }
 
@@ -593,15 +610,18 @@ mod tests {
             "sim_script",
             r#"shared_global = 42; C_Module:Get("m"):Register():Set("sim_ran", true)"#,
         )]);
-        assert!(
-            wait_for(Duration::from_millis(500), || {
+        wait_until_blocking(
+            "positive control: the sim thread must have actually run and set shared_global \
+             before the no-shared-state assertion means anything",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || {
                 matches!(
                     rw.store.lock().unwrap().get("sim_ran"),
                     Some(ValueType::Bool(true))
                 )
-            }),
-            "positive control: the sim thread must have actually run and set shared_global \
-             before the no-shared-state assertion means anything"
+                .then_some(())
+            },
         );
 
         sim.run_once(
@@ -609,9 +629,12 @@ mod tests {
             r#"C_Module:Get("m"):Register():Set("x", shared_global or -1)"#.to_string(),
         );
 
-        assert!(wait_for(Duration::from_secs(2), || {
-            matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::Int(-1)))
-        }));
+        wait_until_blocking(
+            "run once shares no lua state with sim thread",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || matches!(rw.store.lock().unwrap().get("x"), Some(ValueType::Int(-1))).then_some(()),
+        );
     }
 
     #[test]

@@ -300,14 +300,7 @@ where
     }
 
     /// Terminate the server task and every connection, if running.
-    #[cfg_attr(
-        not(test),
-        allow(
-            dead_code,
-            reason = "blocking teardown kept for tests only now that refresh_impl \
-            routes every apply/stop through request_stop()/poll_stop()"
-        )
-    )]
+    #[cfg(test)]
     pub async fn stop(&mut self) -> Result<(), Error> {
         if matches!(self.server, CsmsState::Idle) {
             return Ok(());
@@ -315,12 +308,13 @@ where
         if matches!(self.server, CsmsState::Running(_)) {
             self.request_stop().await?;
         }
-        loop {
-            if let Some(res) = self.poll_stop().await {
-                return res;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
-        }
+        ferrowl_test_support::wait_until_async(
+            "stop settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || self.poll_stop().await,
+        )
+        .await
     }
 
     /// The bound local address (`host:port`) when running, for the status line. `None` both
@@ -380,6 +374,7 @@ mod tests {
 
     use crate::module::ocpp::config::device::OcppSecurityConfig;
     use crate::module::ocpp::config::session::OcppProtocol;
+    use ferrowl_test_support::{wait_until, wait_until_async};
 
     /// A handler that never receives a Call in this test — `start()` binds an occupied port, so
     /// no connection is ever accepted.
@@ -465,13 +460,13 @@ mod tests {
             .await
             .expect("start must succeed");
 
-        for _ in 0..50 {
-            if backend.bound_addr().is_some() {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        assert!(backend.bound_addr().is_some(), "listener must have bound");
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || backend.bound_addr().is_some().then_some(()),
+        )
+        .await;
 
         backend.request_stop().await.expect("request_stop");
         assert!(
@@ -479,12 +474,13 @@ mod tests {
             "bound_addr must stay readable while the stop is in flight"
         );
 
-        let result = loop {
-            if let Some(res) = backend.poll_stop().await {
-                break res;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        };
+        let result = wait_until_async(
+            "stop settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || backend.poll_stop().await,
+        )
+        .await;
         assert!(result.is_ok());
         assert!(backend.bound_addr().is_none());
     }

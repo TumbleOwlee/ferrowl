@@ -17,6 +17,7 @@ use ferrowl_lua::module::{ModuleDirectory, ModuleHost, ValueType};
 use ferrowl_modbus::{Key, SlaveKey, UnitId};
 use ferrowl_ocpp::V1_6;
 use ferrowl_store::{CellKind, Memory, Range};
+use ferrowl_test_support::wait_until_blocking;
 
 use crate::app::LOG_SIZE;
 use crate::config::script::ScriptDef;
@@ -52,20 +53,6 @@ fn script(name: &str, code: &str) -> ScriptDef {
         code: code.to_string(),
         enabled: true,
     }
-}
-
-/// Polls `cond` up to `timeout`, sleeping in small steps (mirrors `session_sim.rs`'s helper).
-fn wait_for(timeout: Duration, mut cond: impl FnMut() -> bool) -> bool {
-    let step = Duration::from_millis(10);
-    let mut waited = Duration::ZERO;
-    while waited < timeout {
-        if cond() {
-            return true;
-        }
-        std::thread::sleep(step);
-        waited += step;
-    }
-    cond()
 }
 
 fn holding(addr: u16) -> Register {
@@ -223,9 +210,12 @@ fn it_two_modbus_modules_session_mirror() {
         "#,
     )]);
 
-    assert!(wait_for(Duration::from_millis(500), || {
-        read_register(&mem_a, 0) == 7
-    }));
+    wait_until_blocking(
+        "two modbus modules session mirror",
+        Duration::from_millis(10),
+        Duration::from_secs(10),
+        || (read_register(&mem_a, 0) == 7).then_some(()),
+    );
 }
 
 // --- 2. OCPP client -> modbus mirror -----------------------------------------
@@ -254,9 +244,12 @@ fn it_ocpp_client_to_modbus_mirror() {
         "#,
     )]);
 
-    assert!(wait_for(Duration::from_millis(500), || {
-        read_register(&mem, 1) == 42
-    }));
+    wait_until_blocking(
+        "ocpp client to modbus mirror",
+        Duration::from_millis(10),
+        Duration::from_secs(10),
+        || (read_register(&mem, 1) == 42).then_some(()),
+    );
 }
 
 #[test]
@@ -278,13 +271,19 @@ fn it_session_register_accessor_sees_runtime_add() {
         r#"r = r or C_Module:Get("evse"):Register(); r:Set("setpoint", 1); if r:Has("extra") then r:Set("extra", 9) end"#,
     )]);
 
-    assert!(wait_for(Duration::from_millis(500), || {
-        read_register(&mem, 0) == 1
-    }));
+    wait_until_blocking(
+        "register 0 set to 1",
+        Duration::from_millis(10),
+        Duration::from_secs(10),
+        || (read_register(&mem, 0) == 1).then_some(()),
+    );
     shared.write().insert("extra".to_string(), holding(1));
-    assert!(wait_for(Duration::from_millis(500), || {
-        read_register(&mem, 1) == 9
-    }));
+    wait_until_blocking(
+        "register 1 set to 9 after the runtime add",
+        Duration::from_millis(10),
+        Duration::from_secs(10),
+        || (read_register(&mem, 1) == 9).then_some(()),
+    );
 }
 
 // --- 3. OCPP action dispatch cross-module -------------------------------------
@@ -307,9 +306,12 @@ fn it_ocpp_action_dispatch_cross_module() {
         "#,
     )]);
 
-    assert!(wait_for(Duration::from_millis(500), || {
-        queue.lock().len() >= 2
-    }));
+    wait_until_blocking(
+        "ocpp action dispatch cross module",
+        Duration::from_millis(10),
+        Duration::from_secs(10),
+        || (queue.lock().len() >= 2).then_some(()),
+    );
     let items: Vec<_> = queue.lock().drain(..).collect();
     assert!(
         items
@@ -344,18 +346,30 @@ fn it_ocpp_server_enumeration() {
         "#,
     )]);
 
-    assert!(wait_for(Duration::from_millis(500), || {
-        let lines = log_lines(&log);
-        lines.iter().any(|l| l == "stations=CP1") && lines.iter().any(|l| l == "conns=1")
-    }));
-    assert!(wait_for(Duration::from_millis(500), || {
-        with_state_mut(&states, |reg| {
-            reg.stations
-                .get("CP1")
-                .and_then(|st| st.cs.clone())
-                .is_some_and(|cs| matches!(cs.read().get_field("Model"), Some(ValueType::String(ref s)) if s == "X"))
-        })
-    }));
+    wait_until_blocking(
+        "log has stations=CP1 and conns=1",
+        Duration::from_millis(10),
+        Duration::from_secs(10),
+        || {
+            let lines = log_lines(&log);
+            (lines.iter().any(|l| l == "stations=CP1") && lines.iter().any(|l| l == "conns=1"))
+                .then_some(())
+        },
+    );
+    wait_until_blocking(
+        "CP1 Model set to X",
+        Duration::from_millis(10),
+        Duration::from_secs(10),
+        || {
+            with_state_mut(&states, |reg| {
+                reg.stations
+                    .get("CP1")
+                    .and_then(|st| st.cs.clone())
+                    .is_some_and(|cs| matches!(cs.read().get_field("Model"), Some(ValueType::String(ref s)) if s == "X"))
+            })
+            .then_some(())
+        },
+    );
 }
 
 // --- 5. Module removal mid-run -------------------------------------------------
@@ -389,9 +403,12 @@ fn it_module_removal_mid_run_logs_error_and_keeps_looping() {
     ]);
 
     // Let it run cleanly for a bit first.
-    assert!(wait_for(Duration::from_millis(300), || {
-        read_register(&mem_keep, 1) >= 2
-    }));
+    wait_until_blocking(
+        "keep counter reaches 2",
+        Duration::from_millis(10),
+        Duration::from_secs(10),
+        || (read_register(&mem_keep, 1) >= 2).then_some(()),
+    );
     let count_before_removal = read_register(&mem_keep, 1);
 
     // Drop "evse_b" from the registry without stopping the sim.
@@ -402,15 +419,24 @@ fn it_module_removal_mid_run_logs_error_and_keeps_looping() {
     );
     registry.replace_all(modules);
 
-    assert!(wait_for(Duration::from_millis(500), || {
-        log_lines(&log)
-            .iter()
-            .any(|l| l.contains("[sim]") && l.contains("unknown module"))
-    }));
+    wait_until_blocking(
+        "unknown module error logged",
+        Duration::from_millis(10),
+        Duration::from_secs(10),
+        || {
+            (log_lines(&log)
+                .iter()
+                .any(|l| l.contains("[sim]") && l.contains("unknown module")))
+            .then_some(())
+        },
+    );
     // Loop keeps running: the "keep" counter still advances past the pre-removal value.
-    assert!(wait_for(Duration::from_millis(500), || {
-        read_register(&mem_keep, 1) > count_before_removal
-    }));
+    wait_until_blocking(
+        "keep counter advances past its pre-removal value",
+        Duration::from_millis(10),
+        Duration::from_secs(10),
+        || (read_register(&mem_keep, 1) > count_before_removal).then_some(()),
+    );
 }
 
 // --- 6. Rename -----------------------------------------------------------------
@@ -458,14 +484,23 @@ fn it_module_rename_old_name_errors_new_name_resolves() {
     );
     registry.replace_all(modules);
 
-    assert!(wait_for(Duration::from_millis(500), || {
-        log_lines(&log)
-            .iter()
-            .any(|l| l.contains("[sim]") && l.contains("unknown module"))
-    }));
-    assert!(wait_for(Duration::from_millis(500), || {
-        read_register(&mem_b, 0) == 55
-    }));
+    wait_until_blocking(
+        "unknown module error logged for the old name",
+        Duration::from_millis(10),
+        Duration::from_secs(10),
+        || {
+            (log_lines(&log)
+                .iter()
+                .any(|l| l.contains("[sim]") && l.contains("unknown module")))
+            .then_some(())
+        },
+    );
+    wait_until_blocking(
+        "register 0 set to 55 via the new name",
+        Duration::from_millis(10),
+        Duration::from_secs(10),
+        || (read_register(&mem_b, 0) == 55).then_some(()),
+    );
 }
 
 // --- 7. Type/Role introspection -------------------------------------------------
@@ -493,10 +528,16 @@ fn it_type_role_introspection() {
         "#,
     )]);
 
-    assert!(wait_for(Duration::from_millis(500), || {
-        let lines = log_lines(&log);
-        lines.iter().any(|l| l == "modbus/client") && lines.iter().any(|l| l == "ocpp/client")
-    }));
+    wait_until_blocking(
+        "type role introspection",
+        Duration::from_millis(10),
+        Duration::from_secs(10),
+        || {
+            let lines = log_lines(&log);
+            (lines.iter().any(|l| l == "modbus/client") && lines.iter().any(|l| l == "ocpp/client"))
+                .then_some(())
+        },
+    );
 }
 
 fn registry_map(modules: Vec<(&str, Arc<dyn ModuleHost>)>) -> HashMap<String, Arc<dyn ModuleHost>> {
@@ -520,18 +561,24 @@ fn it_held_modbus_accessor_reaches_rebuilt_module() {
         "held",
         r#"r = r or C_Module:Get("evse"):Register(); r:Set("setpoint", 5)"#,
     )]);
-    assert!(wait_for(Duration::from_millis(500), || {
-        read_register(&old_mem, 0) == 5
-    }));
+    wait_until_blocking(
+        "old module register 0 set to 5",
+        Duration::from_millis(10),
+        Duration::from_secs(10),
+        || (read_register(&old_mem, 0) == 5).then_some(()),
+    );
 
     let new_mem = evse_memory();
     registry.replace_all(registry_map(vec![(
         "evse",
         Arc::new(modbus_host(new_mem.clone(), "client")),
     )]));
-    assert!(wait_for(Duration::from_millis(500), || {
-        read_register(&new_mem, 0) == 5
-    }));
+    wait_until_blocking(
+        "rebuilt module register 0 set to 5",
+        Duration::from_millis(10),
+        Duration::from_secs(10),
+        || (read_register(&new_mem, 0) == 5).then_some(()),
+    );
 }
 
 #[test]
@@ -554,15 +601,23 @@ fn it_held_ocpp_accessor_raises_after_replacement() {
 
     let (_state2, _queue2, entry2) = client_entry();
     registry.replace_all(registry_map(vec![("cs1", Arc::new(entry2))]));
-    assert!(wait_for(Duration::from_millis(500), || {
-        log_lines(&log)
-            .iter()
-            .any(|l| l.contains("module 'cs1' was replaced; call OCPP() again"))
-    }));
+    wait_until_blocking(
+        "held ocpp accessor raises after replacement",
+        Duration::from_millis(10),
+        Duration::from_secs(10),
+        || {
+            log_lines(&log)
+                .iter()
+                .any(|l| l.contains("module 'cs1' was replaced; call OCPP() again"))
+                .then_some(())
+        },
+    );
     let n = log_lines(&log).len();
-    assert!(
-        wait_for(Duration::from_millis(500), || log_lines(&log).len() > n),
-        "sim loop must keep running"
+    wait_until_blocking(
+        "sim loop must keep running",
+        Duration::from_millis(10),
+        Duration::from_secs(10),
+        || (log_lines(&log).len() > n).then_some(()),
     );
 }
 
@@ -579,9 +634,12 @@ fn it_held_ocpp_accessor_follows_in_place_rebuild() {
         "held",
         r#"o = o or C_Module:Get("cs1"):OCPP(); o:Set("Model", "x")"#,
     )]);
-    assert!(wait_for(Duration::from_millis(500), || {
-        state.read().model == "x"
-    }));
+    wait_until_blocking(
+        "state model set to x",
+        Duration::from_millis(10),
+        Duration::from_secs(10),
+        || (state.read().model == "x").then_some(()),
+    );
 
     state.write().model = String::new();
     registry.replace_all(registry_map(vec![(
@@ -592,9 +650,12 @@ fn it_held_ocpp_accessor_follows_in_place_rebuild() {
             instance_id: id,
         }),
     )]));
-    assert!(wait_for(Duration::from_millis(500), || {
-        state.read().model == "x"
-    }));
+    wait_until_blocking(
+        "state model set to x again after the rebuild",
+        Duration::from_millis(10),
+        Duration::from_secs(10),
+        || (state.read().model == "x").then_some(()),
+    );
     assert!(!log_lines(&log).iter().any(|l| l.contains("was replaced")));
 }
 
@@ -612,9 +673,12 @@ fn it_session_sim_survives_module_set_changes() {
         "count",
         r#"n = (n or 0) + 1; C_Module:Get("evse"):Register():Set("setpoint", n)"#,
     )]);
-    assert!(wait_for(Duration::from_millis(2000), || {
-        read_register(&mem, 0) >= 10
-    }));
+    wait_until_blocking(
+        "session sim survives module set changes",
+        Duration::from_millis(10),
+        Duration::from_secs(10),
+        || (read_register(&mem, 0) >= 10).then_some(()),
+    );
     let before = read_register(&mem, 0);
 
     let (_s, _q, cs) = client_entry();

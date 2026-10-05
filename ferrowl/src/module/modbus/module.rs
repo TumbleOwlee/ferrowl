@@ -559,7 +559,9 @@ impl ModbusModule {
 mod tests {
     use ferrowl_codec::Kind;
     use ferrowl_modbus::UnitId;
-    use ferrowl_test_support::{TempDirGuard, reserve_temp_dir};
+    use ferrowl_test_support::{
+        TempDirGuard, reserve_temp_dir, wait_until, wait_until_async, wait_until_blocking,
+    };
 
     #[test]
     /// MB-R-087 — effective timing uses the device config's values when set, otherwise the built-in defaults.
@@ -734,15 +736,13 @@ mod tests {
         assert!(std::sync::Arc::ptr_eq(&module.log(), &module.log()));
 
         module.start().await.expect("start");
-        let mut addr = None;
-        for _ in 0..50 {
-            addr = module.bound_addr();
-            if addr.is_some() {
-                break;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
-        }
-        let addr = addr.expect("listener must have bound within 1s");
+        let addr = wait_until(
+            "listener bind",
+            tokio::time::Duration::from_millis(20),
+            tokio::time::Duration::from_secs(10),
+            || module.bound_addr(),
+        )
+        .await;
 
         module.memory().write().write_unchecked(
             Key {
@@ -797,15 +797,13 @@ mod tests {
 
         module.start().await.expect("start");
 
-        let mut addr = None;
-        for _ in 0..50 {
-            addr = module.bound_addr();
-            if addr.is_some() {
-                break;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
-        }
-        let addr = addr.expect("listener must have bound within 1s");
+        let addr = wait_until(
+            "listener bind",
+            tokio::time::Duration::from_millis(20),
+            tokio::time::Duration::from_secs(10),
+            || module.bound_addr(),
+        )
+        .await;
         assert_ne!(addr.port(), 0, "the OS must have assigned a real port");
 
         module.stop().await.expect("stop");
@@ -996,12 +994,13 @@ mod tests {
             "claim must survive a repeat request_stop while still stopping"
         );
 
-        loop {
-            if module_a.poll_stop().await.is_some() {
-                break;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
-        }
+        let _ = wait_until_async(
+            "stop settles",
+            tokio::time::Duration::from_millis(5),
+            tokio::time::Duration::from_secs(10),
+            async || module_a.poll_stop().await,
+        )
+        .await;
         assert_eq!(registry.conflict("B", path), None);
     }
 
@@ -1177,18 +1176,6 @@ mod tests {
         raw.first().copied().unwrap_or(0)
     }
 
-    /// Poll `read_marker` for up to ~2s (well beyond the test device's 50ms sim interval) until it
-    /// equals `want`, to bound the wait for the sim thread's next cycle.
-    fn wait_for_marker(module: &super::ModbusModule, want: u16) -> bool {
-        for _ in 0..200 {
-            if read_marker(module) == want {
-                return true;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        false
-    }
-
     #[test]
     /// SC-R-026 — a Modbus sim runs from construction on an enabled script, with no network start.
     fn ut_sim_starts_at_construction_without_network_start() {
@@ -1199,7 +1186,12 @@ mod tests {
 
         // No `start()` call anywhere — the sim runs solely because a script is enabled.
         assert!(module.lua_running());
-        assert!(wait_for_marker(&module, 7));
+        wait_until_blocking(
+            "marker reaches 7",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(10),
+            || (read_marker(&module) == 7).then_some(()),
+        );
     }
 
     #[test]
@@ -1243,7 +1235,12 @@ mod tests {
             r#"C_Register:Set("marker", 7)"#.to_string(),
         )]);
         assert!(module.lua_running());
-        assert!(wait_for_marker(&module, 7));
+        wait_until_blocking(
+            "marker reaches 7",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(10),
+            || (read_marker(&module) == 7).then_some(()),
+        );
     }
 
     #[test]
@@ -1253,7 +1250,12 @@ mod tests {
 
         let device = device_with_script(vec![script(r#"C_Register:Set("marker", 1)"#, true)]);
         let mut module = ModbusModule::new(&test_spec("sim5", 15206), &device);
-        assert!(wait_for_marker(&module, 1));
+        wait_until_blocking(
+            "marker reaches 1",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(10),
+            || (read_marker(&module) == 1).then_some(()),
+        );
 
         // Fresh Lua state on restart: new code takes over immediately (proves a restart, not the
         // old thread still running the old script).
@@ -1261,7 +1263,12 @@ mod tests {
             "sim".to_string(),
             r#"C_Register:Set("marker", 2)"#.to_string(),
         )]);
-        assert!(wait_for_marker(&module, 2));
+        wait_until_blocking(
+            "marker reaches 2",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(10),
+            || (read_marker(&module) == 2).then_some(()),
+        );
     }
 
     #[tokio::test]
@@ -1303,16 +1310,16 @@ mod tests {
                 .map(|(_, _, l)| l)
                 .collect()
         };
-        let mut found = false;
-        for _ in 0..200 {
-            let lines = script_lines(&module);
-            if lines.iter().any(|l| l == "hello") && lines.iter().any(|l| l == "info-line") {
-                found = true;
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        assert!(found, "Lua print/C_Log output should reach script_log");
+        wait_until_blocking(
+            "Lua print/C_Log output should reach script_log",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(10),
+            || {
+                let lines = script_lines(&module);
+                (lines.iter().any(|l| l == "hello") && lines.iter().any(|l| l == "info-line"))
+                    .then_some(())
+            },
+        );
 
         let general_lines: Vec<String> = module
             .log
@@ -1383,12 +1390,12 @@ mod tests {
         module: &mut super::ModbusModule,
         edit: impl FnOnce(&mut super::ModbusModule),
     ) {
-        for _ in 0..200 {
-            if read_marker(module) >= 3 {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+        wait_until_blocking(
+            "counter reaches 3",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(10),
+            || (read_marker(module) >= 3).then_some(()),
+        );
         let before = read_marker(module);
         assert!(before >= 3, "counter never reached 3");
         edit(module);
@@ -1417,22 +1424,25 @@ if C_Register:Has("extra") then C_Register:Set("extra", 9) end"#,
         )]);
         let mut module = ModbusModule::new(&test_spec("sim_add", 0), &device);
         assert!(module.lua_running());
-        assert!(wait_for_marker(&module, 1), "sim never ran before the add");
+        wait_until_blocking(
+            "sim never ran before the add",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(10),
+            || (read_marker(&module) == 1).then_some(()),
+        );
+
         module.add_register(
             "extra".into(),
             String::new(),
             test_register(1, false),
             vec![],
         );
-        let mut ok = false;
-        for _ in 0..200 {
-            if read_holding(&module, 1, 1) == [9] {
-                ok = true;
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        assert!(ok, "added register never written by the running sim");
+        wait_until_blocking(
+            "added register never written by the running sim",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(10),
+            || (read_holding(&module, 1, 1) == [9]).then_some(()),
+        );
         assert!(module.lua_running());
     }
 
@@ -1447,7 +1457,13 @@ if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
             true,
         )]);
         let mut module = ModbusModule::new(&test_spec("sim_edit", 0), &device);
-        assert!(wait_for_marker(&module, 3));
+        wait_until_blocking(
+            "marker reaches 3",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(10),
+            || (read_marker(&module) == 3).then_some(()),
+        );
+
         module.memory().write().write_unchecked(
             ferrowl_modbus::Key {
                 id: ferrowl_modbus::SlaveKey {
@@ -1459,15 +1475,12 @@ if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
             &[0],
         );
         module.update_register(0, "wide".into(), "d".into(), test_register(2, true), vec![]);
-        let mut ok = false;
-        for _ in 0..200 {
-            if read_holding(&module, 2, 2) == [1, 4464] {
-                ok = true;
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        assert!(ok, "post-edit name/address/format not honoured");
+        wait_until_blocking(
+            "post-edit name/address/format not honoured",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(10),
+            || (read_holding(&module, 2, 2) == [1, 4464]).then_some(()),
+        );
         std::thread::sleep(std::time::Duration::from_millis(200));
         assert_eq!(read_marker(&module), 0, "old name must be unknown");
         assert!(module.lua_running());
@@ -1505,30 +1518,32 @@ if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
         gone.address = Some(1);
         device.definitions.insert("gone".into(), gone);
         let mut module = ModbusModule::new(&test_spec("sim_del", 0), &device);
-        assert!(
-            wait_for_marker(&module, 1),
-            "sim never ran before the delete"
+        wait_until_blocking(
+            "sim never ran before the delete",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(10),
+            || (read_marker(&module) == 1).then_some(()),
         );
+
         module.remove_register_by_name("gone");
-        let mut logged = false;
-        for _ in 0..200 {
-            let lines: Vec<String> = module
-                .script_log()
-                .blocking_read()
-                .peek_n(crate::app::LOG_SIZE)
-                .into_iter()
-                .map(|(_, _, l)| l)
-                .collect();
-            if lines
-                .iter()
-                .any(|l| l.contains("[sim]") && l.contains("unknown register 'gone'"))
-            {
-                logged = true;
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        assert!(logged, "unknown register error not logged");
+        wait_until_blocking(
+            "unknown register error not logged",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(10),
+            || {
+                let lines: Vec<String> = module
+                    .script_log()
+                    .blocking_read()
+                    .peek_n(crate::app::LOG_SIZE)
+                    .into_iter()
+                    .map(|(_, _, l)| l)
+                    .collect();
+                lines
+                    .iter()
+                    .any(|l| l.contains("[sim]") && l.contains("unknown register 'gone'"))
+                    .then_some(())
+            },
+        );
         let a = read_marker(&module);
         std::thread::sleep(std::time::Duration::from_millis(300));
         assert!(read_marker(&module) > a, "other script stopped");
@@ -1550,15 +1565,12 @@ if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
             test_register(1, false),
             vec![],
         );
-        let mut ok = false;
-        for _ in 0..200 {
-            if read_holding(&module, 1, 1) == [100] {
-                ok = true;
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        assert!(ok);
+        wait_until_blocking(
+            "holding 1 reads [100]",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(10),
+            || (read_holding(&module, 1, 1) == [100]).then_some(()),
+        );
         module.memory().write().write_unchecked(
             ferrowl_modbus::Key {
                 id: ferrowl_modbus::SlaveKey {
@@ -1586,12 +1598,13 @@ if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
         use crate::config::{Endpoint, Role};
         let device = device_with_script(vec![script(COUNTER, true)]);
         let mut module = ModbusModule::new(&test_spec("sim_reconf", 0), &device);
-        for _ in 0..200 {
-            if read_marker(&module) >= 3 {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
+        wait_until(
+            "counter reaches 3",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(10),
+            || (read_marker(&module) >= 3).then_some(()),
+        )
+        .await;
         let before = read_marker(&module);
         assert!(before >= 3);
         module
