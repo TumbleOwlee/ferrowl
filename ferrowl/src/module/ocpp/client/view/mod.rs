@@ -48,8 +48,9 @@ use crate::module::ocpp::client::backend::{
 use crate::module::ocpp::client::config::{ConfigEditDialog, ConfigKey};
 use crate::module::ocpp::client::lua_sim::{ClientFields, OcppSimHandle, ScopedActionQueue};
 use crate::module::ocpp::config::device::{ConnectorRef, OcppDeviceConfig};
-use crate::module::ocpp::config::session::OcppSpec;
+use crate::module::ocpp::config::session::{OcppRole, OcppSpec};
 use crate::module::ocpp::lock::{HasState, with_state, with_state_mut};
+use crate::module::ocpp::replace::MergedCommand;
 use crate::module::ocpp::scope::Scope;
 use crate::module::ocpp::setup_dialog::OcppSetupDialog;
 use crate::module::view::{CommandDescriptor, CommandSpec, ModuleView, SharedLog};
@@ -486,14 +487,23 @@ pub struct ClientView<V: ClientVersion> {
 enum PendingLifecycle {
     Stop,
     Restart,
-    ApplySetup(Box<SetupFollowUp>),
+    ApplySetup {
+        follow_up: Box<SetupFollowUp>,
+        /// UI-R-354 — a lifecycle command merged into the pending apply.
+        then: Option<MergedCommand>,
+    },
 }
 
-/// What an applied `:edit` still has to do once its deferred stop settles: swap the whole view
-/// (role or version changed), or adopt the new spec in place and reconnect if the station was
+/// What an applied `:edit` still has to do once its deferred stop settles: build the view that
+/// replaces this one (role or version changed), or adopt the new spec in place and reconnect if the station was
 /// connected when the edit was confirmed (OC-R-085).
 enum SetupFollowUp {
-    Replace(Box<dyn ModuleView>),
+    Replace {
+        role: OcppRole,
+        spec: Box<OcppSpec>,
+        path: String,
+        device: Box<OcppDeviceConfig>,
+    },
     InPlace {
         spec: Box<OcppSpec>,
         path: String,
