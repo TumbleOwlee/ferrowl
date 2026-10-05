@@ -159,6 +159,7 @@ Default sequential; never infer concurrency from plan shape.
 #### Every stage
 
 - Not done until the plan's Verification method has run and its outcome is reported. Waiving it requires asking.
+- Card → `done` with a draft PR open ticks that stage in `pr.md`'s `## Plan` checklist (`- [ ] s<n> — <line>` → `- [x] s<n> — <line> (<short sha>)`); a card leaving `done` (review, *PR feedback*) unticks it and drops the sha. Each change goes out with `gh pr edit <pr> --body-file <(tail -n +2 artifacts/<slug>/pr.md)`. `s0`'s tick goes in before the PR opens. A plan revision that adds or drops a stage adds or drops its line the same way.
 
 #### Sequential
 
@@ -168,7 +169,7 @@ One fresh `spec-implementer`, spawned with worktree path, plan path, its stage c
 2. Green: card → `inreview`, `status=inreview stage=s<n>`. Orchestrator runs `gauntlet.sh` and the per-stage review below.
 3. Both clean → user approval stop. Approved → same implementer (resumed) commits, answers `status=committed`.
 4. Orchestrator pushes the worktree (push is never the implementer's), re-runs `gauntlet.sh` on the pushed sha, card → `done`.
-5. **The first push (`s0`) opens the draft PR.** Orchestrator appends `Closes #<issue>` as the last line of `pr.md`'s draft form (the one PR-body line it writes itself), opens the PR from that file, records `pr` on the parent card, logs `pr=draft`. Every later push (step 4) updates it; the user reviews there (*PR feedback*).
+5. **The first push (`s0`) opens the draft PR.** Orchestrator appends `Closes #<issue>` as the last line of `pr.md`'s draft form (that line and the stage ticks, *Every stage*, are the only PR-body text it writes), opens the PR from that file, records `pr` on the parent card, logs `pr=draft`. Every later push (step 4) updates it; the user reviews there (*PR feedback*).
 
 ```sh
 gh pr create --draft --title "$(head -1 artifacts/<slug>/pr.md | sed 's/^# //')" --body-file <(tail -n +2 artifacts/<slug>/pr.md)
@@ -236,7 +237,7 @@ Before proposing a PR, whole-branch pass — cross-stage bugs, spec drift across
 ### Gate 4 — pull request. Stop for approval.
 
 - Gauntlet + gate 3 clean, *PR feedback* at `threads=0`, then **ask whether to mark the PR ready** — user may want a manual run first; don't pre-empt it.
-- `spec-author` rewrites `artifacts/<slug>/pr.md` in **full form** (content rules in its file; `.github/PULL_REQUEST_TEMPLATE.md` carries the same four sections for human PRs). User approves; orchestrator appends `Closes #<issue>` as the last line, pushes, replaces the draft's title and body, and marks it ready. Log `pr=ready` on the parent card:
+- `spec-author` rewrites `artifacts/<slug>/pr.md` in **full form** (content rules in its file; `.github/PULL_REQUEST_TEMPLATE.md` carries the same sections, less `## Plan`, for human PRs). User approves; orchestrator appends `Closes #<issue>` as the last line, pushes, replaces the draft's title and body, and marks it ready. Log `pr=ready` on the parent card:
 
 ```sh
 gh pr edit <pr> --title "$(head -1 artifacts/<slug>/pr.md | sed 's/^# //')" --body-file <(tail -n +2 artifacts/<slug>/pr.md)
@@ -275,6 +276,7 @@ No worktree on the card → died during gate 1 dialog or gate 2 planning, nothin
 | `pr=<n>` | `pr-feedback.sh fetch <n> …` — its status line's `state=`/`draft=` | closed/merged: run is over; missing: draft never opened, the next push opens it |
 | `gauntlet=pass` | `gauntlet.sh` at that sha | card overstated state |
 | stage `done` | `git branch --contains` vs feature branch | never merged; downstream plans a lie |
+| PR `## Plan` ticks | ticked boxes in the PR body vs stage cards in `done/` | tick never pushed: re-tick from the cards, `gh pr edit` |
 
 Report differences first. Agree → resume. Disagree → stop and report: card behind git is a forgotten move, correctable; card claiming what git can't show is never trusted into being true.
 
