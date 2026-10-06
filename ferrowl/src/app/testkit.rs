@@ -331,6 +331,10 @@ impl IsFocus for MockView {
 }
 
 impl ModuleView for MockView {
+    fn clone_setup(&self, name: &str) -> Box<dyn SetupView> {
+        Box::new(MockSetup::new(name))
+    }
+
     fn name(&self) -> String {
         self.name.clone()
     }

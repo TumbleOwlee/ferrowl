@@ -49,7 +49,9 @@ use crate::module::ocpp::server::backend::{
 };
 use crate::module::ocpp::server::detail::DetailOverlay;
 use crate::module::ocpp::server::lua::{ServerActionQueue, ServerStates, SharedServerStates};
+use crate::module::ocpp::setup::OcppSetupView;
 use crate::module::ocpp::setup_dialog::OcppSetupDialog;
+use crate::module::type_descriptor::SetupView;
 use crate::module::view::{CommandDescriptor, CommandSpec, ModuleView, SharedLog};
 
 /// Build the runtime RFID store from a persisted device config (CS list + per-connector lists).
@@ -535,6 +537,12 @@ where
 
     fn log(&self) -> SharedLog {
         self.log.clone()
+    }
+
+    fn clone_setup(&self, name: &str) -> Box<dyn SetupView> {
+        Box::new(OcppSetupView::from_dialog(
+            self.edit_dialog().into_clone(name),
+        ))
     }
 
     fn session_spec(&self, base: &std::path::Path) -> Option<serde_json::Value> {
@@ -1260,5 +1268,29 @@ mod tests {
 
         drop(occupier);
         v.backend.stop().await.expect("cleanup stop");
+    }
+
+    /// UI-R-366, UI-R-367 — the server clone confirms into a tab with the source's endpoint.
+    #[tokio::test]
+    async fn ut_clone_setup_round_trips_server() {
+        let spec = OcppSpec {
+            name: "csms".into(),
+            version: OcppVersion::V1_6,
+            role: OcppRole::Server,
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".into(),
+            port: 9100,
+            path: String::new(),
+            timeout_ms: None,
+            reconnect: None,
+            security: Default::default(),
+        };
+        let view = ServerView::<V1_6>::new(spec, String::new(), OcppDeviceConfig::default());
+        let base = std::path::Path::new(".");
+        let (name, factory) = view.clone_setup("csms-2").confirm().unwrap();
+        assert_eq!(name, "csms-2");
+        let mut expected = view.session_spec(base).unwrap();
+        expected["name"] = "csms-2".into();
+        assert_eq!(factory().session_spec(base).unwrap(), expected);
     }
 }

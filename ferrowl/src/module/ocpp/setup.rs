@@ -20,6 +20,10 @@ pub struct OcppSetupView {
 }
 
 impl OcppSetupView {
+    pub fn from_dialog(dialog: OcppSetupDialog) -> Self {
+        Self { dialog }
+    }
+
     pub fn new() -> Self {
         Self {
             dialog: OcppSetupDialog::new(),

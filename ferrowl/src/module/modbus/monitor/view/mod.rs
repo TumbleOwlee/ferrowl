@@ -25,6 +25,8 @@ use crate::app::Level;
 use crate::config::device::{MonitorRegisterDef, Scalar};
 use crate::config::{ModuleSpec, MonitorDeviceConfig};
 use crate::module::modbus::dialog::parse_raw_value;
+use crate::module::modbus::monitor::setup::MonitorSetupView;
+use crate::module::type_descriptor::SetupView;
 use crate::module::view::{
     CommandDescriptor, CommandFuture, CommandResult, CommandSpec, ModuleView, RefreshFuture,
     SharedLog, StopOutcome, parse_command,
@@ -850,6 +852,11 @@ enum PendingLifecycle {
 }
 
 impl ModbusMonitorModuleView {
+    /// The setup dialog `:edit` opens, prefilled from this view's spec and device.
+    fn edit_dialog(&self) -> MonitorSetupDialog {
+        MonitorSetupDialog::edit(&self.spec.name, &self.spec, &self.device)
+    }
+
     pub fn new(module: ModbusMonitorModule, spec: ModuleSpec, device: MonitorDeviceConfig) -> Self {
         Self {
             module,
@@ -1659,7 +1666,7 @@ impl ModuleView for ModbusMonitorModuleView {
             }),
 
             ModbusMonitorCmd::Edit => {
-                let dialog = MonitorSetupDialog::edit(&self.spec.name, &self.spec, &self.device);
+                let dialog = self.edit_dialog();
                 self.overlay = MonitorOverlay::EditSetup(Box::new(dialog));
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
             }
@@ -1750,6 +1757,12 @@ impl ModuleView for ModbusMonitorModuleView {
 
     fn take_stop_outcome(&mut self) -> Option<StopOutcome> {
         self.last_stop_outcome.take()
+    }
+
+    fn clone_setup(&self, name: &str) -> Box<dyn SetupView> {
+        Box::new(MonitorSetupView::from_dialog(
+            self.edit_dialog().into_clone(name),
+        ))
     }
 
     fn session_spec(&self, base: &std::path::Path) -> Option<serde_json::Value> {
@@ -5438,5 +5451,57 @@ mod tests {
             edit.dialog.label.state.focused(),
             "deleting the last alias must re-home focus onto Label"
         );
+    }
+
+    /// UI-R-366, UI-R-367 — the monitor clone dialog is the `:edit` dialog with a new name and
+    /// confirms into a monitor tab with the same endpoint.
+    #[tokio::test]
+    async fn ut_clone_setup_round_trips_monitor() {
+        // Explicit frame bits: the dialog always resolves them, so an unset source value would
+        // legitimately come back as the default.
+        let mut spec = spec();
+        spec.endpoint = Endpoint::Rtu {
+            path: "/dev/none".to_string(),
+            baud_rate: 9600,
+            parity: None,
+            data_bits: Some(8),
+            stop_bits: Some(1),
+        };
+        let module = ModbusMonitorModule::new(&spec, &device());
+        let v = ModbusMonitorModuleView::new(module, spec, device());
+        let edit = v.edit_dialog();
+        let clone = v.edit_dialog().into_clone("x-2");
+        assert_eq!(edit.path.state.input(), clone.path.state.input());
+        assert_eq!(edit.baud.state.input(), clone.baud.state.input());
+        {
+            use ferrowl_ui::widgets::GetValue;
+            assert_eq!(
+                edit.transport.state.get_value(),
+                clone.transport.state.get_value()
+            );
+            assert_eq!(
+                edit.reconnect.state.get_value(),
+                clone.reconnect.state.get_value()
+            );
+            assert_eq!(
+                edit.parity.state.get_value(),
+                clone.parity.state.get_value()
+            );
+            assert_eq!(
+                edit.data_bits.state.get_value(),
+                clone.data_bits.state.get_value()
+            );
+            assert_eq!(
+                edit.stop_bits.state.get_value(),
+                clone.stop_bits.state.get_value()
+            );
+        }
+
+        let base = std::path::Path::new(".");
+        let (name, factory) = v.clone_setup("x-2").confirm().unwrap();
+        assert_eq!(name, "x-2");
+        let mut expected = v.session_spec(base).unwrap();
+        expected["name"] = "x-2".into();
+        assert_eq!(factory().session_spec(base).unwrap(), expected);
     }
 }

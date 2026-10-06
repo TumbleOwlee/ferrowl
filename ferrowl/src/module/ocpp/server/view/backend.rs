@@ -67,6 +67,15 @@ impl<V: ServerVersion> ServerView<V>
 where
     V::Action: Clone,
 {
+    /// The setup dialog `:edit` opens, prefilled from this view's spec and device.
+    pub(super) fn edit_dialog(&self) -> crate::module::ocpp::setup_dialog::OcppSetupDialog {
+        crate::module::ocpp::setup_dialog::OcppSetupDialog::edit(
+            &self.spec,
+            &self.device_path,
+            &self.device.extra_headers,
+        )
+    }
+
     /// (Re)start the single Lua sim over the shared state registry (no-op if no enabled scripts).
     pub(super) fn start_sim(&mut self) {
         if let Some(mut sim) = self.runtime.handle.take() {
@@ -910,13 +919,7 @@ where
                     }
                 }
                 OcppServerCmd::Edit => {
-                    self.overlay = ServerOverlay::Setup(Box::new(
-                        crate::module::ocpp::setup_dialog::OcppSetupDialog::edit(
-                            &self.spec,
-                            &self.device_path,
-                            &self.device.extra_headers,
-                        ),
-                    ));
+                    self.overlay = ServerOverlay::Setup(Box::new(self.edit_dialog()));
                     CommandResult::Handled(None)
                 }
                 OcppServerCmd::WriteDevice(None) => {

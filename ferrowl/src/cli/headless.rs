@@ -1145,6 +1145,10 @@ mod tests {
         }
     }
     impl ModuleView for NeverSettlingView {
+        fn clone_setup(&self, _name: &str) -> Box<dyn crate::module::type_descriptor::SetupView> {
+            unreachable!("headless never opens a setup dialog")
+        }
+
         fn name(&self) -> String {
             "never-settles".to_string()
         }

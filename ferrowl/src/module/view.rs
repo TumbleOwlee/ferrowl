@@ -6,6 +6,7 @@ use ratatui::layout::Rect;
 
 use crate::app::{Level, LogRing};
 use crate::config::script::ScriptDef;
+use crate::module::type_descriptor::SetupView;
 
 /// Generic log channel shared between a [`ModuleView`] and the owning [`Tab`].
 pub type SharedLog = std::sync::Arc<tokio::sync::RwLock<LogRing>>;
@@ -152,6 +153,10 @@ pub trait ModuleView: SetFocus + IsFocus {
         let _ = base;
         None
     }
+
+    /// UI-R-366, UI-R-367 — a create-mode setup dialog for this module's type and role, every
+    /// field prefilled as `:edit` prefills it, the name field holding `name`.
+    fn clone_setup(&self, name: &str) -> Box<dyn SetupView>;
 
     /// Take a view that should replace this one in its tab, if the view requested one (e.g. the
     /// OCPP role was switched in the edit dialog, turning a client view into a server view).
