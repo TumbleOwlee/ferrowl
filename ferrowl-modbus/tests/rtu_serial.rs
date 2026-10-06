@@ -23,7 +23,7 @@ use tokio::time::sleep;
 type Mem = Arc<MemLock<Memory<Key<SlaveKey>>>>;
 
 fn sink() -> impl ferrowl_modbus::LogFn + Clone {
-    |_s: String| async move {}
+    |_level: ferrowl_modbus::Level, _s: String| async move {}
 }
 
 fn empty_mem() -> Mem {
@@ -163,7 +163,7 @@ async fn bridge_rtu_downstream_open_failure_answers_gateway_path_unavailable_and
     let lines = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
     let log = {
         let lines = lines.clone();
-        move |s: String| {
+        move |_level: ferrowl_modbus::Level, s: String| {
             let lines = lines.clone();
             async move {
                 lines.lock().push(s);

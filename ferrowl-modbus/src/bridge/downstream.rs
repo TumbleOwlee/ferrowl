@@ -1,4 +1,5 @@
 use crate::LogFn;
+use crate::log::Level;
 use rust_modbus::{
     Client, ClientFraming, ClientTransport, ExceptionCode, RequestPdu, ResponsePdu, UnitId,
 };
@@ -63,12 +64,13 @@ where
                 loop {
                     match connect().await {
                         Ok(client) => {
-                            log.invoke("downstream connected".to_string()).await;
+                            log.invoke(Level::Info, "downstream connected".to_string())
+                                .await;
                             *state.lock().await = Some(client);
                             break;
                         }
                         Err(e) => {
-                            log.invoke(format!(
+                            log.invoke(Level::Error, format!(
                                 "{ERROR_PREFIX} downstream connect failed: {e}. Reconnecting in {}s.",
                                 backoff.as_secs()
                             ))
@@ -135,13 +137,15 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 
     /// A `LogFn` that records every line into a shared buffer for assertions.
-    fn recording_log() -> (impl LogFn + Clone, Arc<parking_lot::Mutex<Vec<String>>>) {
-        let lines = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
+    type Lines = Arc<parking_lot::Mutex<Vec<(crate::Level, String)>>>;
+
+    fn recording_log() -> (impl LogFn + Clone, Lines) {
+        let lines = Arc::new(parking_lot::Mutex::new(Vec::<(crate::Level, String)>::new()));
         let sink = lines.clone();
-        let log = move |s: String| {
+        let log = move |level: crate::Level, s: String| {
             let sink = sink.clone();
             async move {
-                sink.lock().push(s);
+                sink.lock().push((level, s));
             }
         };
         (log, lines)
@@ -180,11 +184,12 @@ mod tests {
         assert_eq!(result, Err(ExceptionCode::GatewayPathUnavailable));
     }
 
-    /// BR-R-007 — a successful downstream exchange relays the response unmodified.
+    /// BR-R-007, BR-R-031, MB-R-259 — a successful downstream exchange relays the response
+    /// unmodified; the connect that preceded it was logged at Info.
     #[tokio::test]
     async fn ut_forward_success_relays_response_unmodified() {
         let (client_end, mut peer) = tokio::io::duplex(256);
-        let (log, _lines) = recording_log();
+        let (log, lines) = recording_log();
         let handle: DownstreamHandle<FrameTransport<DuplexStream, Rtu>, Rtu> =
             DownstreamHandle::spawn(
                 {
@@ -230,9 +235,12 @@ mod tests {
         );
 
         assert_eq!(result, Ok(Some(expected)));
+        assert!(lines.lock().iter().any(|(level, l)| {
+            *level == crate::Level::Info && l.contains("downstream connected")
+        }));
     }
 
-    /// BR-R-018, BR-R-006 — a downstream timeout answers `GatewayTargetDeviceFailedToRespond`
+    /// BR-R-018, BR-R-006, BR-R-031, MB-R-260 — a downstream timeout answers `GatewayTargetDeviceFailedToRespond`
     /// and wakes the reconnector for a second connect attempt (mirrors MB-R-050–056's
     /// backoff-driven reconnect); a subsequent connect failure logs a `[bridge]`-prefixed
     /// failure line (`forward` itself carries no `log`, only the reconnector does — see
@@ -293,7 +301,10 @@ mod tests {
             "expected the reconnector to attempt a second connect"
         );
         assert!(
-            lines.lock().iter().any(|l| l.starts_with(ERROR_PREFIX)),
+            lines
+                .lock()
+                .iter()
+                .any(|(level, l)| *level == crate::Level::Error && l.starts_with(ERROR_PREFIX)),
             "expected a [bridge]-prefixed failure line: {:?}",
             lines.lock()
         );

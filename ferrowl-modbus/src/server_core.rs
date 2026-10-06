@@ -1,6 +1,7 @@
 //! Transport-agnostic Modbus server request handler shared by the TCP and RTU servers.
 
 use crate::common::serial_config_from;
+use crate::log::Level;
 use crate::tcp::Config;
 use crate::tcp::tls::build_server_tls_config;
 use crate::{
@@ -40,11 +41,14 @@ where
     T: KeyParams,
     L: LogFn + Clone,
 {
-    log.invoke(format!(
-        "{name} request received for slave ID {slave} and range [{}, {}).",
-        addr,
-        addr as usize + cnt as usize
-    ))
+    log.invoke(
+        Level::Info,
+        format!(
+            "{name} request received for slave ID {slave} and range [{}, {}).",
+            addr,
+            addr as usize + cnt as usize
+        ),
+    )
     .await;
     let key = Key {
         id: T::from_slave_fn(slave, fc),
@@ -57,22 +61,28 @@ where
     match result {
         Ok(v) => {
             if verbose {
-                log.invoke(format!(
-                    "{name} request for slave ID {slave} and range [{}, {}) successful.",
-                    addr,
-                    addr as usize + cnt as usize
-                ))
+                log.invoke(
+                    Level::Info,
+                    format!(
+                        "{name} request for slave ID {slave} and range [{}, {}) successful.",
+                        addr,
+                        addr as usize + cnt as usize
+                    ),
+                )
                 .await;
             }
             Ok(v)
         }
         Err(e) => {
             if verbose {
-                log.invoke(format!(
-                    "{name} request for slave ID {slave} and range [{}, {}) failed: {e}.",
-                    addr,
-                    addr as usize + cnt as usize
-                ))
+                log.invoke(
+                    Level::Warning,
+                    format!(
+                        "{name} request for slave ID {slave} and range [{}, {}) failed: {e}.",
+                        addr,
+                        addr as usize + cnt as usize
+                    ),
+                )
                 .await;
             }
             Err(ExceptionCode::IllegalDataAddress)
@@ -99,11 +109,14 @@ where
     T: KeyParams,
     L: LogFn + Clone,
 {
-    log.invoke(format!(
-        "{name} request received for slave ID {slave}, range [{}, {}), and values {values:?}.",
-        addr,
-        addr as usize + values.len()
-    ))
+    log.invoke(
+        Level::Info,
+        format!(
+            "{name} request received for slave ID {slave}, range [{}, {}), and values {values:?}.",
+            addr,
+            addr as usize + values.len()
+        ),
+    )
     .await;
     let key = Key {
         id: T::from_slave_fn(slave, fc),
@@ -116,7 +129,7 @@ where
     match result {
         Ok(()) => {
             if verbose {
-                log.invoke(format!(
+                log.invoke(Level::Info, format!(
                     "{name} request for slave ID {slave}, range [{}, {}), and values {values:?} successful.",
                     addr,
                     addr as usize + values.len()
@@ -127,7 +140,7 @@ where
         }
         Err(e) => {
             if verbose {
-                log.invoke(format!(
+                log.invoke(Level::Warning, format!(
                     "{name} request for slave ID {slave}, range [{}, {}), and values {values:?} failed: {e}.",
                     addr,
                     addr as usize + values.len()
@@ -160,9 +173,10 @@ where
     L: LogFn + Clone,
     V: Display,
 {
-    log.invoke(format!(
-        "{name} request received for slave ID {slave}, address {addr}, and value {value}."
-    ))
+    log.invoke(
+        Level::Info,
+        format!("{name} request received for slave ID {slave}, address {addr}, and value {value}."),
+    )
     .await;
     let key = Key {
         id: T::from_slave_fn(slave, fc),
@@ -175,7 +189,7 @@ where
     match result {
         Ok(()) => {
             if verbose {
-                log.invoke(format!(
+                log.invoke(Level::Info, format!(
                     "{name} request for slave ID {slave}, address {addr}, and value {value} successful."
                 ))
                 .await;
@@ -184,7 +198,7 @@ where
         }
         Err(e) => {
             if verbose {
-                log.invoke(format!(
+                log.invoke(Level::Warning, format!(
                     "{name} request for slave ID {slave}, address {addr}, and value {value} failed: {e}."
                 ))
                 .await;
@@ -372,7 +386,7 @@ where
         } => {
             let (read_addr, cnt, write_addr) = (read_address.0, read_quantity.0, write_address.0);
             let values: Vec<u16> = registers.iter().map(|v| v.0).collect();
-            log.invoke(format!(
+            log.invoke(Level::Info, format!(
                 "ReadWriteMultipleRegisrters request received for slave ID {slave}, read address {read_addr}, count {cnt}, write address {write_addr}, and values {values:?}."
             ))
             .await;
@@ -422,7 +436,7 @@ where
             match outcome {
                 Outcome::NotAddressable(e) => {
                     if verbose {
-                        log.invoke(format!(
+                        log.invoke(Level::Warning, format!(
                             "ReadWriteMultipleRegisrters request for slave ID {slave}, read address {read_addr}, count {cnt}, write address {write_addr}, and values {values:?} failed: {e}."
                         ))
                         .await;
@@ -431,7 +445,7 @@ where
                 }
                 Outcome::Rejected(e) => {
                     if verbose {
-                        log.invoke(format!(
+                        log.invoke(Level::Warning, format!(
                             "ReadWriteMultipleRegisrters request for slave ID {slave}, read address {read_addr}, count {cnt}, write address {write_addr}, and values {values:?} failed: {e}."
                         ))
                         .await;
@@ -440,7 +454,7 @@ where
                 }
                 Outcome::Ok(v) => {
                     if verbose {
-                        log.invoke(format!(
+                        log.invoke(Level::Info, format!(
                             "ReadWriteMultipleRegisrters request for slave ID {slave}, read address {read_addr}, count {cnt}, write address {write_addr}, and values {values:?} successful."
                         ))
                         .await;
@@ -457,10 +471,13 @@ where
         // function code the frame layer learns to decode later cannot silently acquire a
         // different answer here. MB-R-066 still requires the received line.
         other => {
-            log.invoke(format!(
-                "{} request received for slave ID {slave}. Unsupported function.",
-                other.function(),
-            ))
+            log.invoke(
+                Level::Warning,
+                format!(
+                    "{} request received for slave ID {slave}. Unsupported function.",
+                    other.function(),
+                ),
+            )
             .await;
             Err(ExceptionCode::IllegalFunction)
         }
@@ -618,7 +635,10 @@ where
     async fn on_error(&self, _conn: &Connection, error: &rust_modbus::Error) {
         if self.verbose {
             self.log
-                .invoke(format!("Server processing failed. [{error}]"))
+                .invoke(
+                    Level::Warning,
+                    format!("Server processing failed. [{error}]"),
+                )
                 .await;
         }
     }
@@ -650,7 +670,10 @@ where
             other => other.to_string(),
         };
         self.log
-            .invoke(format!("TLS handshake with {peer} failed: {detail}."))
+            .invoke(
+                Level::Error,
+                format!("TLS handshake with {peer} failed: {detail}."),
+            )
             .await;
     }
 }
@@ -883,6 +906,7 @@ where
                         Ok(Some((tls_config, used_fallback))) => {
                             if used_fallback {
                                 log.invoke(
+                                    Level::Info,
                                     "No cert_file/key_file/self_signed configured for this TLS \
                                      server; falling back to an ephemeral self-signed certificate."
                                         .to_string(),
@@ -956,7 +980,9 @@ where
     };
 
     let result = run_with_backoff(BackoffPolicy::default(), attempt, wait_abortable).await;
-    status.invoke("Server stopped".to_string()).await;
+    status
+        .invoke(Level::Info, "Server stopped".to_string())
+        .await;
     result
 }
 
@@ -993,97 +1019,98 @@ where
     let receiver = AsyncMutex::new(receiver);
     let activity = Arc::new(AtomicBool::new(false));
 
-    let attempt = || {
-        let config = config.clone();
-        let memory = memory.clone();
-        let log = log.clone();
-        let activity = activity.clone();
-        let receiver = &receiver;
-        let path_conflict = path_conflict.clone();
-        let open = open.clone();
-        async move {
-            activity.store(false, Ordering::Relaxed);
-            let guard = config.read().await;
-            let reconnect = guard.reconnect;
-            let serial = match serial_config_from(
-                guard.baud_rate,
-                guard.data_bits,
-                guard.stop_bits,
-                guard.parity.as_deref(),
-            ) {
-                Ok(serial) => serial,
-                Err(e) => {
-                    return AttemptOutcome::Failed {
-                        error: e.into(),
-                        reconnect: false, // a bad serial-config value never fixes itself
-                        reset: false,
-                    };
-                }
-            };
-            let path = guard.path.clone();
-            drop(guard);
-            let expanded = ferrowl_util::path::expand(&path);
-            let expanded = expanded.to_string_lossy().into_owned();
-            if let Some(other) = path_conflict.check(&expanded) {
-                log.invoke(format!(
+    let attempt =
+        || {
+            let config = config.clone();
+            let memory = memory.clone();
+            let log = log.clone();
+            let activity = activity.clone();
+            let receiver = &receiver;
+            let path_conflict = path_conflict.clone();
+            let open = open.clone();
+            async move {
+                activity.store(false, Ordering::Relaxed);
+                let guard = config.read().await;
+                let reconnect = guard.reconnect;
+                let serial = match serial_config_from(
+                    guard.baud_rate,
+                    guard.data_bits,
+                    guard.stop_bits,
+                    guard.parity.as_deref(),
+                ) {
+                    Ok(serial) => serial,
+                    Err(e) => {
+                        return AttemptOutcome::Failed {
+                            error: e.into(),
+                            reconnect: false, // a bad serial-config value never fixes itself
+                            reset: false,
+                        };
+                    }
+                };
+                let path = guard.path.clone();
+                drop(guard);
+                let expanded = ferrowl_util::path::expand(&path);
+                let expanded = expanded.to_string_lossy().into_owned();
+                if let Some(other) = path_conflict.check(&expanded) {
+                    log.invoke(Level::Warning, format!(
                     "Serial path '{expanded}' is already in use by module '{other}' in this \
                      session; skipping open."
                 ))
                 .await;
-                return AttemptOutcome::Failed {
-                    error: Error::PathConflict {
-                        path: expanded,
-                        other,
-                    },
-                    reconnect,
-                    reset: false,
-                };
-            }
-            let mut receiver = receiver.lock().await;
-            let mut parked: std::collections::VecDeque<ServerCommand> =
-                std::collections::VecDeque::new();
-            // MB-E-091 — `open_serial` is synchronous with no await point, so this race cannot
-            // preempt it mid-call; a terminate is honored at the first surrounding await instead.
-            let open_result = crate::common::race_terminate(
-                async { open_serial::<F>(&path, serial) },
-                &mut receiver,
-                |_: &ServerCommand| true,
-                &mut parked,
-            )
-            .await;
-            debug_assert!(
-                parked.is_empty(),
-                "ServerCommand has only one variant; nothing is ever parked"
-            );
-            match open_result {
-                None => AttemptOutcome::Done,
-                Some(Err(e)) => AttemptOutcome::Failed {
-                    error: SerialError::Error(e).into(),
-                    reconnect,
-                    reset: false,
-                },
-                Some(Ok(transport)) => {
-                    open.set(true);
-                    let server = ModbusServer::new(
-                        Server::new(memory.clone(), log.clone(), verbose, physical_serial)
-                            .with_reset_on(activity.clone(), ResetOn::Request),
-                    );
-                    let handle = server.handle();
-                    let end =
-                        drive_serve(server.serve_link(transport), handle, &mut receiver).await;
-                    open.set(false);
-                    match end {
-                        ServeEnd::Terminated => AttemptOutcome::Done,
-                        ServeEnd::Failed(e) => AttemptOutcome::Failed {
-                            error: Error::Server(e),
-                            reconnect,
-                            reset: activity.load(Ordering::Relaxed),
+                    return AttemptOutcome::Failed {
+                        error: Error::PathConflict {
+                            path: expanded,
+                            other,
                         },
+                        reconnect,
+                        reset: false,
+                    };
+                }
+                let mut receiver = receiver.lock().await;
+                let mut parked: std::collections::VecDeque<ServerCommand> =
+                    std::collections::VecDeque::new();
+                // MB-E-091 — `open_serial` is synchronous with no await point, so this race cannot
+                // preempt it mid-call; a terminate is honored at the first surrounding await instead.
+                let open_result = crate::common::race_terminate(
+                    async { open_serial::<F>(&path, serial) },
+                    &mut receiver,
+                    |_: &ServerCommand| true,
+                    &mut parked,
+                )
+                .await;
+                debug_assert!(
+                    parked.is_empty(),
+                    "ServerCommand has only one variant; nothing is ever parked"
+                );
+                match open_result {
+                    None => AttemptOutcome::Done,
+                    Some(Err(e)) => AttemptOutcome::Failed {
+                        error: SerialError::Error(e).into(),
+                        reconnect,
+                        reset: false,
+                    },
+                    Some(Ok(transport)) => {
+                        open.set(true);
+                        let server = ModbusServer::new(
+                            Server::new(memory.clone(), log.clone(), verbose, physical_serial)
+                                .with_reset_on(activity.clone(), ResetOn::Request),
+                        );
+                        let handle = server.handle();
+                        let end =
+                            drive_serve(server.serve_link(transport), handle, &mut receiver).await;
+                        open.set(false);
+                        match end {
+                            ServeEnd::Terminated => AttemptOutcome::Done,
+                            ServeEnd::Failed(e) => AttemptOutcome::Failed {
+                                error: Error::Server(e),
+                                reconnect,
+                                reset: activity.load(Ordering::Relaxed),
+                            },
+                        }
                     }
                 }
             }
-        }
-    };
+        };
 
     let wait_abortable = |backoff: std::time::Duration| {
         let receiver = &receiver;
@@ -1094,7 +1121,9 @@ where
     };
 
     let result = run_with_backoff(BackoffPolicy::default(), attempt, wait_abortable).await;
-    status.invoke("Server stopped".to_string()).await;
+    status
+        .invoke(Level::Info, "Server stopped".to_string())
+        .await;
     result
 }
 
@@ -1140,13 +1169,107 @@ mod tests {
     fn recording_log() -> (impl LogFn + Clone, Arc<Mutex<Vec<String>>>) {
         let buf = Arc::new(Mutex::new(Vec::<String>::new()));
         let sink = buf.clone();
-        let log = move |s: String| {
+        let log = move |_level: crate::Level, s: String| {
             let sink = sink.clone();
             async move {
                 sink.lock().unwrap().push(s);
             }
         };
         (log, buf)
+    }
+
+    /// Like [`recording_log`], but keeps each line's level.
+    type Levels = Arc<Mutex<Vec<(crate::Level, String)>>>;
+
+    fn recording_levels() -> (impl LogFn + Clone, Levels) {
+        let buf = Arc::new(Mutex::new(Vec::<(crate::Level, String)>::new()));
+        let sink = buf.clone();
+        let log = move |level: crate::Level, s: String| {
+            let sink = sink.clone();
+            async move {
+                sink.lock().unwrap().push((level, s));
+            }
+        };
+        (log, buf)
+    }
+
+    fn has_level(buf: &Levels, level: crate::Level, needle: &str) -> bool {
+        buf.lock()
+            .unwrap()
+            .iter()
+            .any(|(l, s)| *l == level && s.contains(needle))
+    }
+
+    #[tokio::test]
+    /// MB-R-258, MB-R-275, MB-R-276 — request traces and successes log at Info; a rejected
+    /// request and an unsupported function log at Warning.
+    async fn ut_request_lines_carry_category_levels() {
+        let mem = seeded(
+            RegKind::HoldingRegister,
+            CellType::Register,
+            4,
+            &[1, 2, 3, 4],
+        );
+        let (log, buf) = recording_levels();
+        let ok = RequestPdu::ReadHoldingRegisters {
+            address: Address(0),
+            quantity: Quantity(2),
+        };
+        handle_request::<SlaveKey, _>(UnitId(1), ok, &mem, &log, true, false)
+            .await
+            .unwrap();
+        assert!(has_level(&buf, crate::Level::Info, "request received"));
+        assert!(has_level(&buf, crate::Level::Info, "successful."));
+
+        let bad = RequestPdu::ReadHoldingRegisters {
+            address: Address(10),
+            quantity: Quantity(2),
+        };
+        let _ = handle_request::<SlaveKey, _>(UnitId(1), bad, &mem, &log, true, false).await;
+        assert!(has_level(&buf, crate::Level::Warning, "failed"));
+
+        let _ = handle_request::<SlaveKey, _>(
+            UnitId(1),
+            RequestPdu::ReportServerId,
+            &mem,
+            &log,
+            true,
+            false,
+        )
+        .await;
+        assert!(has_level(
+            &buf,
+            crate::Level::Warning,
+            "Unsupported function"
+        ));
+    }
+
+    #[tokio::test]
+    /// MB-R-258, MB-R-270, MB-R-276 — a frame the server cannot process logs at Warning.
+    async fn ut_processing_failure_logs_warning() {
+        use tokio::io::AsyncWriteExt;
+        let mem = seeded_memory(&[10, 20]);
+        let (log, buf) = recording_levels();
+        let server = Server::new(mem, log, true, false);
+        let (server_end, mut client_end) = tokio::io::duplex(256);
+        let modbus = ModbusServer::new(server);
+        let handle = modbus.handle();
+        let serving = tokio::spawn(modbus.serve_link(FrameTransport::<_, Tcp>::new(server_end)));
+
+        // An MBAP header announcing a PDU length no frame can have.
+        client_end
+            .write_all(&[0, 1, 0, 0, 0xFF, 0xFF, 1, 3])
+            .await
+            .unwrap();
+        wait_until(
+            "processing failure logged",
+            Duration::from_millis(10),
+            Duration::from_secs(5),
+            || has_level(&buf, crate::Level::Warning, "Server processing failed").then_some(()),
+        )
+        .await;
+        handle.shutdown().await;
+        let _ = serving.await;
     }
 
     #[tokio::test]

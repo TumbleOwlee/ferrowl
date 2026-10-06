@@ -1357,7 +1357,10 @@ impl ModuleView for ModbusMonitorModuleView {
                         let endpoint = self.spec.endpoint.to_string();
                         let (level, msg) = match self
                             .module
-                            .start(move |_s: String| async {}, move |_s: String| async {})
+                            .start(
+                                move |_level: ferrowl_modbus::Level, _s: String| async {},
+                                move |_level: ferrowl_modbus::Level, _s: String| async {},
+                            )
                             .await
                         {
                             Ok(()) => (Level::Info, format!("Restarted monitor on {endpoint}")),
@@ -1381,7 +1384,10 @@ impl ModuleView for ModbusMonitorModuleView {
                         }
                         let (level, msg) = if let Err(e) = self
                             .module
-                            .start(move |_s: String| async {}, move |_s: String| async {})
+                            .start(
+                                move |_level: ferrowl_modbus::Level, _s: String| async {},
+                                move |_level: ferrowl_modbus::Level, _s: String| async {},
+                            )
                             .await
                         {
                             (Level::Error, format!(":reload start error: {e}"))
@@ -1428,7 +1434,10 @@ impl ModuleView for ModbusMonitorModuleView {
                             Some(MergedCommand::Start) => Some(
                                 match self
                                     .module
-                                    .start(move |_s: String| async {}, move |_s: String| async {})
+                                    .start(
+                                        move |_level: ferrowl_modbus::Level, _s: String| async {},
+                                        move |_level: ferrowl_modbus::Level, _s: String| async {},
+                                    )
                                     .await
                                 {
                                     Ok(()) => {
@@ -1440,7 +1449,10 @@ impl ModuleView for ModbusMonitorModuleView {
                             Some(MergedCommand::Restart) => Some(
                                 match self
                                     .module
-                                    .start(move |_s: String| async {}, move |_s: String| async {})
+                                    .start(
+                                        move |_level: ferrowl_modbus::Level, _s: String| async {},
+                                        move |_level: ferrowl_modbus::Level, _s: String| async {},
+                                    )
                                     .await
                                 {
                                     Ok(()) => {
@@ -1593,7 +1605,10 @@ impl ModuleView for ModbusMonitorModuleView {
                 let endpoint = self.spec.endpoint.to_string();
                 match self
                     .module
-                    .start(move |_s: String| async {}, move |_s: String| async {})
+                    .start(
+                        move |_level: ferrowl_modbus::Level, _s: String| async {},
+                        move |_level: ferrowl_modbus::Level, _s: String| async {},
+                    )
                     .await
                 {
                     Ok(()) => CommandResult::Handled(Some((
@@ -2120,7 +2135,10 @@ mod tests {
         let module = ModbusMonitorModule::new(&spec(), &device);
         let mut v = ModbusMonitorModuleView::new(module, spec(), device);
         v.module
-            .start(|_: String| async {}, |_: String| async {})
+            .start(
+                |_: ferrowl_modbus::Level, _: String| async {},
+                |_: ferrowl_modbus::Level, _: String| async {},
+            )
             .await
             .expect("start always succeeds for a valid transport");
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
@@ -2159,7 +2177,10 @@ mod tests {
         let module = ModbusMonitorModule::new(&spec(), &device);
         let mut v = ModbusMonitorModuleView::new(module, spec(), device);
         v.module
-            .start(|_: String| async {}, |_: String| async {})
+            .start(
+                |_: ferrowl_modbus::Level, _: String| async {},
+                |_: ferrowl_modbus::Level, _: String| async {},
+            )
             .await
             .expect("start always succeeds for a valid transport");
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -2198,7 +2219,10 @@ mod tests {
         let module = ModbusMonitorModule::new(&spec(), &device);
         let mut v = ModbusMonitorModuleView::new(module, spec(), device);
         v.module
-            .start(|_: String| async {}, |_: String| async {})
+            .start(
+                |_: ferrowl_modbus::Level, _: String| async {},
+                |_: ferrowl_modbus::Level, _: String| async {},
+            )
             .await
             .expect("start always succeeds for a valid transport");
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -3167,7 +3191,10 @@ mod tests {
         let module = ModbusMonitorModule::new(&spec(), &device);
         let mut v = ModbusMonitorModuleView::new(module, spec(), device);
         v.module
-            .start(|_: String| async {}, |_: String| async {})
+            .start(
+                |_: ferrowl_modbus::Level, _: String| async {},
+                |_: ferrowl_modbus::Level, _: String| async {},
+            )
             .await
             .expect("start always succeeds for a valid transport");
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -3212,7 +3239,10 @@ mod tests {
         let module = ModbusMonitorModule::new(&spec(), &device);
         let mut v = ModbusMonitorModuleView::new(module, spec(), device);
         v.module
-            .start(|_: String| async {}, |_: String| async {})
+            .start(
+                |_: ferrowl_modbus::Level, _: String| async {},
+                |_: ferrowl_modbus::Level, _: String| async {},
+            )
             .await
             .expect("start always succeeds for a valid transport");
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -3272,7 +3302,10 @@ mod tests {
         let module = ModbusMonitorModule::new(&spec(), &device);
         let mut v = ModbusMonitorModuleView::new(module, spec(), device);
         v.module
-            .start(|_: String| async {}, |_: String| async {})
+            .start(
+                |_: ferrowl_modbus::Level, _: String| async {},
+                |_: ferrowl_modbus::Level, _: String| async {},
+            )
             .await
             .expect("start always succeeds for a valid transport");
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -3331,7 +3364,10 @@ mod tests {
         let records_before = v.module.records();
         let log_before = v.module.log();
         v.module
-            .start(|_: String| async {}, |_: String| async {})
+            .start(
+                |_: ferrowl_modbus::Level, _: String| async {},
+                |_: ferrowl_modbus::Level, _: String| async {},
+            )
             .await
             .expect("start always succeeds for a valid transport");
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -3409,7 +3445,10 @@ mod tests {
         let module = ModbusMonitorModule::new(&s, &device);
         let mut v = ModbusMonitorModuleView::new(module, s.clone(), device.clone());
         v.module
-            .start(|_: String| async {}, |_: String| async {})
+            .start(
+                |_: ferrowl_modbus::Level, _: String| async {},
+                |_: ferrowl_modbus::Level, _: String| async {},
+            )
             .await
             .expect("start always succeeds for a valid transport");
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -3582,7 +3621,10 @@ mod tests {
         let module = ModbusMonitorModule::new(&spec(), &device);
         let mut v = ModbusMonitorModuleView::new(module, spec(), device);
         v.module
-            .start(|_: String| async {}, |_: String| async {})
+            .start(
+                |_: ferrowl_modbus::Level, _: String| async {},
+                |_: ferrowl_modbus::Level, _: String| async {},
+            )
             .await
             .expect("start always succeeds for a valid transport");
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -3637,7 +3679,10 @@ mod tests {
         let registry = SerialPathRegistry::new();
         v.set_serial_paths(registry.clone());
         v.module
-            .start(|_: String| async {}, |_: String| async {})
+            .start(
+                |_: ferrowl_modbus::Level, _: String| async {},
+                |_: ferrowl_modbus::Level, _: String| async {},
+            )
             .await
             .expect("start always succeeds for a valid transport");
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;

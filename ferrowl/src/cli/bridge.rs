@@ -13,9 +13,16 @@ use crate::config::ClientOrServer;
 use crate::view::log::format_timestamp;
 
 const SOURCE: &str = "bridge";
-/// BR-R-013 — the bridge's own error-line prefix, unlike headless `run`'s `--exit-on-error`
-/// (CL-R-031), which keys off log level rather than a prefix.
+/// BR-R-013 — the bridge's own error-line prefix; with the producer-chosen level it decides
+/// `--exit-on-error` (BR-R-026), where headless `run` keys off the level alone (CL-R-031).
 const ERROR_PREFIX: &str = ferrowl_modbus::bridge::ERROR_PREFIX;
+
+/// BR-R-026, CL-R-060 — a drained line trips `--exit-on-error` only when it is `[bridge]`-sourced
+/// and its producer-chosen level is Error; upstream-leg server lines share the channel but never
+/// exit.
+fn is_exit_trigger(level: ferrowl_modbus::Level, msg: &str) -> bool {
+    level == ferrowl_modbus::Level::Error && msg.starts_with(ERROR_PREFIX)
+}
 
 /// Run the bridge described by `args`. Returns the process exit code; never panics on the
 /// relay's own runtime errors (those surface as `[bridge]`-prefixed log lines), only on setup
@@ -49,11 +56,11 @@ pub async fn run(args: &BridgeArgs) -> i32 {
         }
     };
 
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    let log = move |msg: String| {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(ferrowl_modbus::Level, String)>();
+    let log = move |level: ferrowl_modbus::Level, msg: String| {
         let tx = tx.clone();
         async move {
-            let _ = tx.send(msg);
+            let _ = tx.send((level, msg));
         }
     };
 
@@ -80,7 +87,7 @@ pub async fn run(args: &BridgeArgs) -> i32 {
     loop {
         tokio::select! {
             msg = rx.recv() => {
-                let Some(msg) = msg else { break };
+                let Some((level, msg)) = msg else { break };
                 let line = format!(
                     "[{}] {SOURCE} | {msg}",
                     format_timestamp(crate::time::now_unix_ms())
@@ -89,7 +96,7 @@ pub async fn run(args: &BridgeArgs) -> i32 {
                 if let Some(f) = log_file.as_mut() {
                     let _ = writeln!(f, "{line}");
                 }
-                if args.exit_on_error && msg.starts_with(ERROR_PREFIX) {
+                if args.exit_on_error && is_exit_trigger(level, &msg) {
                     exit_code = 3;
                     break;
                 }
@@ -217,8 +224,8 @@ mod tests {
         )
         .spawn(
             receiver,
-            |_s: String| async move {},
-            |_s: String| async move {},
+            |_level: ferrowl_modbus::Level, _s: String| async move {},
+            |_level: ferrowl_modbus::Level, _s: String| async move {},
         )
         .await
         .expect("downstream server failed to start");
@@ -274,7 +281,11 @@ mod tests {
             mem,
             ferrowl_modbus::tcp::new_self_signed_cache(),
         )
-        .spawn(rx, |_s: String| async move {}, |_s: String| async move {})
+        .spawn(
+            rx,
+            |_level: ferrowl_modbus::Level, _s: String| async move {},
+            |_level: ferrowl_modbus::Level, _s: String| async move {},
+        )
         .await
         .expect("client failed to connect to upstream");
         (tx, handle)
@@ -364,11 +375,25 @@ mod tests {
         assert_eq!(exit_code, 0);
     }
 
-    /// BR-R-026 — with `--exit-on-error` set and no downstream listening, a forwarded request
-    /// answers `GatewayPathUnavailable` and logs a `[bridge]`-prefixed line, making the run
-    /// exit 3.
+    /// BR-R-026, CL-R-060 — only a `[bridge]`-prefixed line whose producer level is Error trips
+    /// `--exit-on-error`: a prefixed Warning and an unprefixed upstream-leg Error do not.
+    #[test]
+    fn ut_exit_trigger_tests_prefix_and_level() {
+        use ferrowl_modbus::Level;
+        let prefixed = format!("{ERROR_PREFIX} downstream connect failed: refused.");
+        assert!(is_exit_trigger(Level::Error, &prefixed));
+        assert!(!is_exit_trigger(Level::Warning, &prefixed));
+        assert!(!is_exit_trigger(
+            Level::Error,
+            "TLS handshake with 127.0.0.1:1 failed: bad certificate."
+        ));
+    }
+
+    /// BR-R-026, CL-R-060 — with `--exit-on-error` set and no downstream listening, a forwarded
+    /// request answers `GatewayPathUnavailable` and logs a `[bridge]`-prefixed Error line, making
+    /// the run exit 3.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn ut_bridge_exit_on_error_flags_bridge_prefixed_line() {
+    async fn ut_bridge_exit_on_error_tests_prefix_and_level() {
         // Nothing listens on this downstream port.
         let downstream_port = reserve_tcp_port().release();
         let upstream_port = reserve_tcp_port().release();

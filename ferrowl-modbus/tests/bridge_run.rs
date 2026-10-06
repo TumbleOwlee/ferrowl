@@ -23,7 +23,7 @@ use tokio::sync::RwLock as TokioRwLock;
 use tokio::sync::mpsc;
 
 fn sink() -> impl ferrowl_modbus::LogFn + Clone {
-    |_s: String| async move {}
+    |_level: ferrowl_modbus::Level, _s: String| async move {}
 }
 
 fn tcp_config(port: u16) -> ferrowl_modbus::tcp::Config {

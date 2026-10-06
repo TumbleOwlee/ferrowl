@@ -3,6 +3,7 @@
 use super::record::{MonitorRecord, RecordStatus, SharedRecordLog, TableShape};
 use super::table::SharedObservedTable;
 use crate::common::serial_config_from;
+use crate::log::Level;
 use crate::server_core::wait_reconnect_backoff;
 use crate::{
     ConnectedCell, Error, Key, LogFn, PathConflictCell, SerialError, ServerCommand, SlaveKey,
@@ -54,7 +55,8 @@ where
     match state {
         MatchState::ExpectRequest => match F::decode_request(&bytes) {
             Err(e) => {
-                log.invoke(format!("malformed frame discarded: {e}")).await;
+                log.invoke(Level::Warning, format!("malformed frame discarded: {e}"))
+                    .await;
                 MatchState::ExpectRequest
             }
             Ok((slave, request)) => handle_new_request(slave, request, log, table, records).await,
@@ -79,8 +81,11 @@ where
                     handle_new_request(new_slave, new_request, log, table, records).await
                 }
                 Err(_) => {
-                    log.invoke("malformed frame discarded while awaiting response".to_string())
-                        .await;
+                    log.invoke(
+                        Level::Warning,
+                        "malformed frame discarded while awaiting response".to_string(),
+                    )
+                    .await;
                     MatchState::ExpectResponse {
                         slave,
                         function,
@@ -134,15 +139,16 @@ async fn log_complete<L: LogFn>(
         }
         None => format!("slave {slave} complete (broadcast): request={request:?}"),
     };
-    log.invoke(msg).await;
+    log.invoke(Level::Info, msg).await;
 }
 
 /// MB-R-143 — one log entry per unmatched request: no response frame arrived before the next
 /// request began.
 async fn log_unmatched<L: LogFn>(slave: UnitId, request: &RequestPdu, log: &L) {
-    log.invoke(format!(
-        "slave {slave} unmatched (no response): request={request:?}"
-    ))
+    log.invoke(
+        Level::Warning,
+        format!("slave {slave} unmatched (no response): request={request:?}"),
+    )
     .await;
 }
 
@@ -680,100 +686,101 @@ where
     let receiver = tokio::sync::Mutex::new(receiver);
     let activity = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
-    let attempt = || {
-        let config = config.clone();
-        let table = table.clone();
-        let records = records.clone();
-        let log = log.clone();
-        let activity = activity.clone();
-        let receiver = &receiver;
-        let path_conflict = path_conflict.clone();
-        let open = open.clone();
-        async move {
-            activity.store(false, std::sync::atomic::Ordering::Relaxed);
-            let guard = config.read().await;
-            let reconnect = guard.reconnect;
-            let serial = match serial_config_from(
-                guard.baud_rate,
-                guard.data_bits,
-                guard.stop_bits,
-                guard.parity.as_deref(),
-            ) {
-                Ok(serial) => serial,
-                Err(e) => {
-                    return AttemptOutcome::Failed {
-                        error: e.into(),
-                        reconnect: false,
-                        reset: false,
-                    };
-                }
-            };
-            let path = guard.path.clone();
-            drop(guard);
-            let expanded = ferrowl_util::path::expand(&path);
-            let expanded = expanded.to_string_lossy().into_owned();
-            if let Some(other) = path_conflict.check(&expanded) {
-                log.invoke(format!(
+    let attempt =
+        || {
+            let config = config.clone();
+            let table = table.clone();
+            let records = records.clone();
+            let log = log.clone();
+            let activity = activity.clone();
+            let receiver = &receiver;
+            let path_conflict = path_conflict.clone();
+            let open = open.clone();
+            async move {
+                activity.store(false, std::sync::atomic::Ordering::Relaxed);
+                let guard = config.read().await;
+                let reconnect = guard.reconnect;
+                let serial = match serial_config_from(
+                    guard.baud_rate,
+                    guard.data_bits,
+                    guard.stop_bits,
+                    guard.parity.as_deref(),
+                ) {
+                    Ok(serial) => serial,
+                    Err(e) => {
+                        return AttemptOutcome::Failed {
+                            error: e.into(),
+                            reconnect: false,
+                            reset: false,
+                        };
+                    }
+                };
+                let path = guard.path.clone();
+                drop(guard);
+                let expanded = ferrowl_util::path::expand(&path);
+                let expanded = expanded.to_string_lossy().into_owned();
+                if let Some(other) = path_conflict.check(&expanded) {
+                    log.invoke(Level::Warning, format!(
                     "Serial path '{expanded}' is already in use by module '{other}' in this \
                      session; skipping open."
                 ))
                 .await;
-                return AttemptOutcome::Failed {
-                    error: Error::PathConflict {
-                        path: expanded,
-                        other,
-                    },
-                    reconnect,
-                    reset: false,
-                };
-            }
-            let transport_config = match TransportConfig::from_serial(&serial) {
-                Ok(cfg) => cfg,
-                Err(e) => {
                     return AttemptOutcome::Failed {
-                        error: SerialError::Error(e).into(),
-                        reconnect: false,
+                        error: Error::PathConflict {
+                            path: expanded,
+                            other,
+                        },
+                        reconnect,
                         reset: false,
                     };
                 }
-            };
-            match open_serial::<F>(&path, serial) {
-                Err(e) => AttemptOutcome::Failed {
-                    error: SerialError::Error(e).into(),
-                    reconnect,
-                    reset: false,
-                },
-                Ok(transport) => {
-                    open.set(true);
-                    let stream = transport.into_inner();
-                    let reader = AduReader::<_, F>::with_config(
-                        stream,
-                        Direction::Request,
-                        transport_config,
-                    );
-                    let mut receiver = receiver.lock().await;
-                    let end = drive_monitor::<_, F, _>(
-                        reader,
-                        log.clone(),
-                        table.clone(),
-                        records.clone(),
-                        &activity,
-                        &mut receiver,
-                    )
-                    .await;
-                    open.set(false);
-                    match end {
-                        MonitorEnd::Terminated => AttemptOutcome::Done,
-                        MonitorEnd::Failed(e) => AttemptOutcome::Failed {
-                            error: Error::Server(e),
-                            reconnect,
-                            reset: activity.load(std::sync::atomic::Ordering::Relaxed),
-                        },
+                let transport_config = match TransportConfig::from_serial(&serial) {
+                    Ok(cfg) => cfg,
+                    Err(e) => {
+                        return AttemptOutcome::Failed {
+                            error: SerialError::Error(e).into(),
+                            reconnect: false,
+                            reset: false,
+                        };
+                    }
+                };
+                match open_serial::<F>(&path, serial) {
+                    Err(e) => AttemptOutcome::Failed {
+                        error: SerialError::Error(e).into(),
+                        reconnect,
+                        reset: false,
+                    },
+                    Ok(transport) => {
+                        open.set(true);
+                        let stream = transport.into_inner();
+                        let reader = AduReader::<_, F>::with_config(
+                            stream,
+                            Direction::Request,
+                            transport_config,
+                        );
+                        let mut receiver = receiver.lock().await;
+                        let end = drive_monitor::<_, F, _>(
+                            reader,
+                            log.clone(),
+                            table.clone(),
+                            records.clone(),
+                            &activity,
+                            &mut receiver,
+                        )
+                        .await;
+                        open.set(false);
+                        match end {
+                            MonitorEnd::Terminated => AttemptOutcome::Done,
+                            MonitorEnd::Failed(e) => AttemptOutcome::Failed {
+                                error: Error::Server(e),
+                                reconnect,
+                                reset: activity.load(std::sync::atomic::Ordering::Relaxed),
+                            },
+                        }
                     }
                 }
             }
-        }
-    };
+        };
 
     let wait_abortable = |backoff: std::time::Duration| {
         let receiver = &receiver;
@@ -784,7 +791,9 @@ where
     };
 
     let result = run_with_backoff(BackoffPolicy::default(), attempt, wait_abortable).await;
-    status.invoke("Monitor stopped".to_string()).await;
+    status
+        .invoke(Level::Info, "Monitor stopped".to_string())
+        .await;
     result
 }
 
@@ -808,18 +817,31 @@ mod tests {
 
     /// A log sink recording every line sent to it, for assertions.
     #[derive(Clone, Default)]
-    struct RecordingLog(Arc<std::sync::Mutex<Vec<String>>>);
+    struct RecordingLog(Arc<std::sync::Mutex<Vec<(crate::Level, String)>>>);
     impl LogFn for RecordingLog {
-        fn invoke(&self, msg: String) -> impl std::future::Future<Output = ()> + Send {
+        fn invoke(
+            &self,
+            level: crate::Level,
+            msg: String,
+        ) -> impl std::future::Future<Output = ()> + Send {
             let inner = self.0.clone();
             async move {
-                inner.lock().unwrap().push(msg);
+                inner.lock().unwrap().push((level, msg));
             }
         }
     }
     impl RecordingLog {
         fn lines(&self) -> Vec<String> {
-            self.0.lock().unwrap().clone()
+            self.0
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(_, m)| m.clone())
+                .collect()
+        }
+
+        fn levels(&self) -> Vec<crate::Level> {
+            self.0.lock().unwrap().iter().map(|(l, _)| *l).collect()
         }
     }
 
@@ -831,7 +853,7 @@ mod tests {
         Rtu::encode_response(&slave, pdu).unwrap()
     }
 
-    /// MB-R-193 — a matched request/response pair returns to `ExpectRequest` and logs one
+    /// MB-R-193, MB-R-258, MB-R-275 — a matched request/response pair returns to `ExpectRequest` and logs one
     /// "complete" entry (MB-R-143).
     #[tokio::test]
     async fn ut_matched_request_response_pair_updates_state_and_logs() {
@@ -862,9 +884,10 @@ mod tests {
         assert_eq!(state, MatchState::ExpectRequest);
         assert_eq!(log.lines().len(), 1);
         assert!(log.lines()[0].contains("complete"));
+        assert_eq!(log.levels()[0], crate::Level::Info);
     }
 
-    /// MB-R-193 — a pending request with no matching response before the next request begins
+    /// MB-R-193, MB-R-258, MB-R-280 — a pending request with no matching response before the next request begins
     /// is logged unmatched (MB-R-143), and the new request starts a fresh wait.
     #[tokio::test]
     async fn ut_pending_request_marked_unmatched_when_next_request_arrives() {
@@ -907,10 +930,11 @@ mod tests {
         );
         assert_eq!(log.lines().len(), 1);
         assert!(log.lines()[0].contains("unmatched"));
+        assert_eq!(log.levels(), vec![crate::Level::Warning]);
     }
 
-    /// MB-R-194 — a frame that fails CRC validation is logged (Warning-worded, level-independent
-    /// at this crate layer) and discarded; decoding resumes at the next boundary without a state
+    /// MB-R-194, MB-R-258, MB-E-015 — a frame that fails CRC validation is logged at Warning
+    /// and discarded; decoding resumes at the next boundary without a state
     /// change, in `ExpectRequest`.
     #[tokio::test]
     async fn ut_crc_failure_logged_warning_and_discarded_without_state_change() {
@@ -929,9 +953,10 @@ mod tests {
         assert_eq!(state, MatchState::ExpectRequest);
         assert_eq!(log.lines().len(), 1);
         assert!(log.lines()[0].contains("malformed frame"));
+        assert_eq!(log.levels()[0], crate::Level::Warning);
     }
 
-    /// MB-R-194 — a malformed frame while awaiting a response leaves the awaited state
+    /// MB-R-194, MB-R-258, MB-E-015 — a malformed frame while awaiting a response leaves the awaited state
     /// unchanged (still waiting — neither the response nor a new request).
     #[tokio::test]
     async fn ut_crc_failure_while_expecting_response_does_not_change_state() {
@@ -953,9 +978,10 @@ mod tests {
         let state = process_frame::<Rtu, _>(bytes, waiting.clone(), &log, &table, &records).await;
         assert_eq!(state, waiting);
         assert!(log.lines()[0].contains("malformed frame"));
+        assert_eq!(log.levels()[0], crate::Level::Warning);
     }
 
-    /// MB-R-143 — a broadcast (slave id 0) request is logged complete immediately and never
+    /// MB-R-143, MB-R-258, MB-R-275 — a broadcast (slave id 0) request is logged complete immediately and never
     /// marked unmatched: it never enters `ExpectResponse`.
     #[tokio::test]
     async fn ut_broadcast_request_logged_complete_never_unmatched() {
@@ -977,6 +1003,7 @@ mod tests {
         assert_eq!(state, MatchState::ExpectRequest);
         assert_eq!(log.lines().len(), 1);
         assert!(log.lines()[0].contains("complete"));
+        assert_eq!(log.levels()[0], crate::Level::Info);
         assert!(!log.lines()[0].contains("unmatched"));
     }
 

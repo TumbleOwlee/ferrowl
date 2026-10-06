@@ -16,7 +16,7 @@ use tokio::sync::{RwLock, mpsc};
 use tokio::time::sleep;
 
 fn sink() -> impl ferrowl_modbus::LogFn + Clone {
-    |_s: String| async move {}
+    |_level: ferrowl_modbus::Level, _s: String| async move {}
 }
 
 fn empty_table() -> ferrowl_modbus::monitor::SharedObservedTable {

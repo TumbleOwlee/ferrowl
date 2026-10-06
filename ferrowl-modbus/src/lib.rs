@@ -33,7 +33,7 @@ pub use command::{Command, ServerCommand};
 pub use conn_state::ConnectedCell;
 pub use error::{Error, ModbusError, SelfSignedStep, SerialError, TcpError, TlsError};
 pub use key::{Key, KeyParams, SlaveKey};
-pub use log::LogFn;
+pub use log::{Level, LogFn};
 pub use operation::Operation;
 pub use path_conflict::{PathConflictCell, PathConflictCheck};
 pub use run_config::RunConfig;

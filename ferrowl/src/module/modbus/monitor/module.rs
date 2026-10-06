@@ -259,31 +259,9 @@ impl ModbusMonitorModule {
 
         let (tx, rx) = tokio::sync::mpsc::channel::<ServerCommand>(10);
 
-        let log_ring = self.log.clone();
-        let log_sink = self.file_sink.clone();
-        let log_cb = move |s: String| {
-            let log_ring = log_ring.clone();
-            let log_sink = log_sink.clone();
-            async move {
-                log_ring.write().await.write(network_log_level(&s), &s);
-                super::super::log::append(&log_sink, &s);
-            }
-        };
-
-        let status_ring = self.log.clone();
-        let status_sink = self.file_sink.clone();
-        let status_cb = move |s: String| {
-            let status_ring = status_ring.clone();
-            let status_sink = status_sink.clone();
-            async move {
-                let line = format!("[status] {s}");
-                status_ring
-                    .write()
-                    .await
-                    .write(network_log_level(&line), &line);
-                super::super::log::append(&status_sink, &line);
-            }
-        };
+        let log_cb = super::super::module::ring_log(self.log.clone(), self.file_sink.clone(), "");
+        let status_cb =
+            super::super::module::ring_log(self.log.clone(), self.file_sink.clone(), "[status] ");
 
         // MB-R-150 — the checker consulted before every connect attempt, via the freshly-built
         // builder's `PathConflictCell` (attached before `spawn()`, below).
@@ -316,7 +294,12 @@ impl ModbusMonitorModule {
             }
         };
 
-        let _ = log.invoke(format!("Monitor '{}' started", self.name)).await;
+        let _ = log
+            .invoke(
+                ferrowl_modbus::Level::Info,
+                format!("Monitor '{}' started", self.name),
+            )
+            .await;
         let _ = status;
         self.command_tx = Some(tx);
         self.task = Some(handle);
@@ -403,18 +386,6 @@ impl ModbusMonitorModule {
             async || self.poll_stop().await,
         )
         .await
-    }
-}
-
-/// Classifies a monitor's network/status line for the log ring: reuses
-/// [`super::super::module::network_log_level`]'s classification plus a monitor-specific Warning
-/// branch for a discarded, malformed frame (MB-R-142) — the decode/match state machine phrases
-/// its discarded-frame log line to contain this exact substring.
-pub(crate) fn network_log_level(s: &str) -> crate::app::Level {
-    if s.to_lowercase().contains("malformed frame") {
-        crate::app::Level::Warning
-    } else {
-        super::super::module::network_log_level(s)
     }
 }
 
@@ -655,7 +626,10 @@ mod tests {
         let mut module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device);
         assert!(!module.is_running(), "not running before start()");
         module
-            .start(|_: String| async {}, |_: String| async {})
+            .start(
+                |_: ferrowl_modbus::Level, _: String| async {},
+                |_: ferrowl_modbus::Level, _: String| async {},
+            )
             .await
             .expect("start always succeeds for a valid transport");
         assert!(module.is_running(), "running once start() succeeds");
@@ -678,7 +652,10 @@ mod tests {
         let path = crate::module::modbus::build::endpoint_serial_path(&bad_rtu_endpoint())
             .expect("Rtu endpoint has a serial path");
         module
-            .start(|_: String| async {}, |_: String| async {})
+            .start(
+                |_: ferrowl_modbus::Level, _: String| async {},
+                |_: ferrowl_modbus::Level, _: String| async {},
+            )
             .await
             .expect("start always succeeds for a valid transport");
         assert_eq!(registry.conflict("B", &path), Some("mon1".to_string()));
@@ -713,7 +690,10 @@ mod tests {
         device.reconnect = Some(false);
         let mut module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device);
         module
-            .start(|_: String| async {}, |_: String| async {})
+            .start(
+                |_: ferrowl_modbus::Level, _: String| async {},
+                |_: ferrowl_modbus::Level, _: String| async {},
+            )
             .await
             .expect("start always succeeds for a valid transport");
 
@@ -775,7 +755,10 @@ mod tests {
         };
         let mut module = ModbusMonitorModule::new(&spec(endpoint), &device_with_defs());
         let err = module
-            .start(|_: String| async {}, |_: String| async {})
+            .start(
+                |_: ferrowl_modbus::Level, _: String| async {},
+                |_: ferrowl_modbus::Level, _: String| async {},
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, Error::Transport(_)));
@@ -789,7 +772,10 @@ mod tests {
         device.reconnect = Some(true);
         let mut module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device);
         module
-            .start(|_: String| async {}, |_: String| async {})
+            .start(
+                |_: ferrowl_modbus::Level, _: String| async {},
+                |_: ferrowl_modbus::Level, _: String| async {},
+            )
             .await
             .expect("start always succeeds for a valid transport");
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
@@ -803,7 +789,10 @@ mod tests {
         device.reconnect = Some(false);
         let mut module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device);
         module
-            .start(|_: String| async {}, |_: String| async {})
+            .start(
+                |_: ferrowl_modbus::Level, _: String| async {},
+                |_: ferrowl_modbus::Level, _: String| async {},
+            )
             .await
             .expect("start always succeeds for a valid transport");
         wait_until(
@@ -900,7 +889,10 @@ mod tests {
         device.reconnect = Some(true);
         let mut module = ModbusMonitorModule::new(&spec(bad_rtu_endpoint()), &device);
         module
-            .start(|_: String| async {}, |_: String| async {})
+            .start(
+                |_: ferrowl_modbus::Level, _: String| async {},
+                |_: ferrowl_modbus::Level, _: String| async {},
+            )
             .await
             .expect("start always succeeds for a valid transport");
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -933,7 +925,10 @@ mod tests {
         let path = crate::module::modbus::build::endpoint_serial_path(&bad_rtu_endpoint())
             .expect("Rtu endpoint has a serial path");
         let _ = module
-            .start(|_: String| async {}, |_: String| async {})
+            .start(
+                |_: ferrowl_modbus::Level, _: String| async {},
+                |_: ferrowl_modbus::Level, _: String| async {},
+            )
             .await;
         assert_eq!(registry.conflict("B", &path), Some("mon1".to_string()));
 
@@ -958,7 +953,10 @@ mod tests {
         let path = crate::module::modbus::build::endpoint_serial_path(&bad_rtu_endpoint())
             .expect("Rtu endpoint has a serial path");
         let _ = module
-            .start(|_: String| async {}, |_: String| async {})
+            .start(
+                |_: ferrowl_modbus::Level, _: String| async {},
+                |_: ferrowl_modbus::Level, _: String| async {},
+            )
             .await;
         assert_eq!(registry.conflict("B", &path), Some("mon1".to_string()));
 
@@ -971,7 +969,10 @@ mod tests {
 
         let mut reconfigured = module.reconfigure(&spec(bad_rtu_endpoint()), &device);
         let _ = reconfigured
-            .start(|_: String| async {}, |_: String| async {})
+            .start(
+                |_: ferrowl_modbus::Level, _: String| async {},
+                |_: ferrowl_modbus::Level, _: String| async {},
+            )
             .await;
         assert_eq!(registry.conflict("B", &path), Some("mon1".to_string()));
     }
@@ -989,20 +990,14 @@ mod tests {
         let path = crate::module::modbus::build::endpoint_serial_path(&bad_rtu_endpoint())
             .expect("Rtu endpoint has a serial path");
         let _ = module
-            .start(|_: String| async {}, |_: String| async {})
+            .start(
+                |_: ferrowl_modbus::Level, _: String| async {},
+                |_: ferrowl_modbus::Level, _: String| async {},
+            )
             .await;
 
         let unrelated_registry = SerialPathRegistry::new();
         assert_eq!(unrelated_registry.conflict("B", &path), None);
-    }
-
-    /// MB-R-194 — network_log_level's monitor-specific Warning branch: a discarded
-    /// malformed-frame line classifies as Warning, matching the decode/match state machine's
-    /// log wording.
-    #[test]
-    fn ut_network_log_level_classifies_malformed_frame_as_warning() {
-        let line = "Discarding malformed frame (checksum mismatch): 01 02 03";
-        assert_eq!(network_log_level(line), crate::app::Level::Warning);
     }
 
     /// `definitions()` rebuilds the flat on-disk map from whatever is

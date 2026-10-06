@@ -105,7 +105,7 @@ mod tests {
 
     /// A `LogFn` that discards every line; only timings and results are asserted here.
     fn silent_log() -> impl LogFn + Clone {
-        |_s: String| async move {}
+        |_level: crate::Level, _s: String| async move {}
     }
 
     #[tokio::test]

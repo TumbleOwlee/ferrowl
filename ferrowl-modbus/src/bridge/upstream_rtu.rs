@@ -60,7 +60,7 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 
     fn sink() -> impl LogFn + Clone {
-        |_s: String| async move {}
+        |_level: crate::Level, _s: String| async move {}
     }
 
     /// BR-R-008 — an upstream broadcast (RTU unit id 0) is forwarded downstream (fire and

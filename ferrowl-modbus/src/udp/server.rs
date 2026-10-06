@@ -1,3 +1,4 @@
+use crate::log::Level;
 use crate::server_core::{
     BoundAddr, ResetOn, ServeEnd, Server, drive_serve, wait_reconnect_backoff,
 };
@@ -180,7 +181,9 @@ where
     };
 
     let result = run_with_backoff(BackoffPolicy::default(), attempt, wait_abortable).await;
-    status.invoke("Server stopped".to_string()).await;
+    status
+        .invoke(Level::Info, "Server stopped".to_string())
+        .await;
     result
 }
 
@@ -205,7 +208,7 @@ mod tests {
     }
 
     fn sink() -> impl crate::LogFn + Clone {
-        |_s: String| async move {}
+        |_level: crate::Level, _s: String| async move {}
     }
 
     /// MB-R-120 revised (bound_addr companion) — same lifecycle as `tcp::server`'s own test:

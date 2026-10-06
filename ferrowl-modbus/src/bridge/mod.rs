@@ -144,7 +144,7 @@ mod tests {
     use tokio::sync::mpsc;
 
     fn sink() -> impl LogFn + Clone {
-        |_s: String| async move {}
+        |_level: crate::Level, _s: String| async move {}
     }
 
     fn tcp_config(port: u16) -> crate::tcp::Config {

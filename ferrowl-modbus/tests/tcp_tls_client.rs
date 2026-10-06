@@ -602,8 +602,8 @@ async fn it_terminate_during_tls_handshake_returns_immediately() {
     let (handle, _connected) = builder
         .spawn(
             receiver,
-            |_s: String| async move {},
-            |_s: String| async move {},
+            |_level: ferrowl_modbus::Level, _s: String| async move {},
+            |_level: ferrowl_modbus::Level, _s: String| async move {},
         )
         .await
         .expect("spawn always returns Ok");

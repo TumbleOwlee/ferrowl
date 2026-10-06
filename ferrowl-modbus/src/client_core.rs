@@ -7,6 +7,7 @@
 //! identical across every transport once a `ClientCore` exists.
 
 use crate::common::serial_config_from;
+use crate::log::Level;
 use crate::tcp::tls::{ClientStream, SelfSignedCache, build_client_tls_config};
 use crate::{
     Command, Error, Key, KeyParams, LogFn, ModbusError, Operation, PathConflictCell, RunConfig,
@@ -51,9 +52,10 @@ async fn log_read_intent<L>(log: &L, name: &str, slave_id: UnitId, start: usize,
 where
     L: LogFn,
 {
-    log.invoke(format!(
-        "Perform {name} request for slave ID {slave_id} and range [{start}, {end})."
-    ))
+    log.invoke(
+        Level::Info,
+        format!("Perform {name} request for slave ID {slave_id} and range [{start}, {end})."),
+    )
     .await;
 }
 
@@ -343,7 +345,7 @@ where
         // exception shape as an over-long range, so it follows the retry path of MB-R-043
         // instead of surfacing as a transport error that would disconnect the client.
         if F::is_broadcast(op.slave_id) {
-            log.invoke(format!(
+            log.invoke(Level::Warning, format!(
                 "Read request for slave ID {} skipped: address 0 is the broadcast address, which no device answers.",
                 op.slave_id
             ))
@@ -428,30 +430,34 @@ where
     {
         match classify(result) {
             Ok(_) => {
-                log.invoke(format!(
-                    "{label} request to {detail} successfully executed."
-                ))
+                log.invoke(
+                    Level::Info,
+                    format!("{label} request to {detail} successfully executed."),
+                )
                 .await;
                 Ok(())
             }
             Err(ModbusError::Exception(e)) => {
-                log.invoke(format!(
-                    "{label} request to {detail} {invalid_word}. [{e:?}]"
-                ))
+                log.invoke(
+                    Level::Warning,
+                    format!("{label} request to {detail} {invalid_word}. [{e:?}]"),
+                )
                 .await;
                 Ok(())
             }
             Err(ModbusError::Error(e)) => {
-                log.invoke(format!(
-                    "{label} request to {detail} failed. Disconnecting client. [{e:?}]"
-                ))
+                log.invoke(
+                    Level::Error,
+                    format!("{label} request to {detail} failed. Disconnecting client. [{e:?}]"),
+                )
                 .await;
                 Err(ModbusError::Error(e).into())
             }
             Err(ModbusError::Timeout(e)) => {
-                log.invoke(format!(
-                    "{label} request to {detail} timed out. Disconnecting client. [{e:?}]"
-                ))
+                log.invoke(
+                    Level::Error,
+                    format!("{label} request to {detail} timed out. Disconnecting client. [{e:?}]"),
+                )
                 .await;
                 Err(ModbusError::Timeout(e).into())
             }
@@ -502,9 +508,12 @@ where
                         guard.write_unchecked(key, &range, &values)
                     };
                     if !ok {
-                        log.invoke(format!(
-                            "{s} Failed because of failing memory update for [{start}, {end})."
-                        ))
+                        log.invoke(
+                            Level::Warning,
+                            format!(
+                                "{s} Failed because of failing memory update for [{start}, {end})."
+                            ),
+                        )
                         .await;
                     } else {
                         let mut hex_str = String::with_capacity(values.len() * 3 + 4);
@@ -519,20 +528,20 @@ where
                             first = false;
                         }
                         hex_str += "]";
-                        log.invoke(format!("{s} request to read [{start}, {end}) successful. Received values {hex_str}."))
+                        log.invoke(Level::Info, format!("{s} request to read [{start}, {end}) successful. Received values {hex_str}."))
                             .await;
                     }
                     *index = (*index + 1) % count;
                     *retries = 0;
                 }
                 (s, Err(ModbusError::Timeout(e))) => {
-                    log.invoke(format!(
+                    log.invoke(Level::Error, format!(
                             "{s} request to read [{start}, {end}) timed out. Disconnecting client. [{e:?}]"
                         )).await;
                     return Err(ModbusError::Timeout(e).into());
                 }
                 (s, Err(ModbusError::Error(e))) => {
-                    log.invoke(format!(
+                    log.invoke(Level::Error, format!(
                         "{s} request to read [{start}, {end}) failed. Disconnecting client. [{e:?}]"
                     ))
                     .await;
@@ -541,9 +550,10 @@ where
                 (s, Err(ModbusError::Exception(e))) => {
                     *retries += 1;
                     if *retries >= MAX_RETRIES {
-                        log.invoke(format!(
-                            "{s} request to read [{start}, {end}) invalid. [{e}]"
-                        ))
+                        log.invoke(
+                            Level::Warning,
+                            format!("{s} request to read [{start}, {end}) invalid. [{e}]"),
+                        )
                         .await;
                         *index = (*index + 1) % count;
                         *retries = 0;
@@ -605,9 +615,9 @@ where
                 // that the same as an explicit `Terminate`.
                 cmd = commands.recv() => match cmd.unwrap_or(Command::Terminate) {
                     Command::Terminate => {
-                        log.invoke("Client gracefully terminated.".to_string())
+                        log.invoke(Level::Info, "Client gracefully terminated.".to_string())
                             .await;
-                        status.invoke("Client disconnected".to_string()).await;
+                        status.invoke(Level::Info, "Client disconnected".to_string()).await;
                         return (had_success, Ok(()));
                     }
                     Command::WriteSingleCoil(slave, addr, coil) => {
@@ -736,7 +746,9 @@ where
                         // attempt itself was in flight: the attempt is abandoned, never having
                         // reached a connected state.
                         drop(guard);
-                        status.invoke("Client disconnected".to_string()).await;
+                        status
+                            .invoke(Level::Info, "Client disconnected".to_string())
+                            .await;
                         return ferrowl_util::backoff::AttemptOutcome::Done;
                     }
                 };
@@ -762,17 +774,23 @@ where
                         // backing off: there is no connection loop left to hand it to.
                         for _ in 0..parked.len() {
                             log.invoke(
+                                Level::Warning,
                                 "Command dropped: client is disconnected and reconnecting."
                                     .to_string(),
                             )
                             .await;
                         }
                         if !reconnect {
-                            log.invoke(format!("{e} Reconnect disabled; client stopping."))
+                            log.invoke(
+                                Level::Error,
+                                format!("{e} Reconnect disabled; client stopping."),
+                            )
+                            .await;
+                            status
+                                .invoke(Level::Info, "Client disconnected".to_string())
                                 .await;
-                            status.invoke("Client disconnected".to_string()).await;
                         } else {
-                            log.invoke(format!("{e}")).await;
+                            log.invoke(Level::Error, format!("{e}")).await;
                         }
                         return ferrowl_util::backoff::AttemptOutcome::Failed {
                             error: e,
@@ -797,9 +815,11 @@ where
                         if !reconnect {
                             // run() already logged the underlying disconnect; just surface the
                             // status change before the task ends.
-                            status.invoke("Client disconnected".to_string()).await;
+                            status
+                                .invoke(Level::Info, "Client disconnected".to_string())
+                                .await;
                         } else {
-                            log.invoke(format!("{e}")).await;
+                            log.invoke(Level::Warning, format!("{e}")).await;
                         }
                         ferrowl_util::backoff::AttemptOutcome::Failed {
                             error: e,
@@ -816,8 +836,11 @@ where
             let status = status.clone();
             let receiver = &receiver;
             async move {
-                log.invoke(format!("Reconnecting in {}s.", backoff.as_secs()))
-                    .await;
+                log.invoke(
+                    Level::Info,
+                    format!("Reconnecting in {}s.", backoff.as_secs()),
+                )
+                .await;
                 let mut guard = receiver.lock().await;
                 // Any non-terminate command received while disconnected is dropped with a log
                 // line rather than queued for after reconnect.
@@ -826,12 +849,14 @@ where
                     backoff,
                     "Command dropped: client is disconnected and reconnecting.",
                     |cmd: &Command| matches!(cmd, Command::Terminate),
-                    |msg| log.invoke(msg),
+                    |msg| log.invoke(Level::Warning, msg),
                 )
                 .await;
                 drop(guard);
                 if aborted {
-                    status.invoke("Client disconnected".to_string()).await;
+                    status
+                        .invoke(Level::Info, "Client disconnected".to_string())
+                        .await;
                 }
                 aborted
             }
@@ -878,13 +903,15 @@ mod tests {
     }
 
     /// A `LogFn` that records every line into a shared buffer for assertions.
-    fn recording_log() -> (impl LogFn + Clone, Arc<parking_lot::Mutex<Vec<String>>>) {
-        let lines = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
+    type Lines = Arc<parking_lot::Mutex<Vec<(crate::Level, String)>>>;
+
+    fn recording_log() -> (impl LogFn + Clone, Lines) {
+        let lines = Arc::new(parking_lot::Mutex::new(Vec::<(crate::Level, String)>::new()));
         let sink = lines.clone();
-        let log = move |s: String| {
+        let log = move |level: crate::Level, s: String| {
             let sink = sink.clone();
             async move {
-                sink.lock().push(s);
+                sink.lock().push((level, s));
             }
         };
         (log, lines)
@@ -901,7 +928,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// MB-R-101 — an RTU read addressed to slave id 0 fails locally, never reaching the wire,
+    /// MB-R-101, MB-R-258, MB-R-278 — an RTU read addressed to slave id 0 fails locally, never reaching the wire,
     /// and fails as a Modbus exception so it follows the retry path of MB-R-043 rather than
     /// disconnecting the client.
     async fn ut_rtu_broadcast_read_is_refused_locally() {
@@ -921,7 +948,9 @@ mod tests {
             Err(ModbusError::Exception(ExceptionCode::IllegalDataAddress))
         ));
         assert!(
-            lines.lock().iter().any(|l| l.contains("broadcast address")),
+            lines.lock().iter().any(|(level, l)| {
+                *level == crate::Level::Warning && l.contains("broadcast address")
+            }),
             "the refusal is logged: {:?}",
             lines.lock()
         );
@@ -985,7 +1014,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// MB-R-102 — an RTU write addressed to slave id 0 is transmitted without awaiting a
+    /// MB-R-102, MB-R-258, MB-R-275 — an RTU write addressed to slave id 0 is transmitted without awaiting a
     /// response, logged as executed, and does not disconnect the client.
     async fn ut_rtu_broadcast_write_is_fire_and_forget() {
         let (core, mut peer) = rtu_client_over_duplex();
@@ -1008,7 +1037,7 @@ mod tests {
                 &mut crate::common::Commands::new(&mut rx, std::collections::VecDeque::new()),
                 RunConfig {
                     log,
-                    status: |_s: String| async move {},
+                    status: |_level: crate::Level, _s: String| async move {},
                     timeout_ms: 200,
                     delay_ms: 0,
                     interval_ms: 60_000,
@@ -1023,7 +1052,9 @@ mod tests {
             lines
                 .lock()
                 .iter()
-                .any(|l| l.contains("WriteSingleRegister") && l.contains("successfully executed")),
+                .any(|(level, l)| *level == crate::Level::Info
+                    && l.contains("WriteSingleRegister")
+                    && l.contains("successfully executed")),
             "the write is logged as executed: {:?}",
             lines.lock()
         );
@@ -1408,7 +1439,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// MB-R-157 — three consecutive Modbus exceptions on the same operation skip it (advance the
+    /// MB-R-157, MB-R-258, MB-R-265 — three consecutive Modbus exceptions on the same operation skip it (advance the
     /// round-robin index) and reset the retry counter; a fourth exception on the next rotation
     /// starts counting again rather than skipping immediately.
     async fn ut_three_consecutive_exceptions_skip_advance_and_reset_the_counter() {
@@ -1431,11 +1462,11 @@ mod tests {
         let mut retries = 0u32;
         let mut had_success = false;
 
-        let invalid_count = |lines: &Arc<parking_lot::Mutex<Vec<String>>>| -> usize {
+        let invalid_count = |lines: &Lines| -> usize {
             lines
                 .lock()
                 .iter()
-                .filter(|l| l.contains("invalid."))
+                .filter(|(level, l)| *level == crate::Level::Warning && l.contains("invalid."))
                 .count()
         };
 
@@ -1481,7 +1512,7 @@ mod tests {
             lines
                 .lock()
                 .iter()
-                .any(|l| l.contains("invalid.") && l.contains("[0, 2)"))
+                .any(|(_, l)| l.contains("invalid.") && l.contains("[0, 2)"))
         );
         assert_eq!(index, 1);
         assert_eq!(retries, 0);
@@ -1528,7 +1559,7 @@ mod tests {
             lines
                 .lock()
                 .iter()
-                .any(|l| l.contains("invalid.") && l.contains("[10, 12)"))
+                .any(|(_, l)| l.contains("invalid.") && l.contains("[10, 12)"))
         );
         assert_eq!(index, 0);
 

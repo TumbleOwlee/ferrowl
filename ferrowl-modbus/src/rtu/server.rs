@@ -125,7 +125,7 @@ mod tests {
     }
 
     fn sink() -> impl crate::LogFn + Clone {
-        |_s: String| async move {}
+        |_level: crate::Level, _s: String| async move {}
     }
 
     fn config(path: &str) -> Config {
@@ -173,7 +173,7 @@ mod tests {
         );
     }
 
-    /// MB-R-200 — "report a distinct path-conflict status/log entry instead — replacing today's
+    /// MB-R-200, MB-R-258, MB-R-274 — "report a distinct path-conflict status/log entry instead — replacing today's
     /// silent indefinite retry": unlike an ordinary open failure (which the server's own
     /// `attempt` closure never logs, only client/monitor do via their reconnect loops), a
     /// conflict must be visible via `log` before the attempt returns, since a `reconnect:true`
@@ -191,13 +191,13 @@ mod tests {
         path_conflict.set(std::sync::Arc::new(|_: &str| {
             Some("other-module".to_string())
         }));
-        let lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let lines: Arc<Mutex<Vec<(crate::Level, String)>>> = Arc::new(Mutex::new(Vec::new()));
         let log_sink = {
             let lines = lines.clone();
-            move |s: String| {
+            move |level: crate::Level, s: String| {
                 let lines = lines.clone();
                 async move {
-                    lines.lock().unwrap().push(s);
+                    lines.lock().unwrap().push((level, s));
                 }
             }
         };
@@ -217,7 +217,8 @@ mod tests {
         assert!(
             logged
                 .iter()
-                .any(|l| l.contains("already in use by module 'other-module'")),
+                .any(|(level, l)| *level == crate::Level::Warning
+                    && l.contains("already in use by module 'other-module'")),
             "expected a path-conflict log line, got: {logged:?}"
         );
     }

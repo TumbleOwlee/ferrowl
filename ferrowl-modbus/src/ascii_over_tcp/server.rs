@@ -143,7 +143,7 @@ mod tests {
     }
 
     fn sink() -> impl crate::LogFn + Clone {
-        |_s: String| async move {}
+        |_level: crate::Level, _s: String| async move {}
     }
 
     /// MB-R-130 (bound_addr companion) — same lifecycle as `tcp::server`'s own test: `None`

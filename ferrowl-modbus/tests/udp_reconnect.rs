@@ -23,7 +23,7 @@ use tokio::time::sleep;
 type Mem = Arc<MemLock<Memory<ferrowl_modbus::Key<SlaveKey>>>>;
 
 fn sink() -> impl ferrowl_modbus::LogFn + Clone {
-    |_s: String| async move {}
+    |_level: ferrowl_modbus::Level, _s: String| async move {}
 }
 
 fn empty_mem() -> Mem {
@@ -85,7 +85,7 @@ async fn udp_server_bind_failure_retries_then_succeeds() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// MB-R-120, MB-R-134 — with `reconnect` disabled, a Udp bind failure fails the
+/// MB-R-120, MB-R-134, MB-R-257 — with `reconnect` disabled, a Udp bind failure fails the
 /// server: `spawn()` still returns `Ok(handle)`, but the joined task carries the bind error.
 async fn udp_server_bind_failure_reconnect_false_ends_task() {
     let occupier = reserve_udp_port();
@@ -104,7 +104,13 @@ async fn udp_server_bind_failure_reconnect_false_ends_task() {
         .await
         .expect("task should end promptly, not retry, with reconnect disabled")
         .expect("task must not panic");
-    assert!(matches!(result, Err(Error::Server(_))));
+    let Err(Error::Server(e)) = result else {
+        panic!("expected a server error, got {result:?}");
+    };
+    assert!(
+        format!("{e:?}").contains("AddrInUse"),
+        "not address-in-use: {e:?}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

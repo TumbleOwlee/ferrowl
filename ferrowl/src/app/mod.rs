@@ -67,6 +67,16 @@ impl Level {
     }
 }
 
+impl From<ferrowl_modbus::Level> for Level {
+    fn from(level: ferrowl_modbus::Level) -> Self {
+        match level {
+            ferrowl_modbus::Level::Info => Level::Info,
+            ferrowl_modbus::Level::Warning => Level::Warning,
+            ferrowl_modbus::Level::Error => Level::Error,
+        }
+    }
+}
+
 impl From<ferrowl_lua::module::LogLevel> for Level {
     fn from(level: ferrowl_lua::module::LogLevel) -> Self {
         match level {

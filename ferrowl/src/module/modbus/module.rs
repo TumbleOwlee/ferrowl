@@ -36,27 +36,21 @@ pub type ModuleLog = Arc<RwLock<LogRing>>;
 /// with the Lua sim thread so scripts can drive virtual registers and the table shows them.
 pub type VirtualStore = Arc<RwLock<HashMap<String, ferrowl_codec::Value>>>;
 
-/// Classifies a network/status line from the client/server instance for the log ring: outright
-/// disconnects and transport errors are `Error`, degraded-but-recovering states (lost connection,
-/// backoff, retried exceptions) are `Warning`, everything else (request intent, success) is `Info`.
-pub(crate) fn network_log_level(s: &str) -> Level {
-    let lower = s.to_lowercase();
-    if lower.contains("disconnecting")
-        || lower.contains("reconnect disabled")
-        || lower.contains("timed out")
-        || lower.contains("tls handshake")
-    {
-        Level::Error
-    } else if lower.contains("disconnected")
-        || lower.contains("reconnecting")
-        || lower.contains("invalid")
-        || lower.contains("dropped")
-        || lower.contains("failed")
-        || lower.contains("already in use")
-    {
-        Level::Warning
-    } else {
-        Level::Info
+/// MB-R-258, UI-R-372 — a log callback writing each line to the ring at the level its producer
+/// chose, prefixed with `prefix`, and to the module's log file.
+pub(crate) fn ring_log(
+    log: ModuleLog,
+    sink: FileSink,
+    prefix: &'static str,
+) -> impl ferrowl_modbus::LogFn + Clone {
+    move |level: ferrowl_modbus::Level, s: String| {
+        let log = log.clone();
+        let sink = sink.clone();
+        async move {
+            let line = format!("{prefix}{s}");
+            log.write().await.write(level.into(), &line);
+            append(&sink, &line);
+        }
     }
 }
 
@@ -354,30 +348,11 @@ impl ModbusModule {
     /// configured) the per-module log file. The Lua simulation thread is independent of network
     /// start/stop — it runs whenever there are enabled scripts, regardless.
     pub async fn start(&mut self) -> Result<(), Error> {
-        let log = self.log.clone();
-        let log_sink = self.file_sink.clone();
-        let status = self.log.clone();
-        let status_sink = self.file_sink.clone();
         let result = self
             .instance
             .start(
-                move |s: String| {
-                    let log = log.clone();
-                    let log_sink = log_sink.clone();
-                    async move {
-                        log.write().await.write(network_log_level(&s), &s);
-                        append(&log_sink, &s);
-                    }
-                },
-                move |s: String| {
-                    let status = status.clone();
-                    let status_sink = status_sink.clone();
-                    async move {
-                        let line = format!("[status] {s}");
-                        status.write().await.write(network_log_level(&line), &line);
-                        append(&status_sink, &line);
-                    }
-                },
+                ring_log(self.log.clone(), self.file_sink.clone(), ""),
+                ring_log(self.log.clone(), self.file_sink.clone(), "[status] "),
             )
             .await;
         // MB-R-150 — claim this instance's serial path (Rtu/Ascii only; a no-op via
@@ -592,28 +567,45 @@ mod tests {
         assert_eq!(timing.interval_ms, DEFAULT_INTERVAL_MS);
     }
 
-    #[test]
-    /// MB-R-178 (server logging half) — a TLS handshake failure line classifies as
-    /// `Level::Error`, matching the peer/failure-detail format `on_tls_handshake_failed`
-    /// logs (`"TLS handshake with {peer} failed: {detail}."`).
-    fn ut_network_log_level_classifies_tls_handshake_failure_as_error() {
-        use super::network_log_level;
-        use crate::app::Level;
+    #[tokio::test]
+    /// UI-R-372, MB-R-258 — a line the crate hands the log callback is written to the ring at the
+    /// level the producer passed, whatever its text says; the status variant prefixes
+    /// `[status] `.
+    async fn ut_ring_log_writes_producer_level() {
+        use super::{FileSink, ModuleLog, ring_log};
+        use crate::app::{Level, LogRing};
+        use ferrowl_modbus::{Level as Producer, LogFn};
+        use std::sync::Arc;
+        use tokio::sync::RwLock;
 
-        let line = "TLS handshake with 127.0.0.1:5502 failed: bad certificate.";
-        assert_eq!(network_log_level(line), Level::Error);
-    }
+        let ring: ModuleLog = Arc::new(RwLock::new(LogRing::init()));
+        let sink: FileSink = Arc::new(std::sync::Mutex::new(None));
+        let log = ring_log(ring.clone(), sink.clone(), "");
+        let status = ring_log(ring.clone(), sink, "[status] ");
 
-    #[test]
-    /// MB-R-150 — a serial-path-conflict log line classifies as `Level::Warning`, the same
-    /// degraded-but-recovering bucket as "reconnecting"/"disconnected", not the Info default.
-    fn ut_network_log_level_classifies_path_conflict_as_warning() {
-        use super::network_log_level;
-        use crate::app::Level;
+        log.invoke(Producer::Warning, "request timed out".to_string())
+            .await;
+        log.invoke(Producer::Info, "disconnecting peer".to_string())
+            .await;
+        status
+            .invoke(Producer::Error, "Client disconnected".to_string())
+            .await;
 
-        let line = "Serial path '/dev/ttyUSB0' is already in use by module 'PLC Sim' in this \
-                     session; skipping open.";
-        assert_eq!(network_log_level(line), Level::Warning);
+        let lines: Vec<_> = ring
+            .read()
+            .await
+            .peek_n(10)
+            .into_iter()
+            .map(|(_, level, line)| (level, line))
+            .collect();
+        assert_eq!(
+            lines,
+            vec![
+                (Level::Warning, "request timed out".to_string()),
+                (Level::Info, "disconnecting peer".to_string()),
+                (Level::Error, "[status] Client disconnected".to_string()),
+            ]
+        );
     }
 
     fn device_with_defs() -> (crate::config::DeviceConfig, TempDirGuard) {
