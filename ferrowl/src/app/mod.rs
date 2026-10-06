@@ -867,6 +867,28 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-364, UI-R-194 — the idle hint names both pane-toggle bindings.
+    fn ut_idle_hint_names_both_pane_toggle_bindings() {
+        use super::testkit::{MockView, build_app};
+        let mut app = build_app(vec![MockView::pair("a").0.boxed()]);
+        app.draw().unwrap();
+        let text = app.screen.text();
+        assert!(text.contains("C-w+j C-w+k"));
+        assert!(text.contains("S-Up S-Down"));
+    }
+
+    #[test]
+    /// UI-R-365, UI-R-194 — the idle hint names both tab-switch bindings.
+    fn ut_idle_hint_names_both_tab_switch_bindings() {
+        use super::testkit::{MockView, build_app};
+        let mut app = build_app(vec![MockView::pair("a").0.boxed()]);
+        app.draw().unwrap();
+        let text = app.screen.text();
+        assert!(text.contains("C-t+h C-t+l"));
+        assert!(text.contains("S-Left S-Right"));
+    }
+
+    #[test]
     /// UI-R-007 — only key press events are acted upon; release and repeat kinds are ignored for
     /// command/navigation purposes.
     fn ut_only_key_press_events_are_acted_on() {

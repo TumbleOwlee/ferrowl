@@ -14,8 +14,11 @@ pub(super) static GLOBAL_SECTIONS: &[HelpSection] = &[
         keys: &[
             (":", "enter command mode"),
             ("C-w j/k", "switch table/log pane"),
+            ("S-Up/S-Down", "switch table/log pane"),
             ("C-t l", "next tab"),
             ("C-t h", "previous tab"),
+            ("S-Right", "next tab"),
+            ("S-Left", "previous tab"),
             ("C-t <digit[digit]>", "jump to tab by number"),
             ("?", "this help"),
         ],
@@ -56,3 +59,28 @@ pub(super) static GLOBAL_SECTIONS: &[HelpSection] = &[
         ],
     },
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    /// UI-R-363 — the Global section lists every binding of the api-contract Global table.
+    fn ut_global_section_lists_every_global_keybinding() {
+        assert_eq!(GLOBAL_SECTIONS[0].title, "Global");
+        assert_eq!(
+            GLOBAL_SECTIONS[0].keys,
+            &[
+                (":", "enter command mode"),
+                ("C-w j/k", "switch table/log pane"),
+                ("S-Up/S-Down", "switch table/log pane"),
+                ("C-t l", "next tab"),
+                ("C-t h", "previous tab"),
+                ("S-Right", "next tab"),
+                ("S-Left", "previous tab"),
+                ("C-t <digit[digit]>", "jump to tab by number"),
+                ("?", "this help"),
+            ]
+        );
+    }
+}

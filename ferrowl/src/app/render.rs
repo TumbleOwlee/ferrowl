@@ -278,7 +278,7 @@ fn render_command(command: &mut CommandLine, focus: Focus, area: Rect, buf: &mut
         buf.set_string(
             area.x,
             area.y,
-            "  :  command    |    C-w+j C-w+k  table/log    |    C-t+h C-t+l  tabs    |    ?  help",
+            "  :  command  |  C-w+j C-w+k S-Up S-Down  table/log  |  C-t+h C-t+l S-Left S-Right  tabs  |  ?  help",
             Style::default().fg(COLOR_SCHEME.text).bg(COLOR_SCHEME.bg),
         );
     }
