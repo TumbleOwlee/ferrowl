@@ -82,7 +82,7 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **UI-R-016** — The command line is parsed by a pure, state-independent parser into a fixed set of app-level commands ([`api-contract.md`](./api-contract.md) ``## Generic `:` commands (app-level)``); leading/trailing and inter-token whitespace collapsed. Any first token not recognized at the app level is forwarded verbatim to the active view.
 
-**UI-R-017** — App-level commands are dispatched by the application: tab lifecycle (`:quit`, `:qall`, `:new`, `:load`), session persistence (`:write`), tab reordering (`:swap`), session-script management (`:session`, `:script copy`), log-ring clear (`:log clear`). Exact syntax and aliases: [`api-contract.md`](./api-contract.md).
+**UI-R-017** — App-level commands are dispatched by the application: tab lifecycle (`:quit`, `:qall`, `:new`, `:clone`, `:load`), session persistence (`:write`), tab reordering (`:swap`), session-script management (`:session`, `:script copy`), log-ring clear (`:log clear`). Exact syntax and aliases: [`api-contract.md`](./api-contract.md).
 
 **UI-R-018** — A command not handled at the app level is forwarded to the active tab's view.
 
@@ -183,6 +183,18 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **UI-R-334** — A new-module dialog (UI-R-024) failing validation stays open.
 
 **UI-R-025** — Creating a tab whose name collides with an existing tab is refused with a warning in the active tab's log, dialog left open.
+
+**UI-R-366** — `:clone` opens a new-module setup dialog (UI-R-024) for the active tab's module type and role directly, without showing the module-type selector.
+
+**UI-R-367** — Every field of a `:clone` setup dialog (UI-R-366) other than the name field holds the value that `:edit` on the active tab would prefill into the same field of its setup dialog.
+
+**UI-R-368** — The name field of a `:clone` setup dialog (UI-R-366) is prefilled `<name>-<N>`, where `<name>` is the active tab's name and `<N>` is the smallest integer ≥ 2 for which no existing tab carries that name.
+
+**UI-R-369** — Confirming a valid `:clone` setup dialog (UI-R-366) creates and starts a new tab exactly as confirming a new-module setup dialog does (UI-R-333), a name collision being refused per UI-R-025.
+
+**UI-R-370** — A `:clone` setup dialog (UI-R-366) failing validation stays open, as a new-module dialog does (UI-R-334).
+
+**UI-R-371** — Opening, confirming or cancelling a `:clone` setup dialog (UI-R-366) leaves the source tab's configuration and run state unchanged.
 
 ### Field-completion popup
 

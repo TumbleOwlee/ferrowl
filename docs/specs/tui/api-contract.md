@@ -15,6 +15,7 @@ Dispatch: first token matched against the generic set; not in the set → forwar
 | `:quit` | `:q`, `:q!` | — | Stop and close the active tab; quit the app if it was the last | UI-R-019, UI-R-316 |
 | `:qall` | `:qa`, `:qa!` | — | Quit the whole app immediately | UI-R-019 |
 | `:new` | `:n` | — | Open the new-module type selector | UI-R-008, UI-R-024 |
+| `:clone` | — | — | Open the active tab's module setup dialog prefilled from that tab, name suffixed `-N`; confirm creates a new tab | UI-R-366, UI-R-367, UI-R-368, UI-R-369 |
 | `:load [path]` | `:l` | optional device-config path | Open the Modbus create dialog, config-path field pre-filled with `path` | UI-R-017 |
 | `:write [path]` | `:w`, `:s`, `:save` | optional output path (default `session.toml`) | Save all module instances plus session scripts/interval as a session file; format from extension (`.toml`/`.json`) | UI-R-017 |
 | `:swap <i> <j>` | — | two tab indices | Swap tabs `i` and `j` (no-op if equal or out of range); non-numeric rejected | UI-R-017 |
