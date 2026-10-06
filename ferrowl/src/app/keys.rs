@@ -84,9 +84,27 @@ impl<S: DrawSurface> App<S> {
             }
             return false;
         }
+        if modifiers == KeyModifiers::SHIFT
+            && matches!(
+                code,
+                KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down
+            )
+            && !self.view_overlay_active()
+        {
+            if let Some(KeyMode::TabDigit { first, .. }) = self.keymode {
+                self.switch_tab(first);
+            }
+            self.keymode = None;
+            match code {
+                KeyCode::Right => self.next_tab(),
+                KeyCode::Left => self.prev_tab(),
+                _ => self.toggle_pane(),
+            }
+            return false;
+        }
         match (&self.keymode, modifiers, code) {
             // Window switch
-            (None, KeyModifiers::CONTROL, KeyCode::Char('w')) => {
+            (None, KeyModifiers::CONTROL, KeyCode::Char('w')) if !self.view_overlay_active() => {
                 self.keymode = Some(KeyMode::CtrlWin)
             }
             (Some(KeyMode::CtrlWin), _, KeyCode::Char('j' | 'k') | KeyCode::Down | KeyCode::Up) => {
@@ -141,21 +159,9 @@ impl<S: DrawSurface> App<S> {
                 }
             }
             // Command
-            (None, _, KeyCode::Char(':'))
-                if !self
-                    .active_tab()
-                    .is_some_and(|t| t.view.is_overlay_active()) =>
-            {
-                self.enter_command()
-            }
+            (None, _, KeyCode::Char(':')) if !self.view_overlay_active() => self.enter_command(),
             // Keybind help, guarded like `:` so `?` still types into module edit fields.
-            (None, _, KeyCode::Char('?'))
-                if !self
-                    .active_tab()
-                    .is_some_and(|t| t.view.is_overlay_active()) =>
-            {
-                self.help_open = true
-            }
+            (None, _, KeyCode::Char('?')) if !self.view_overlay_active() => self.help_open = true,
             (_, _, _) => {
                 // A pending single-digit jump that never got a second digit still commits before
                 // the key is forwarded to the tab.
@@ -198,8 +204,13 @@ impl<S: DrawSurface> App<S> {
         self.set_content_focus(true);
     }
 
-    /// `Ctrl+w` j/k: toggle focus between the active tab's content view and its log pane. Only
-    /// reachable while the content surface is focused (the modal layers route keys elsewhere).
+    fn view_overlay_active(&self) -> bool {
+        self.active_tab()
+            .is_some_and(|t| t.view.is_overlay_active())
+    }
+
+    /// Toggle focus between the active tab's content view and its log pane. Reached from the
+    /// `Ctrl+w` chord and `Shift+Down`/`Shift+Up`, never under a view overlay or other modal layer.
     fn toggle_pane(&mut self) {
         if let Some(tab) = self.active_tab_mut() {
             tab.focus_next();
@@ -341,8 +352,8 @@ mod tests {
     }
 
     #[test]
-    /// UI-R-009 — the `Ctrl+w` chord toggles focus between the active tab's content view and its
-    /// log pane.
+    /// UI-R-009 — while content or log holds focus, the `Ctrl+w` chord toggles focus between the
+    /// active tab's content view and its log pane.
     fn ut_ctrl_w_chord_toggles_content_and_log_focus() {
         let mut app = app_with(&["a"]);
         assert!(!app.tabs.titles[0].is_log_focused());
@@ -472,5 +483,163 @@ mod tests {
             h0.keys().is_empty(),
             "the key is not delivered to the tab the jump left"
         );
+    }
+
+    const SHIFT: KeyModifiers = KeyModifiers::SHIFT;
+
+    #[test]
+    /// UI-R-359, UI-R-360 — `Shift+Right`/`Shift+Left` switch tabs, wrapping at both ends.
+    fn ut_shift_right_left_switch_tabs_wrapping() {
+        let mut app = app_with(&["a", "b", "c"]);
+        app.handle_nav_key(SHIFT, KeyCode::Right);
+        assert_eq!(app.tabs.selected_index(), 1);
+        app.handle_nav_key(SHIFT, KeyCode::Right);
+        app.handle_nav_key(SHIFT, KeyCode::Right);
+        assert_eq!(app.tabs.selected_index(), 0, "wraps last to first");
+        app.handle_nav_key(SHIFT, KeyCode::Left);
+        assert_eq!(app.tabs.selected_index(), 2, "wraps first to last");
+    }
+
+    #[test]
+    /// UI-R-361 — `Shift+Down`/`Shift+Up` toggle (not directional) content/log focus.
+    fn ut_shift_down_up_toggle_content_and_log_focus() {
+        let mut app = app_with(&["a"]);
+        for (key, log) in [
+            (KeyCode::Down, true),
+            (KeyCode::Down, false),
+            (KeyCode::Up, true),
+            (KeyCode::Up, false),
+        ] {
+            app.handle_nav_key(SHIFT, key);
+            assert_eq!(app.tabs.titles[0].is_log_focused(), log);
+        }
+    }
+
+    #[test]
+    /// UI-R-362, UI-E-165 — pane-level Shift+arrows never reach the content view.
+    fn ut_shift_arrows_never_reach_the_content_view() {
+        let (v, h) = MockView::pair("a");
+        let mut app = build_app(vec![v.boxed()]);
+        for k in [KeyCode::Left, KeyCode::Right, KeyCode::Down, KeyCode::Up] {
+            app.handle_nav_key(SHIFT, k);
+        }
+        assert!(h.keys().is_empty());
+        assert!(
+            !app.tabs.titles[0].is_log_focused(),
+            "Down+Up toggled twice"
+        );
+    }
+
+    #[test]
+    /// UI-R-009, UI-E-167 — `Ctrl+w` then j/k/Down/Up is inert under a view overlay and both keys
+    /// reach the overlay.
+    fn ut_ctrl_w_chord_does_not_switch_panes_under_view_overlay() {
+        let (v, h) = MockView::pair("a");
+        let mut app = build_app(vec![v.with_overlay_active().boxed()]);
+        let keys = [
+            KeyCode::Char('j'),
+            KeyCode::Char('k'),
+            KeyCode::Down,
+            KeyCode::Up,
+        ];
+        for k in keys {
+            chord(&mut app, 'w', k);
+            assert!(!app.tabs.titles[0].is_log_focused());
+        }
+        let got = h.keys();
+        assert_eq!(got.len(), 8);
+        assert_eq!(got[0], (KeyModifiers::CONTROL, KeyCode::Char('w')));
+        assert_eq!(got[1], (KeyModifiers::empty(), KeyCode::Char('j')));
+    }
+
+    #[test]
+    /// UI-R-361, UI-E-167 — `Shift+Down`/`Shift+Up` do not switch panes under a view overlay.
+    fn ut_shift_down_up_do_not_switch_panes_under_view_overlay() {
+        let (v, h) = MockView::pair("a");
+        let mut app = build_app(vec![v.with_overlay_active().boxed()]);
+        app.handle_nav_key(SHIFT, KeyCode::Down);
+        app.handle_nav_key(SHIFT, KeyCode::Up);
+        assert!(!app.tabs.titles[0].is_log_focused());
+        assert_eq!(h.keys(), vec![(SHIFT, KeyCode::Down), (SHIFT, KeyCode::Up)]);
+    }
+
+    #[test]
+    /// UI-R-359, UI-R-360 — `Shift+Left`/`Shift+Right` do not switch tabs under a view overlay.
+    fn ut_shift_left_right_do_not_switch_tabs_under_view_overlay() {
+        let (v0, h0) = MockView::pair("a");
+        let mut app = build_app(vec![
+            v0.with_overlay_active().boxed(),
+            MockView::pair("b").0.boxed(),
+        ]);
+        app.handle_nav_key(SHIFT, KeyCode::Right);
+        app.handle_nav_key(SHIFT, KeyCode::Left);
+        assert_eq!(app.tabs.selected_index(), 0);
+        assert_eq!(
+            h0.keys(),
+            vec![(SHIFT, KeyCode::Right), (SHIFT, KeyCode::Left)]
+        );
+    }
+
+    #[test]
+    /// UI-R-359, UI-R-361 — the keybind-help layer keeps Shift+arrows from switching tab or pane.
+    fn ut_shift_arrows_do_nothing_under_keybind_help() {
+        let mut app = app_with(&["a", "b"]);
+        app.handle_nav_key(KeyModifiers::empty(), KeyCode::Char('?'));
+        app.handle_nav_key(SHIFT, KeyCode::Right);
+        app.handle_nav_key(SHIFT, KeyCode::Down);
+        assert_eq!(app.tabs.selected_index(), 0);
+        assert!(!app.tabs.titles[0].is_log_focused());
+        assert!(app.help_open);
+    }
+
+    #[test]
+    /// UI-R-359, UI-R-362, UI-E-165 — a pending tab digit commits, then `Shift+Right` switches
+    /// from the landed tab without reaching the view.
+    fn ut_shift_right_commits_pending_tab_digit_then_switches() {
+        let (t1, h1) = MockView::pair("t1");
+        let mut views = vec![MockView::pair("t0").0.boxed(), t1.boxed()];
+        for n in 2..25 {
+            views.push(MockView::pair(&format!("t{n}")).0.boxed());
+        }
+        let mut app = build_app(views);
+        app.handle_nav_key(KeyModifiers::CONTROL, KeyCode::Char('t'));
+        app.handle_nav_key(KeyModifiers::empty(), KeyCode::Char('1'));
+        app.handle_nav_key(SHIFT, KeyCode::Right);
+        assert_eq!(app.tabs.selected_index(), 2);
+        assert!(app.keymode.is_none());
+        assert!(h1.keys().is_empty());
+    }
+
+    #[test]
+    /// UI-E-166 — an unmodified arrow (terminal without Shift reporting) is a plain arrow.
+    fn ut_plain_arrows_still_reach_the_content_view() {
+        let (v, h) = MockView::pair("a");
+        let mut app = build_app(vec![v.boxed(), MockView::pair("b").0.boxed()]);
+        app.handle_nav_key(KeyModifiers::empty(), KeyCode::Left);
+        app.handle_nav_key(KeyModifiers::empty(), KeyCode::Down);
+        assert_eq!(
+            h.keys(),
+            vec![
+                (KeyModifiers::empty(), KeyCode::Left),
+                (KeyModifiers::empty(), KeyCode::Down)
+            ]
+        );
+        assert_eq!(app.tabs.selected_index(), 0);
+        assert!(!app.tabs.titles[0].is_log_focused());
+    }
+
+    #[test]
+    /// UI-R-362, UI-R-359, UI-R-360 — with the log pane focused, Shift+Left/Right still switch
+    /// tabs and the content view receives nothing.
+    fn ut_shift_arrows_switch_tabs_while_log_focused() {
+        let (v0, h0) = MockView::pair("a");
+        let mut app = build_app(vec![v0.boxed(), MockView::pair("b").0.boxed()]);
+        app.handle_nav_key(SHIFT, KeyCode::Down);
+        assert!(app.tabs.titles[0].is_log_focused());
+        app.handle_nav_key(SHIFT, KeyCode::Right);
+        assert_eq!(app.tabs.selected_index(), 1);
+        app.handle_nav_key(SHIFT, KeyCode::Left);
+        assert_eq!(app.tabs.selected_index(), 0);
+        assert!(h0.keys().is_empty());
     }
 }

@@ -42,6 +42,9 @@ Boundary behavior, error semantics, intentional or known constraints.
 | **UI-E-017** | Non-digit pressed while a first digit is pending | commits the pending jump, then processes the key |
 | **UI-E-018** | Jump to out-of-range or already-active index | silent no-op |
 | **UI-E-019** | Tab switch with 0 or 1 tabs | safe no-op |
+| **UI-E-165** | `Shift+Left`/`Shift+Right`/`Shift+Down`/`Shift+Up` while a content view or log pane widget is focused (UI-R-362) | consumed by tab/focus switching; the widget never sees them, so no content view can bind Shift+arrows. Widgets inside an overlay or dialog are unaffected (UI-R-071) |
+| **UI-E-166** | Terminal (or multiplexer) that does not report the Shift modifier on arrow keys | Shift+arrow arrives as a plain arrow and is handled as one; the aliases (UI-R-359, UI-R-360, UI-R-361) are unavailable and the `Ctrl+t`/`Ctrl+w` chords remain the only path |
+| **UI-E-167** | `Ctrl+w` then `j`/`k`/`Down`/`Up`, or `Shift+Down`/`Shift+Up`, while a dialog or view overlay is open (UI-R-009, UI-R-361) | no pane switch; pane focus stays as it was when the dialog opened and is restored on close (UI-R-072); the keys go to the dialog/overlay (UI-R-071) |
 
 ---
 

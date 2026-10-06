@@ -222,6 +222,12 @@ impl MockView {
         (view, handle)
     }
 
+    /// Make `is_overlay_active()` report true.
+    pub(super) fn with_overlay_active(mut self) -> Self {
+        self.overlay_active = true;
+        self
+    }
+
     /// Make this view report a pending deferred stop that clears after `refreshes` more
     /// `refresh()` calls.
     pub(super) fn with_pending_stop_settling_after(self, refreshes: usize) -> Self {
