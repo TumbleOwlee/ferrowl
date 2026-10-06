@@ -42,9 +42,11 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **UI-R-057** — Whenever the application holds zero tabs and no modal layer is open (no app-level creation/type-select overlay, session dialog, or keybind-help dialog), it exits through the normal terminal-restoring path (UI-R-001). Cancelling the startup selector (UI-R-008) before any tab exists therefore quits. Independent of `:quit`/`:qall` (UI-R-019).
 
+**UI-R-363** — The keybind-help dialog (UI-R-005) has a Global section listing every binding in `api-contract.md` `## Global keybindings`, one entry per row with that row's action.
+
 ## Navigation & tab switching
 
-**UI-R-009** — `Ctrl+w` begins a window-switch chord; a following `j`, `k`, `Down`, or `Up` toggles focus between the active tab's content view and log pane.
+**UI-R-009** — While the active tab's content view or log pane holds focus (never while the command line, a dialog, or an overlay is open, UI-R-072), `Ctrl+w` begins a window-switch chord; a following `j`, `k`, `Down`, or `Up` toggles focus between the active tab's content view and log pane.
 
 **UI-R-010** — `Ctrl+t` begins a tab-switch chord: `l` next tab, `h` previous (both wrap), a digit begins a by-index jump.
 
@@ -61,6 +63,14 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **UI-R-012** — A jump to an out-of-range or already-active index is a silent no-op. Tab-switch operations are safe with zero or one tabs.
 
 **UI-R-013** — In a focused table or selection list, `j`/`Down` and `k`/`Up` move the row selection; `h`/`Left` and `l`/`Right` move the column selection (tables) or item (horizontal selection); `g` first row, `G` last, `0`/`Home` first column, `$`/`End` last. Selection clamps at the ends.
+
+**UI-R-359** — While the active tab's content view or log pane holds focus (never while the command line, a dialog, or an overlay is open, UI-R-072), `Shift+Right` switches to the next tab, wrapping from the last tab to the first, exactly as `Ctrl+t` `l` (UI-R-010).
+
+**UI-R-360** — While the active tab's content view or log pane holds focus (never while the command line, a dialog, or an overlay is open, UI-R-072), `Shift+Left` switches to the previous tab, wrapping from the first tab to the last, exactly as `Ctrl+t` `h` (UI-R-010).
+
+**UI-R-361** — While the active tab's content view or log pane holds focus (never while the command line, a dialog, or an overlay is open, UI-R-072), `Shift+Down` or `Shift+Up` toggles focus between the active tab's content view and log pane, exactly as the `Ctrl+w` chord (UI-R-009).
+
+**UI-R-362** — `Shift+Left`, `Shift+Right`, `Shift+Down`, and `Shift+Up` pressed while the active tab's content view or log pane holds focus are consumed by tab/focus switching (UI-R-359, UI-R-360, UI-R-361) and never delivered to the focused content view or log pane.
 
 ## Command line mechanism
 
@@ -107,6 +117,10 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **UI-R-197** — An empty help list (UI-R-196) renders no help box, and the command line occupies its single row alone.
 
 **UI-R-198** — The command-line widget parses nothing: the submit outcome of UI-R-191 carries the raw trimmed string and the widget derives no command from it.
+
+**UI-R-364** — The application's command-line hint (UI-R-194) names both pane-toggle bindings: the `Ctrl+w` chord (UI-R-009) and `Shift+Down`/`Shift+Up` (UI-R-361).
+
+**UI-R-365** — The application's command-line hint (UI-R-194) names both tab-switch bindings: the `Ctrl+t` chord (UI-R-010) and `Shift+Left`/`Shift+Right` (UI-R-359, UI-R-360).
 
 ### Lifecycle command dispatch
 

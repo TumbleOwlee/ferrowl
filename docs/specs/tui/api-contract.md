@@ -97,9 +97,12 @@ Modbus monitor module (`role = monitor`, MB-R-140–145, MB-R-191–198):
 |---|---|---|---|
 | `:` | content focused, no view overlay | Enter command mode | UI-R-014 |
 | `?` | content focused, no view overlay | Open the keybind-help dialog | UI-R-005 |
-| `Ctrl+w` then `j`/`k`/`Down`/`Up` | content focused | Toggle focus between content view and log pane | UI-R-009 |
+| `Ctrl+w` then `j`/`k`/`Down`/`Up` | content or log focused, no dialog or view overlay | Toggle focus between content view and log pane | UI-R-009 |
+| `Shift+Down` / `Shift+Up` | content or log focused, no dialog or view overlay | Toggle focus between content view and log pane | UI-R-361 |
 | `Ctrl+t` then `l` | content focused | Next tab (wraps) | UI-R-010 |
 | `Ctrl+t` then `h` | content focused | Previous tab (wraps) | UI-R-010 |
+| `Shift+Right` | content or log focused, no dialog or view overlay | Next tab (wraps) | UI-R-359 |
+| `Shift+Left` | content or log focused, no dialog or view overlay | Previous tab (wraps) | UI-R-360 |
 | `Ctrl+t` then digit(s) | content focused | Jump to tab by index; waits up to 800 ms for a 2nd digit if one could form a valid 2-digit index (UI-R-011) | UI-R-011 |
 
 `:` and `?` are suppressed while the active view has an overlay open; they type into it instead.
