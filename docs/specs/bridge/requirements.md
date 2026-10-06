@@ -72,9 +72,15 @@ Per [`../README.md`](../README.md)'s ownership rules, this area does **not** own
 
 **BR-R-025** — The bridge exits 0 on `--duration` deadline or Ctrl-C (exit codes mirror `run`, BR-R-013).
 
-**BR-R-026** — With `--exit-on-error`, the bridge exits 3 on a drained `[bridge]`-sourced error line (exit codes mirror `run`, BR-R-013).
+**BR-R-026** — With `--exit-on-error`, the bridge exits 3 on a drained `[bridge]`-sourced line whose producer-chosen level is Error (CL-R-060; exit codes mirror `run`, BR-R-013).
 
 **BR-R-014** — `bridge` accepts an optional `--duration <secs>`, identical semantics to `run`'s (CL-R-013 family).
+
+**BR-R-031** — A line emitted by a bridge leg's Modbus client or server carries the level the Modbus requirement for that line's category assigns (MB-R-178, MB-R-256, MB-R-259 – MB-R-271, MB-R-275 – MB-R-279).
+
+**BR-R-032** — The bridge's line reporting a relayed request (BR-R-012) carries Info.
+
+**BR-R-033** — The bridge's failure line for a relayed request ("answered with a gateway exception"), emitted only when the downstream request failed by a transport error (timeout, I/O, closed, desync; answered upstream with gateway-target-device-failed-to-respond) or no downstream is connected (answered with gateway-path-unavailable), carries Error in both cases (MB-R-264).
 
 ## Multidrop bus safety
 

@@ -53,10 +53,10 @@ Boundary behavior, error semantics, intentional constraints.
 | **OC-E-029** | Connection drops on the CSMS | that connection deregistered; accept loop and other connections unaffected |
 | **OC-E-030** | CS socket dropped without explicit `:stop`, then `:start` | stale handle torn down first, then a fresh dial |
 | **OC-E-031** | `:start` on an already-connected CS | no-op |
-| **OC-E-032** | CSMS listener fails to bind | logged as an error; retry per OC-E-085 |
-| **OC-E-033** | `accept()` itself errors | logged; accept loop keeps running |
+| **OC-E-032** | CSMS listener fails to bind | logged at Error per OC-R-178; retry per OC-E-085 |
+| **OC-E-033** | `accept()` itself errors | logged at Warning in the CSMS tab log (OC-R-188, OC-R-181); accept loop keeps running after a fixed 1 s wait (OC-R-197) |
 | **OC-E-096** | `:stop` on a CS whose dial to an unresponsive peer is in flight, or on a CSMS waiting in bind or `accept()` | the pending operation is abandoned at once and the module reaches `DISCONNECTED` without waiting for the peer's TCP, TLS, or WebSocket handshake to time out (OC-R-175, OC-R-176, OC-R-177) |
-| **OC-E-097** | Non-terminate command sent while a CS dial, or a CSMS bind, is in flight | parked for the duration of the attempt and delivered once it succeeds; dropped with a log line only if it fails (OC-R-175, OC-R-176; the backoff wait is OC-E-084's separate case, where a command is dropped, not queued) |
+| **OC-E-097** | Non-terminate command sent while a CS dial, or a CSMS bind, is in flight | parked for the duration of the attempt and delivered once it succeeds; dropped with a Warning log line in the module's tab log only if it fails (OC-R-191, OC-R-120, OC-R-181; OC-R-175, OC-R-176; the backoff wait is OC-E-084's separate case, where a command is dropped, not queued) |
 
 ---
 
@@ -68,7 +68,7 @@ Boundary behavior, error semantics, intentional constraints.
 | **OC-E-035** | CSMS has Basic Auth, header mismatch | HTTP **401** |
 | **OC-E-036** | CSMS has no Basic Auth, request sends one | accepted; header ignored |
 | **OC-E-037** | Request lacks the version's subprotocol token | HTTP **400**, handshake refused |
-| **OC-E-038** | TLS handshake fails on an accepted socket | logged with peer address; socket dropped. Listener keeps accepting |
+| **OC-E-038** | TLS handshake fails on an accepted socket | logged at Error in the CSMS tab log with peer address (OC-R-189, OC-R-181); socket dropped. Listener keeps accepting |
 | **OC-E-039** | CS connects to a TLS CSMS whose certificate is not trusted | dial fails; module reports a connect failure |
 | **OC-E-042** | CSMS `ServerTlsPolicy::Mutual`, `verification` resolves to `CaFiles` with zero `ca_files` | fails at construction/`resolve()`, never at listener start (OC-R-039) |
 | **OC-E-043** | CSMS `ServerTlsPolicy::Mutual` with `identity: CertSource::SelfSigned` and `verification: CaFiles` with ≥1 file | permitted; self-signed identity and client-cert CAs are independent (OC-R-040) |

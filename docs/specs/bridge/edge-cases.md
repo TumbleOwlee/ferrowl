@@ -41,3 +41,4 @@ Boundary behavior, error semantics, intentional constraints.
 ## Logging and process contract
 
 - **BR-E-011** — **`--exit-on-error` exit code** — `--exit-on-error` exits 3, distinct from the clap usage-error code 2, mirroring `run` (CL-E-003).
+- **BR-E-012** — **Downstream exception responses are not logged** — a Modbus exception response from the downstream device is relayed upstream unchanged and emits no bridge failure line (BR-R-033); only transport failures and a missing downstream produce one. Deliberate — the exception is the device's valid answer, which the bridge passes through.

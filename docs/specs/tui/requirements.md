@@ -700,6 +700,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **UI-R-043** — Each tab owns a bounded ring log of timestamped, severity-tagged lines (Info/Warning/Error). The log pane shows the most recent lines and auto-follows the tail unless the user has focused that tab's log pane, in which case scroll position holds.
 
+**UI-R-372** — A line a module's crate log callback emits (MB-R-258, OC-R-180) is appended to its tab log (UI-R-043) at the level the producer passed, never re-derived from the message text.
+
 **UI-R-044** — A log line longer than the per-line cap is truncated to it. A monotonic total-written counter lets a consumer holding only a bounded snapshot compute how many lines are new since its last read, across ring eviction.
 
 **UI-R-045** — `:log clear` clears the active tab's on-screen ring.

@@ -114,6 +114,7 @@ Boundary behavior, error semantics, intentional constraints.
 | ID | Condition | Behavior |
 |---|---|---|
 | **MB-E-015** | Frame fails CRC (RTU) or LRC (Ascii), or otherwise malformed | logged at Warning level and discarded. Expected on a live multi-drop bus (noise, a device's retry, monitor attaching mid-frame) |
+| **MB-E-098** | Client or server line built from runtime error text (OS or protocol error description), MB-R-258 – MB-R-280 | carries the fixed level of its category, whatever words the error text contains; a request timeout logs at Error and a refused connect at Error even if the OS text reads "failed" or "invalid". Deliberate — the level is part of the line's category, not its wording; lines whose level today comes from keywords in the text may change level |
 | **MB-E-016** | Completed pairing's operation (MB-R-146) is `ReadWriteMultipleRegisters` (two addresses, two quantities) | Address renders `read_address/write_address`; Quantity `read_quantity/write_quantity`; Values/Payload shows the read response's registers only. The write's values are visible in Memory layout once applied |
 | **MB-E-017** | No traffic at all for a table kind on the selected unit id | that kind's hex-editor block (UI-R-063) omitted from Memory layout, not shown empty (MB-R-144) |
 | **MB-E-018** | Retransmitted `WriteSingleRegister`/`WriteSingleCoil` request arrives while awaiting that request's response | decodes as the response to itself (byte-identical on the wire): false `Ok` record and phantom observed-table write. `WriteMultiple*` and reads unaffected |

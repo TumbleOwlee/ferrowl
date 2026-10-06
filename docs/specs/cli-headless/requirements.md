@@ -119,3 +119,5 @@ Per [`../README.md`](../README.md)'s ownership rules, this area does **not** own
 **CL-R-043** — Per-module draining is exact-by-count (tracking total lines written), so a message repeated verbatim within one drain window is emitted every time.
 
 **CL-R-052** — If more lines were written to a module's log between ticks than the ring holds, the per-module drain (CL-R-043) reports the overflow with a synthetic `(<n> lines dropped: ring overflowed between ticks)` line.
+
+**CL-R-060** — A module line drained by `ferrowl run` or `ferrowl bridge` keeps the level its producer passed (MB-R-258, OC-R-180), which is the level `--exit-on-error` tests (CL-R-031, BR-R-026), never re-derived from the message text.

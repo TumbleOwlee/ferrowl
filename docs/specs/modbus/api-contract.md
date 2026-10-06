@@ -261,3 +261,9 @@ MB-R-145 — display-only interpretation against a monitor's observed-value tabl
 | `default` | optional scalar | unset | int, float, or string; no memory store to write into, so accepted but no effect — kept so a `RegisterDef`-shaped fragment still deserializes | — |
 
 A pasted-in fragment carrying `access` and/or `update` deserializes cleanly, both ignored as unknown fields (same tolerance `## Device config (one file = one device type)`/``### `read_ranges` `` document for other role-conditional shapes).
+
+## Log callback
+
+| Item | Shape | Req |
+|---|---|---|
+| Module log callback | receives `(Level, String)` per line; `Level` is the crate's own `ferrowl_modbus::Level`, with exactly the variants `Info`, `Warning`, `Error` | MB-R-258 |

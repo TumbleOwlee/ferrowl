@@ -363,3 +363,9 @@ Protocol-specific commands owned here (mechanism owned by `tui/`).
 | `:log [file]` | set (or clear) the persistent log file | OC-R-087, OC-R-088 |
 
 A client does **not** connect on creation — `:start` required. A server binds automatically on creation (OC-R-083, OC-R-138).
+
+## Log callback
+
+| Item | Shape | Req |
+|---|---|---|
+| Module log callback | receives `(Level, String)` per line; `Level` is the crate's own `ferrowl_ocpp::Level`, with exactly the variants `Info`, `Warning`, `Error` | OC-R-180 |
