@@ -2234,9 +2234,10 @@ dependencies = [
 [[package]]
 name = "rust-modbus"
 version = "0.3.0"
-source = "git+https://github.com/TumbleOwlee/rust-modbus?rev=2f3ecebd3a10060e72619a82d8e01ea2d870166a#2f3ecebd3a10060e72619a82d8e01ea2d870166a"
+source = "git+https://github.com/TumbleOwlee/rust-modbus?rev=0e6ce4e362d109001ca68156c440ad16bc8389fe#0e6ce4e362d109001ca68156c440ad16bc8389fe"
 dependencies = [
  "crc",
+ "libc",
  "rustls",
  "rustls-native-certs",
  "rustls-pki-types",

@@ -1107,6 +1107,7 @@ mod tests {
         }));
         let e = classify(res).unwrap_err();
         assert!(matches!(e, ModbusError::Error(_)));
+            raw_os_error: None,
     }
 
     #[tokio::test]
