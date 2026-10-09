@@ -19,7 +19,7 @@ use tokio::time::sleep;
 
 /// No-op log/status sink. `LogFn + Clone` is satisfied by a capture-free closure.
 fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
-    |_s: String| async move {}
+    |_level: ferrowl_ocpp::Level, _s: String| async move {}
 }
 
 /// CSMS handler answering the single action these tests exercise.
@@ -261,4 +261,164 @@ async fn it_cs_terminate_during_hanging_dial_ends_task_ok() {
         .await
         .expect("terminate must not wait for the 30s handshake timeout");
     assert!(result.is_ok());
+}
+
+type Lines = Arc<parking_lot::Mutex<Vec<(ferrowl_ocpp::Level, String)>>>;
+
+/// A log sink recording each line with its level.
+fn capturing() -> (impl ferrowl_ocpp::LogFn + Clone, Lines) {
+    let lines = Lines::default();
+    let sink = lines.clone();
+    let f = move |level: ferrowl_ocpp::Level, s: String| {
+        let sink = sink.clone();
+        async move {
+            sink.lock().push((level, s));
+        }
+    };
+    (f, lines)
+}
+
+fn has(lines: &Lines, level: ferrowl_ocpp::Level, needle: &str) -> bool {
+    lines
+        .lock()
+        .iter()
+        .any(|(l, s)| *l == level && s.contains(needle))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// OC-R-180, OC-R-183, OC-R-185, OC-R-186, OC-R-193 — a failed dial logs at Error whatever the
+/// error text says, the backoff announcement logs at Info, a command dropped while backing off
+/// logs at Warning, and terminating logs the disconnect at Info.
+async fn it_cs_dial_failure_and_backoff_lines_carry_levels() {
+    use ferrowl_ocpp::Level;
+    let socket = tokio::net::TcpSocket::new_v4().unwrap();
+    socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let port = socket.local_addr().unwrap().port();
+    let (status, status_lines) = capturing();
+    let (log, log_lines) = capturing();
+    let client = cs::ClientBuilder::<V1_6>::new(
+        config(format!("ws://127.0.0.1:{port}/ocpp/CS001"), true),
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(TestCs, log, status)
+    .await
+    .expect("spawn always returns Ok");
+
+    wait_until(
+        "dial failure and backoff announcement",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || {
+            (status_lines.lock().iter().any(|(l, _)| *l == Level::Error)
+                && has(&status_lines, Level::Info, "Reconnecting in"))
+            .then_some(())
+        },
+    )
+    .await;
+
+    // Sent while backing off: dropped with a Warning.
+    let hb = Action16::Heartbeat(serde_json::from_value(serde_json::json!({})).unwrap());
+    let _ = tokio::time::timeout(Duration::from_millis(300), client.call(hb)).await;
+    wait_until(
+        "dropped command logged",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || has(&log_lines, Level::Warning, "Command dropped").then_some(()),
+    )
+    .await;
+
+    let _ = client.terminate().await;
+    assert!(has(&status_lines, Level::Info, "Client disconnected"));
+    drop(socket);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// OC-R-180, OC-R-184 — an established connection that drops other than by terminate logs
+/// "Connection dropped." at Warning.
+async fn it_cs_connection_drop_logs_warning() {
+    use ferrowl_ocpp::Level;
+    let server = csms::ServerBuilder::<V1_6>::new(
+        csms::Config {
+            host: "127.0.0.1".to_owned(),
+            port: 0,
+            timeout_ms: 1000,
+            reconnect: true,
+            basic_auth: None,
+            tls: Default::default(),
+        },
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(TestCsms, sink())
+    .await
+    .expect("server failed to bind");
+    let addr = wait_until(
+        "CSMS listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || server.local_addr(),
+    )
+    .await;
+    let (status, status_lines) = capturing();
+    let client = cs::ClientBuilder::<V1_6>::new(
+        config(format!("ws://{addr}/ocpp/CS001"), true),
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(TestCs, sink(), status)
+    .await
+    .expect("spawn always returns Ok");
+    let hb = Action16::Heartbeat(serde_json::from_value(serde_json::json!({})).unwrap());
+    let _ = tokio::time::timeout(Duration::from_secs(2), client.call(hb)).await;
+
+    server.terminate().await.expect("server terminate failed");
+    wait_until(
+        "connection drop logged",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || has(&status_lines, Level::Warning, "Connection dropped.").then_some(()),
+    )
+    .await;
+    let _ = client.terminate().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// OC-R-191, OC-E-097 — a command parked during a dial that then fails (here: the peer accepts
+/// the TCP connection, then closes it mid-handshake) is dropped with a Warning.
+async fn it_cs_parked_command_dropped_on_failed_dial_logs_warning() {
+    use ferrowl_ocpp::Level;
+    let guard = reserve_tcp_port();
+    let port = guard.port();
+    let listener = guard.into_listener();
+    let peer = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        std::thread::sleep(Duration::from_millis(500));
+        drop(stream);
+    });
+    let cfg = Arc::new(RwLock::new(cs::Config {
+        extra_headers: Vec::new(),
+        url: format!("ws://127.0.0.1:{port}/ocpp/CS001"),
+        reconnect: true,
+        timeout_ms: 400,
+        basic_auth: None,
+        tls: Default::default(),
+    }));
+    let (log, log_lines) = capturing();
+    let client = cs::ClientBuilder::<V1_6>::new(cfg, ferrowl_ocpp::new_self_signed_cache())
+        .spawn(TestCs, log, sink())
+        .await
+        .expect("spawn always returns Ok");
+    let hb = Action16::Heartbeat(serde_json::from_value(serde_json::json!({})).unwrap());
+    client
+        .sender()
+        .send(cs::Command::SendAction(hb))
+        .await
+        .unwrap();
+    wait_until(
+        "parked command dropped",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || has(&log_lines, Level::Warning, "Command dropped").then_some(()),
+    )
+    .await;
+    let _ = client.terminate().await;
+    peer.join().unwrap();
 }

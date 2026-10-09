@@ -19,7 +19,7 @@ use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 
 /// No-op log/status sink. `LogFn + Clone` is satisfied by a capture-free closure.
 fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
-    |_s: String| async move {}
+    |_level: ferrowl_ocpp::Level, _s: String| async move {}
 }
 
 /// CS handler; this test never receives a server-initiated Call.

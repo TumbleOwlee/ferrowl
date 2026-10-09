@@ -509,7 +509,7 @@ mod tests {
             }
         }
         fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
-            |_s: String| async move {}
+            |_level: ferrowl_ocpp::Level, _s: String| async move {}
         }
 
         let dir = reserve_temp_dir("ferrowl_cfgmod_tls_fail");

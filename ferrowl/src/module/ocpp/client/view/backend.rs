@@ -778,7 +778,7 @@ mod tests {
 
     /// No-op log sink for the CSMS side, mirroring `ferrowl-ocpp/tests/ws_loopback_v16.rs::sink`.
     fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
-        |_s: String| async move {}
+        |_level: ferrowl_ocpp::Level, _s: String| async move {}
     }
 
     fn client_view<V: ClientVersion>(version: OcppVersion, port: u16) -> ClientView<V> {

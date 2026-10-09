@@ -320,19 +320,14 @@ impl<V: Version> OcppClient<V> {
             let _ = self.stop().await;
         }
         let config = build_config(spec, device);
-        let wire_log = log_fn(self.messages.clone());
-        // OC-R-120: connection-status lines (failed-dial reason, "Connection dropped.", the
-        // backoff-wait line, and the final "Client disconnected" once the client task ends
-        // regardless of why) go to the module log, not the message table — the message table
-        // records only request/response pairs (`docs/specs/ocpp/data-contract.md` `## Message
-        // log`). General diagnostic strings (`wire_log`, e.g. "Command dropped...") are
-        // unaffected and keep going to the message table as before.
-        let status = status_fn(log.clone());
+        // OC-R-120: every line the client crate emits goes to the module log at the level its
+        // producer chose; the message table records only request/response pairs.
+        let sink = log_fn(log.clone());
         let client = ClientBuilder::<V>::new(
             Arc::new(RwLock::new(config)),
             self.self_signed_cache.clone(),
         )
-        .spawn(handler, wire_log, status)
+        .spawn(handler, sink.clone(), sink)
         .await?;
         *self.cmd_tx.write() = Some(client.sender());
         self.client = CsState::Running(client);
@@ -568,34 +563,16 @@ async fn record(
     );
 }
 
-/// A `LogFn` that records error/diagnostic strings into the message log.
+/// A `LogFn` that writes each line into the module log at the level its producer chose
+/// (OC-R-120).
 fn log_fn(
-    messages: Messages,
-) -> impl Fn(String) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> + Clone {
-    move |s: String| {
-        let messages = messages.clone();
-        Box::pin(async move {
-            let mut guard = messages.write().await;
-            push_capped(
-                &mut guard,
-                OcppMessage::new(Dir::In, "log", Value::String(s), None, String::new()),
-            );
-        })
-    }
-}
-
-/// A `LogFn` that records connection-status lines (failed-dial reason, "Connection dropped.",
-/// the backoff-wait line, and the final "Client disconnected" once the client task ends
-/// regardless of why) into the module log (OC-R-120), not the message table — the message table
-/// records only request/response message pairs (`docs/specs/ocpp/data-contract.md`
-/// `## Message log`).
-fn status_fn(
     log: SharedLog,
-) -> impl Fn(String) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> + Clone {
-    move |s: String| {
+) -> impl Fn(ferrowl_ocpp::Level, String) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> + Clone
+{
+    move |level: ferrowl_ocpp::Level, s: String| {
         let log = log.clone();
         Box::pin(async move {
-            log.write().await.write(crate::app::Level::Info, &s);
+            log.write().await.write(level.into(), &s);
         })
     }
 }
@@ -1000,7 +977,7 @@ mod tests {
 
     /// No-op log sink for the loopback test below (mirrors `ferrowl-ocpp/tests/ws_loopback_v16.rs`).
     fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
-        |_s: String| async move {}
+        |_level: ferrowl_ocpp::Level, _s: String| async move {}
     }
 
     /// A minimal CSMS test double that default-accepts Heartbeat, for the live-sender test below.
@@ -1219,5 +1196,71 @@ mod tests {
         let neutral = msg_row(&OcppMessage::new(Dir::Out, "Boot", json!({}), None, ""));
         assert_eq!(neutral.status, "");
         assert!(msg_cell_styles(&neutral)[3].is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// OC-R-120, OC-R-180, OC-R-183 — a failed dial lands in the module log at Error, a command
+    /// dropped while backing off (a diagnostic line) lands there too at Warning, and no
+    /// diagnostic row reaches the message table.
+    async fn it_cs_dial_failure_logs_error_in_module_log() {
+        let socket = tokio::net::TcpSocket::new_v4().unwrap();
+        socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let spec = OcppSpec {
+            name: "cs".to_owned(),
+            version: Default::default(),
+            role: Default::default(),
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".to_owned(),
+            port: socket.local_addr().unwrap().port(),
+            path: "/ocpp/CS001".to_owned(),
+            timeout_ms: Some(200),
+            reconnect: Some(true),
+            security: OcppSecurityConfig::default(),
+        };
+        let log = test_log();
+        let mut backend = OcppClient::<ferrowl_ocpp::V1_6>::new();
+        backend
+            .start(&spec, &OcppDeviceConfig::default(), &log, NoopCsHandler)
+            .await
+            .expect("start must not fail synchronously");
+
+        wait_until_async(
+            "dial failure in the module log",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            async || {
+                let lines = log.read().await.peek_n(50);
+                lines
+                    .iter()
+                    .any(|(_, level, _)| *level == crate::app::Level::Error)
+                    .then_some(())
+            },
+        )
+        .await;
+        let tx = backend.cmd_tx.read().clone().expect("running");
+        let hb = ferrowl_ocpp::Action16::Heartbeat(serde_json::from_value(json!({})).unwrap());
+        tx.send(Command::SendAction(hb)).await.unwrap();
+        wait_until_async(
+            "dropped-command diagnostic in the module log",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            async || {
+                let lines = log.read().await.peek_n(50);
+                lines
+                    .iter()
+                    .any(|(_, level, s)| {
+                        *level == crate::app::Level::Warning && s.starts_with("Command dropped")
+                    })
+                    .then_some(())
+            },
+        )
+        .await;
+        let messages = backend.messages_handle();
+        assert!(
+            messages.read().await.iter().all(|m| m.name != "log"),
+            "diagnostics must not land in the message table"
+        );
+        let _ = backend.stop().await;
+        drop(socket);
     }
 }

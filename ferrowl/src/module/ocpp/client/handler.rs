@@ -157,7 +157,7 @@ mod tests {
 
     /// No-op log sink for the CSMS side of a real loopback test.
     fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
-        |_s: String| async move {}
+        |_level: ferrowl_ocpp::Level, _s: String| async move {}
     }
 
     /// Connect a real `OcppClient<V>` to the CSMS bound at `server`, backed by `state`, waiting for

@@ -20,6 +20,7 @@ use crate::module::ocpp::config::session::OcppSpec;
 use crate::module::ocpp::lock::{with_state, with_state_mut};
 pub use crate::module::ocpp::scope::Scope;
 use crate::module::ocpp::wire_log::encode_response_or_log;
+use crate::module::view::SharedLog;
 
 /// A lifecycle/message event delivered from the CSMS server tasks to the view. Version-agnostic:
 /// action payloads are carried as JSON so the (version-specific) view extracts connector ids and
@@ -181,16 +182,19 @@ pub struct OcppServer<V: Version> {
     /// reused across every `start()` call so repeated `:restart`/rebind attempts don't
     /// regenerate it — never reinitialized inside `start()`.
     self_signed_cache: ferrowl_ocpp::SelfSignedCache,
+    /// The tab log the CSMS crate's lines are routed into (OC-R-181).
+    log: SharedLog,
 }
 
 impl<V: Version> OcppServer<V>
 where
     V::Action: Clone,
 {
-    pub fn new() -> Self {
+    pub fn new(log: SharedLog) -> Self {
         Self {
             server: CsmsState::Idle,
             self_signed_cache: ferrowl_ocpp::new_self_signed_cache(),
+            log,
         }
     }
 
@@ -259,8 +263,14 @@ where
             basic_auth: spec.security.basic_auth(),
             tls,
         };
+        let log = self.log.clone();
         let server = ServerBuilder::<V>::new(config, self.self_signed_cache.clone())
-            .spawn(handler, |_s: String| async {})
+            .spawn(handler, move |level: ferrowl_ocpp::Level, s: String| {
+                let log = log.clone();
+                async move {
+                    log.write().await.write(level.into(), &s);
+                }
+            })
             .await?;
         self.server = CsmsState::Running(server);
         Ok(binding)
@@ -371,6 +381,7 @@ pub fn inbound_messages(name: &str, request: Value, response: Value) -> [OcppMes
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::LogRing;
 
     use crate::module::ocpp::config::device::OcppSecurityConfig;
     use crate::module::ocpp::config::session::OcppProtocol;
@@ -415,7 +426,9 @@ mod tests {
             security: OcppSecurityConfig::default(),
         };
 
-        let mut backend = OcppServer::<ferrowl_ocpp::V1_6>::new();
+        let mut backend = OcppServer::<ferrowl_ocpp::V1_6>::new(Arc::new(
+            tokio::sync::RwLock::new(LogRing::init()),
+        ));
         backend
             .start(&spec, NoopCsmsHandler)
             .await
@@ -454,7 +467,9 @@ mod tests {
             security: OcppSecurityConfig::default(),
         };
 
-        let mut backend = OcppServer::<ferrowl_ocpp::V1_6>::new();
+        let mut backend = OcppServer::<ferrowl_ocpp::V1_6>::new(Arc::new(
+            tokio::sync::RwLock::new(LogRing::init()),
+        ));
         backend
             .start(&spec, NoopCsmsHandler)
             .await
@@ -538,5 +553,65 @@ mod tests {
         // Connector 2 still inherits CS (its own list is empty, CS is not).
         assert!(scope_authorized(&s, Scope::connector(2), "CS"));
         assert!(!scope_authorized(&s, Scope::connector(2), "NOPE"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// OC-R-181, OC-R-196, UI-R-372 — a line the CSMS crate emits reaches the tab log at the level
+    /// the producer chose: a command to an unknown connection lands as a Warning.
+    async fn it_csms_crate_lines_reach_tab_log() {
+        let log: SharedLog = Arc::new(tokio::sync::RwLock::new(LogRing::init()));
+        let spec = OcppSpec {
+            name: "csms".to_owned(),
+            version: Default::default(),
+            role: Default::default(),
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".to_owned(),
+            port: 0,
+            path: "/ocpp/CS001".to_owned(),
+            timeout_ms: Some(1000),
+            reconnect: None,
+            security: OcppSecurityConfig::default(),
+        };
+        let mut backend = OcppServer::<ferrowl_ocpp::V1_6>::new(log.clone());
+        backend
+            .start(&spec, NoopCsmsHandler)
+            .await
+            .expect("start must succeed");
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || backend.bound_addr().is_some().then_some(()),
+        )
+        .await;
+
+        let hb = ferrowl_ocpp::Action16::Heartbeat(
+            serde_json::from_value(serde_json::json!({})).unwrap(),
+        );
+        backend
+            .sender()
+            .expect("bound")
+            .cmd_tx
+            .send(Command::SendToConnection(ConnectionId(999), hb))
+            .await
+            .unwrap();
+
+        wait_until_async(
+            "unknown-connection line in the tab log",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            async || {
+                let lines = log.read().await.peek_n(50);
+                lines
+                    .iter()
+                    .any(|(_, level, s)| {
+                        *level == crate::app::Level::Warning
+                            && s.starts_with("CSMS: no such connection")
+                    })
+                    .then_some(())
+            },
+        )
+        .await;
+        backend.stop().await.expect("stop() must succeed");
     }
 }

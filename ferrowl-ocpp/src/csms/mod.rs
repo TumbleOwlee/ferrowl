@@ -89,6 +89,7 @@ where
             && *used_fallback
         {
             log.invoke(
+                crate::Level::Info,
                 "No cert_file/key_file/self_signed configured for this TLS server; falling \
                  back to an ephemeral self-signed certificate."
                     .to_string(),
@@ -254,13 +255,7 @@ where
                     // dropped here, with the same log line as a command arriving while the
                     // listener is not bound and backing off: there is no accept loop left to
                     // hand it to.
-                    for _ in 0..parked.len() {
-                        log.invoke(
-                            "Command dropped: CSMS listener is not bound yet and retrying."
-                                .to_string(),
-                        )
-                        .await;
-                    }
+                    log_parked_dropped(&log, parked.len()).await;
                     AttemptOutcome::Failed {
                         error: Error::from(e),
                         reconnect: config.reconnect,
@@ -316,7 +311,7 @@ where
                 backoff,
                 "Command dropped: CSMS listener is not bound yet and retrying.",
                 |cmd: &Command<V>| matches!(cmd, Command::Terminate),
-                |msg| log.invoke(msg),
+                |msg| log.invoke(crate::Level::Warning, msg),
             )
             .await
         }
@@ -365,7 +360,7 @@ async fn accept_loop<V, H, L>(
                                 match acceptor.accept(stream).await {
                                     Ok(tls_stream) => ServerStream::Tls(Box::new(tls_stream)),
                                     Err(e) => {
-                                        log.invoke(format!("CSMS TLS handshake failed from {peer}: {e}")).await;
+                                        log.invoke(crate::Level::Error, format!("CSMS TLS handshake failed from {peer}: {e}")).await;
                                         return;
                                     }
                                 }
@@ -393,7 +388,7 @@ async fn accept_loop<V, H, L>(
                         let ws = match accept_hdr_async(stream, callback).await {
                             Ok(ws) => ws,
                             Err(e) => {
-                                log.invoke(format!("CSMS handshake failed from {peer}: {e}")).await;
+                                log.invoke(crate::Level::Error, format!("CSMS handshake failed from {peer}: {e}")).await;
                                 return;
                             }
                         };
@@ -407,7 +402,7 @@ async fn accept_loop<V, H, L>(
                         .await;
                     });
                 }
-                Err(e) => log.invoke(format!("CSMS accept error: {e}")).await,
+                Err(e) => log_accept_error(&log, &e).await,
             },
             cmd = commands.recv() => match cmd {
                 None | Some(Command::Terminate) => {
@@ -418,7 +413,7 @@ async fn accept_loop<V, H, L>(
                 }
                 Some(Command::SendToConnection(id, action)) => match registry.sender(id) {
                     Some(tx) => { let _ = tx.send(ConnCommand::Fire(action)).await; }
-                    None => log.invoke(format!("CSMS: no such connection {id}")).await,
+                    None => log.invoke(crate::Level::Warning, format!("CSMS: no such connection {id}")).await,
                 },
                 Some(Command::SendToConnectionAwait(id, action, reply_tx)) => match registry.sender(id) {
                     Some(tx) => { let _ = tx.send(ConnCommand::Call(action, reply_tx)).await; }
@@ -471,8 +466,64 @@ fn reject_unauthorized() -> ErrorResponse {
     resp
 }
 
+/// OC-R-191, OC-E-097 — each command parked during a bind that then failed is dropped with a
+/// Warning.
+pub(crate) async fn log_parked_dropped<L: LogFn>(log: &L, count: usize) {
+    for _ in 0..count {
+        log.invoke(
+            crate::Level::Warning,
+            "Command dropped: CSMS listener is not bound yet and retrying.".to_string(),
+        )
+        .await;
+    }
+}
+
+/// OC-R-188, OC-E-033 — a failed `accept` is transient and logs at Warning.
+pub(crate) async fn log_accept_error<L: LogFn>(log: &L, e: &std::io::Error) {
+    log.invoke(crate::Level::Warning, format!("CSMS accept error: {e}"))
+        .await;
+}
+
 #[cfg(test)]
 mod tests {
+    /// OC-R-191, OC-E-097 — one Warning per command parked during a failed bind.
+    #[tokio::test]
+    async fn ut_log_parked_dropped_is_warning_per_command() {
+        let lines = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let sink = lines.clone();
+        let log = move |level: crate::Level, s: String| {
+            let sink = sink.clone();
+            async move {
+                sink.lock().push((level, s));
+            }
+        };
+        super::log_parked_dropped(&log, 2).await;
+        let got = lines.lock().clone();
+        assert_eq!(got.len(), 2);
+        assert!(got.iter().all(|(l, s)| *l == crate::Level::Warning
+            && s == "Command dropped: CSMS listener is not bound yet and retrying."));
+    }
+
+    /// OC-R-188, OC-E-033 — an accept error is logged at Warning, not Error.
+    #[tokio::test]
+    async fn ut_log_accept_error_is_warning() {
+        let lines = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let sink = lines.clone();
+        let log = move |level: crate::Level, s: String| {
+            let sink = sink.clone();
+            async move {
+                sink.lock().push((level, s));
+            }
+        };
+        let e = std::io::Error::other("boom");
+        super::log_accept_error(&log, &e).await;
+        let got = lines.lock().clone();
+        assert_eq!(
+            got,
+            vec![(crate::Level::Warning, "CSMS accept error: boom".to_string())]
+        );
+    }
+
     use super::identity_from_path;
     use ferrowl_test_support::wait_until;
 
@@ -528,7 +579,7 @@ mod tests {
             handler,
             registry,
             &mut commands,
-            |_s: String| async move {},
+            |_level: crate::Level, _s: String| async move {},
             std::time::Duration::from_secs(1),
             None,
             None,
@@ -624,7 +675,10 @@ mod tests {
             tls: Default::default(),
         };
         let server = super::ServerBuilder::<V1_6>::new(config, new_self_signed_cache())
-            .spawn(NoopHandler, |_s: String| async move {})
+            .spawn(
+                NoopHandler,
+                |_level: crate::Level, _s: String| async move {},
+            )
             .await
             .unwrap();
 

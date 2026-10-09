@@ -19,20 +19,19 @@ use serde_json::json;
 
 /// No-op log sink.
 fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
-    |_s: String| async move {}
+    |_level: ferrowl_ocpp::Level, _s: String| async move {}
 }
+
+type Captured = std::sync::Arc<std::sync::Mutex<Vec<(ferrowl_ocpp::Level, String)>>>;
 
 /// A log sink that records every invocation, for asserting the OC-R-095 fallback is actually
 /// logged rather than only flagged.
-fn capturing_sink() -> (
-    impl ferrowl_ocpp::LogFn + Clone,
-    std::sync::Arc<std::sync::Mutex<Vec<String>>>,
-) {
+fn capturing_sink() -> (impl ferrowl_ocpp::LogFn + Clone, Captured) {
     let lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let sink = {
         let lines = lines.clone();
-        move |s: String| {
-            lines.lock().expect("not poisoned").push(s);
+        move |level: ferrowl_ocpp::Level, s: String| {
+            lines.lock().expect("not poisoned").push((level, s));
             async move {}
         }
     };
@@ -988,7 +987,7 @@ async fn it_cs_cafiles_trusts_only_named_ca() {
 }
 
 #[tokio::test]
-/// OC-R-095 — a `wss://` CSMS bound with no TLS material configured logs the ephemeral-identity
+/// OC-R-095, OC-R-192 — a `wss://` CSMS bound with no TLS material configured logs the ephemeral-identity
 /// fallback, not merely flags it internally.
 async fn it_wss_csms_without_tls_material_logs_the_fallback() {
     let (sink, lines) = capturing_sink();
@@ -1012,9 +1011,10 @@ async fn it_wss_csms_without_tls_material_logs_the_fallback() {
     {
         let captured = lines.lock().expect("not poisoned");
         assert!(
-            captured
-                .iter()
-                .any(|l| l.contains("No cert_file/key_file/self_signed configured")),
+            captured.iter().any(|(level, l)| {
+                *level == ferrowl_ocpp::Level::Info
+                    && l.contains("No cert_file/key_file/self_signed configured")
+            }),
             "fallback was not logged: {captured:?}"
         );
     }
@@ -1142,4 +1142,57 @@ async fn it_ws_endpoint_skips_client_tls_validation() {
         .terminate()
         .await
         .expect("server terminate failed");
+}
+
+#[tokio::test]
+/// OC-R-189, OC-E-038 — a peer that opens a TCP connection to a `wss://` CSMS and writes garbage
+/// fails the TLS handshake, logged at Error with the peer address.
+async fn it_tls_handshake_failure_logs_error() {
+    use tokio::io::AsyncWriteExt;
+    let (sink, lines) = capturing_sink();
+    let server = csms::ServerBuilder::<V1_6>::new(
+        csms::Config {
+            host: "127.0.0.1".to_owned(),
+            port: 0,
+            timeout_ms: 2000,
+            reconnect: true,
+            basic_auth: None,
+            tls: ServerTlsPolicy::Tls {
+                identity: CertSource::Ephemeral {},
+            },
+        },
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(TestCsms, sink)
+    .await
+    .expect("server failed to bind");
+    let addr = wait_until(
+        "CSMS listener bind",
+        std::time::Duration::from_millis(20),
+        std::time::Duration::from_secs(10),
+        || server.local_addr(),
+    )
+    .await;
+    let mut raw = tokio::net::TcpStream::connect(addr).await.unwrap();
+    raw.write_all(b"this is not a TLS client hello\r\n\r\n")
+        .await
+        .unwrap();
+    wait_until(
+        "TLS handshake failure logged",
+        std::time::Duration::from_millis(20),
+        std::time::Duration::from_secs(10),
+        || {
+            lines
+                .lock()
+                .expect("not poisoned")
+                .iter()
+                .any(|(level, l)| {
+                    *level == ferrowl_ocpp::Level::Error
+                        && l.starts_with("CSMS TLS handshake failed from 127.0.0.1:")
+                })
+                .then_some(())
+        },
+    )
+    .await;
+    server.terminate().await.expect("server terminate failed");
 }

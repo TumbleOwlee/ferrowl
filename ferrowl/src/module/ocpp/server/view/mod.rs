@@ -432,13 +432,14 @@ where
     pub fn new(spec: OcppSpec, device_path: String, device: OcppDeviceConfig) -> Self {
         let (events_tx, events_rx) = tokio::sync::mpsc::unbounded_channel();
         let rfids: RfidLists = Arc::new(parking_lot::RwLock::new(rfid_store_from_device(&device)));
+        let log = Arc::new(tokio::sync::RwLock::new(LogRing::init()));
         let mut view = Self {
             instance_id: crate::registry::next_instance_id(),
-            backend: OcppServer::new(),
+            backend: OcppServer::new(log.clone()),
             spec,
             device_path,
             device,
-            log: Arc::new(tokio::sync::RwLock::new(LogRing::init())),
+            log,
             script_log: Arc::new(tokio::sync::RwLock::new(LogRing::init())),
             events_tx,
             events_rx,

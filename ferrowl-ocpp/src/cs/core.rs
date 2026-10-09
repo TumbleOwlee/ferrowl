@@ -78,7 +78,7 @@ where
                 None | Some(Command::Terminate) => break RunEnd::Terminated,
                 Some(Command::SendAction(action)) => {
                     if let Err(e) = connection.outbound.fire(action).await {
-                        log.invoke(format!("CS failed to send action: {e}")).await;
+                        log.invoke(crate::Level::Error, format!("CS failed to send action: {e}")).await;
                     }
                 }
                 Some(Command::SendActionAwait(action, reply_tx)) => {
@@ -91,4 +91,91 @@ where
     connection.shutdown().await;
     handler.on_disconnected().await;
     end
+}
+
+#[cfg(all(test, feature = "v1_6"))]
+mod tests {
+    use super::*;
+    use crate::{Action16, CallError, CallErrorCode, Response16, V1_6};
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+    use tokio::sync::mpsc;
+    use tokio_tungstenite::tungstenite::Error as WsError;
+
+    /// A websocket that never yields a frame and rejects every write.
+    struct DeadWs;
+
+    impl futures_util::Stream for DeadWs {
+        type Item = Result<Message, WsError>;
+        fn poll_next(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            Poll::Pending
+        }
+    }
+
+    impl futures_util::Sink<Message> for DeadWs {
+        type Error = WsError;
+        fn poll_ready(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), WsError>> {
+            Poll::Ready(Ok(()))
+        }
+        fn start_send(self: Pin<&mut Self>, _: Message) -> Result<(), WsError> {
+            Err(WsError::ConnectionClosed)
+        }
+        fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), WsError>> {
+            Poll::Ready(Ok(()))
+        }
+        fn poll_close(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), WsError>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    struct Handler;
+
+    impl CsActionHandler<V1_6> for Handler {
+        async fn handle_call(&self, _: Action16) -> Result<Response16, CallError> {
+            Err(CallError::new(CallErrorCode::NotImplemented, "unsupported"))
+        }
+    }
+
+    /// OC-R-194 — an action that cannot be sent on the connection logs at Error.
+    #[tokio::test]
+    async fn ut_failed_send_logs_error() {
+        let lines = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let sink = lines.clone();
+        let log = move |level: crate::Level, s: String| {
+            let sink = sink.clone();
+            async move {
+                sink.lock().push((level, s));
+            }
+        };
+        let (tx, mut rx) = mpsc::channel(4);
+        let mut commands = super::super::Commands::new(&mut rx, Default::default());
+        let hb = || Action16::Heartbeat(serde_json::from_value(serde_json::json!({})).unwrap());
+        let driver = async {
+            // The first write kills the writer task; the next send then finds the channel closed.
+            tx.send(Command::SendAction(hb())).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            tx.send(Command::SendAction(hb())).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            tx.send(Command::Terminate).await.unwrap();
+        };
+        let (end, ()) = tokio::join!(
+            run::<V1_6, _, _, _, _>(
+                DeadWs,
+                Arc::new(Handler),
+                &mut commands,
+                log,
+                |_: crate::Level, _: String| async {},
+                Duration::from_secs(1),
+            ),
+            driver
+        );
+        let _ = end;
+        let got = lines.lock().clone();
+        assert!(
+            got.iter().any(|(level, s): &(crate::Level, String)| {
+                *level == crate::Level::Error && s.starts_with("CS failed to send action")
+            }),
+            "{got:?}"
+        );
+    }
 }
