@@ -86,6 +86,9 @@ Boundary behavior, error semantics, intentional constraints.
 | **MB-E-059** | RTU serial port disappears mid-serve | serve loop ends, server task ends with an error; retry per MB-E-076 |
 | **MB-E-090** | Terminate while a server bind or serial-port open hangs | the bind or open is abandoned at once and the task ends with success (MB-R-221) |
 | **MB-E-092** | Terminate arriving after a server's serve loop is already running | the serve loop still ends on its own before the task ends; no in-flight connection is torn down early to honor the terminate sooner (MB-R-131, MB-E-076) |
+| **MB-E-101** | `Udp` server on Windows receiving a stray ICMP port-unreachable (`WSAECONNRESET`) or a datagram larger than its receive buffer (`WSAEMSGSIZE`) | both classify `Transient`: one Warning line, and the next receive runs at once unless the receive before also failed (MB-R-284, MB-R-285, MB-E-104); serving goes on |
+| **MB-E-104** | `Udp` server: a transient receive failure arriving right after a good datagram, before that datagram's handling has started (MB-R-285) | may be treated as following a failed receive and wait 1 s before the next receive. The Modbus library hands each datagram to its own handling task and receives again at once, and signals no receive success synchronously, so the server learns of the success only when the handling starts. Deliberate — one extra second of delay after a burst is the cost; the throttle on persistent errors is unaffected |
+| **MB-E-103** | Serial server's port reaches end-of-file between frames (e.g. a hung-up tty, a USB adapter unplugged) | an Error line naming the path and end-of-file, then reopen or end (MB-R-287); under `--exit-on-error` it exits 3 (CL-R-031). Deliberate — nobody closes a serial line on purpose, so an unrequested end is a failure the user must see |
 
 ---
 
@@ -193,3 +196,7 @@ Boundary behavior, error semantics, intentional constraints.
 ### A serial-port open cannot be preempted
 
 **MB-E-091** — A serial-port open is a synchronous call with no await point, so a terminate arriving while it executes cannot preempt it; the terminate is honored at the first await surrounding the open (MB-R-220, MB-R-221).
+
+### No transient listener errors outside Unix and Windows
+
+**MB-E-102** — On a platform that is neither Unix nor Windows the Modbus library classifies every listener I/O error `Fatal`, so any `accept()` or `Udp` receive error ends serving and takes the mid-serve failure path (MB-R-283, MB-R-286) instead of being survived in place (MB-R-281, MB-R-284). Likewise, an I/O error carrying no OS error code is always `Fatal`.

@@ -246,15 +246,19 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **MB-R-268** — A Modbus server appends a line naming the peer's address to its module's log each time it accepts or closes a peer connection (TCP, `RtuOverTcp`, `AsciiOverTcp`), at Info (MB-R-258).
 
-**MB-R-269** — A Modbus server appends a line naming the error to its module log for each `accept()` error on a bound listener (TCP, `RtuOverTcp`, `AsciiOverTcp`, TLS included), at Warning (MB-R-258).
+**MB-R-269** — A Modbus server appends a line naming the error to its module log for each `accept()` error on a bound listener (TCP, `RtuOverTcp`, `AsciiOverTcp`, TLS included) classified `Transient` by the Modbus library's listener-failure classification, at Warning (MB-R-258).
 
 **MB-R-270** — A Modbus server's line reporting a malformed or checksum-failing request frame carries Warning (MB-R-258, MB-E-015).
 
-**MB-R-271** — A Modbus server appends a line naming the error to its module log each time its listener or serial port fails mid-serve (MB-R-131) other than by an `accept()` error (MB-R-281), at Error (MB-R-258), whether or not `reconnect` retries it.
+**MB-R-271** — A Modbus server appends one line naming the error to its module log each time serving ends on a failure — a fatal or unclassified accept error (MB-R-283), a fatal or unclassified `Udp` receive failure (MB-R-286), or its serial link ending unrequested (MB-R-287) — at Error (MB-R-258), whether or not `reconnect` retries it (MB-R-131, MB-R-134).
 
-**MB-R-281** — An `accept()` error on a Modbus server's bound listener (TCP, `RtuOverTcp`, `AsciiOverTcp`, TLS included) never ends serving: the listener keeps accepting and every live connection keeps being served (MB-R-269).
+**MB-R-281** — A transient `accept()` error (MB-R-269) never ends serving: the listener keeps accepting and every live connection keeps being served.
 
-**MB-R-282** — After each `accept()` error (MB-R-281), a Modbus server waits a fixed 1 s, not configurable, before accepting again, live connections being served throughout the wait.
+**MB-R-282** — After each transient `accept()` error (MB-R-281), a Modbus server waits a fixed 1 s, not configurable, before accepting again, live connections being served throughout the wait.
+
+**MB-R-283** — An `accept()` error on a bound TCP-family listener (TCP, `RtuOverTcp`, `AsciiOverTcp`, TLS included) that the Modbus library classifies `Fatal`, or leaves unclassified, ends serving once live connections have drained, and is handled as a mid-serve listener failure: logged per MB-R-271, then retried per MB-R-131 or ending the task per MB-R-134.
+
+**MB-R-287** — A serial server's (RTU, `Ascii`) link ending other than by stop or terminate — on an I/O error, or on end-of-file between frames — is a mid-serve serial failure, logged per MB-R-271 with a line naming the serial path and the I/O error or end-of-file, then reopened per MB-R-131 or ending the task per MB-R-134.
 
 ---
 
@@ -317,6 +321,12 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **MB-R-120** — With `reconnect` enabled (default), a `Udp` bind failure does not fail the start; it retries per MB-R-051, MB-R-130–MB-R-134 (as MB-R-071). Disabled: start fails, error surfaced.
 
 **MB-R-183** — A `Udp` server datagram failing to receive or decode is logged as a failed request (MB-R-066–MB-R-067) and neither ends serving nor affects any other datagram.
+
+**MB-R-284** — A `Udp` server's socket receive failure classified `Transient` by the Modbus library's listener-failure classification appends a line naming the error to its module log at Warning (MB-R-258) and never ends serving; a datagram that fails to decode, or a response that fails to send, is not a receive failure (MB-R-276).
+
+**MB-R-285** — After a transient receive failure (MB-R-284), a `Udp` server receives again at once when the receive before it succeeded, and after a fixed 1 s wait, not configurable, when the receive before it also failed, datagrams already in flight being answered throughout; MB-E-104 states the one case where a receive that succeeded counts as failed.
+
+**MB-R-286** — A `Udp` server's socket receive failure that the Modbus library classifies `Fatal`, or leaves unclassified, ends serving once datagrams in flight have been answered, and is handled as a mid-serve failure: logged per MB-R-271, then retried per MB-R-131 or ending the task per MB-R-134.
 
 ---
 
