@@ -2514,7 +2514,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// MB-R-153 — a server view whose bind target is already occupied shows RECONNECTING (not
+    /// MB-R-153, MB-R-256, UI-E-170 — a server view whose bind target is already occupied shows RECONNECTING (not
     /// DISCONNECTED) while its task backs off retrying the bind, per the occupier idiom
     /// established in `instance/mod.rs`'s `it_server_stop_on_backing_off_task_ends_promptly`.
     async fn it_modbus_server_view_shows_reconnecting_while_bind_backs_off() {
@@ -2549,6 +2549,23 @@ mod tests {
                 term.draw(|f: &mut Frame| view.render(f, area)).unwrap();
                 let text = buffer_text(term.backend().buffer());
                 text.contains("RECONNECTING").then_some(text)
+            },
+        )
+        .await;
+
+        let log = view.log();
+        let addr = format!("127.0.0.1:{port}");
+        wait_until_async(
+            "bind failure Error line in the tab log",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            async || {
+                log.read()
+                    .await
+                    .peek_n(20)
+                    .iter()
+                    .any(|(_, level, line)| *level == Level::Error && line.contains(&addr))
+                    .then_some(())
             },
         )
         .await;

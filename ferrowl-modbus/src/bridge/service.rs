@@ -80,6 +80,10 @@ impl<L> Service for BridgeService<FrameTransport<ClientStream, Tcp>, Tcp, L>
 where
     L: LogFn + Clone + Send + Sync + 'static,
 {
+    async fn on_accept_error(&self, error: &rust_modbus::Error) -> rust_modbus::AcceptErrorAction {
+        crate::server_core::on_listener_accept_error(&self.log, error).await
+    }
+
     async fn on_request(
         &self,
         _conn: &Connection,
@@ -101,6 +105,10 @@ impl<L> Service for BridgeService<FrameTransport<ClientStream, RtuOverTcp>, RtuO
 where
     L: LogFn + Clone + Send + Sync + 'static,
 {
+    async fn on_accept_error(&self, error: &rust_modbus::Error) -> rust_modbus::AcceptErrorAction {
+        crate::server_core::on_listener_accept_error(&self.log, error).await
+    }
+
     async fn on_request(
         &self,
         _conn: &Connection,
@@ -122,6 +130,10 @@ impl<L> Service for BridgeService<FrameTransport<ClientStream, Ascii>, Ascii, L>
 where
     L: LogFn + Clone + Send + Sync + 'static,
 {
+    async fn on_accept_error(&self, error: &rust_modbus::Error) -> rust_modbus::AcceptErrorAction {
+        crate::server_core::on_listener_accept_error(&self.log, error).await
+    }
+
     async fn on_request(
         &self,
         _conn: &Connection,
@@ -143,6 +155,10 @@ impl<L> Service for BridgeService<FrameTransport<SerialStream, Rtu>, Rtu, L>
 where
     L: LogFn + Clone + Send + Sync + 'static,
 {
+    async fn on_accept_error(&self, error: &rust_modbus::Error) -> rust_modbus::AcceptErrorAction {
+        crate::server_core::on_listener_accept_error(&self.log, error).await
+    }
+
     async fn on_request(
         &self,
         _conn: &Connection,
@@ -165,6 +181,10 @@ impl<L> Service for BridgeService<FrameTransport<tokio::io::DuplexStream, Rtu>, 
 where
     L: LogFn + Clone + Send + Sync + 'static,
 {
+    async fn on_accept_error(&self, error: &rust_modbus::Error) -> rust_modbus::AcceptErrorAction {
+        crate::server_core::on_listener_accept_error(&self.log, error).await
+    }
+
     async fn on_request(
         &self,
         _conn: &Connection,
@@ -428,5 +448,68 @@ mod tests {
 
         handle.shutdown().await;
         let _ = serving.await;
+    }
+
+    /// MB-R-281, MB-R-283, BR-R-031, BR-R-034 — every `BridgeService` impl answers a transient
+    /// upstream `accept()` error with a Warning and `Continue`, and a fatal or unclassified one
+    /// with `Stop`; an impl lacking the hook would answer the upstream default `Stop` for both.
+    #[tokio::test]
+    async fn ut_bridge_accept_error_policy() {
+        use rust_modbus::{AcceptErrorAction, Service};
+
+        #[cfg(target_os = "linux")]
+        const TRANSIENT_CODE: i32 = 103;
+        #[cfg(target_os = "macos")]
+        const TRANSIENT_CODE: i32 = 53;
+        #[cfg(windows)]
+        const TRANSIENT_CODE: i32 = 10053;
+        let transient = rust_modbus::Error::Io {
+            kind: std::io::ErrorKind::ConnectionAborted,
+            raw_os_error: Some(TRANSIENT_CODE),
+        };
+        let fatal = rust_modbus::Error::Io {
+            kind: std::io::ErrorKind::Other,
+            raw_os_error: None,
+        };
+
+        macro_rules! check {
+            ($stream:ty, $framing:ty) => {{
+                let (log, lines) = recording_log();
+                let downstream: DownstreamHandle<FrameTransport<$stream, $framing>, $framing> =
+                    DownstreamHandle::spawn(
+                        || async {
+                            std::future::pending::<
+                                Result<
+                                    rust_modbus::Client<
+                                        FrameTransport<$stream, $framing>,
+                                        $framing,
+                                    >,
+                                    crate::Error,
+                                >,
+                            >()
+                            .await
+                        },
+                        true,
+                        log.clone(),
+                    );
+                let service = BridgeService::new(downstream, None, log);
+                assert_eq!(
+                    service.on_accept_error(&transient).await,
+                    AcceptErrorAction::Continue
+                );
+                assert_eq!(
+                    service.on_accept_error(&fatal).await,
+                    AcceptErrorAction::Stop
+                );
+                let logged = lines.lock().clone();
+                assert_eq!(logged.len(), 1, "{logged:?}");
+                assert_eq!(logged[0].0, crate::Level::Warning);
+            }};
+        }
+        check!(ClientStream, Tcp);
+        check!(ClientStream, RtuOverTcp);
+        check!(ClientStream, Ascii);
+        check!(SerialStream, Rtu);
+        check!(DuplexStream, Rtu);
     }
 }

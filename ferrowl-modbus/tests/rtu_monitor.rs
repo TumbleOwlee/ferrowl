@@ -89,3 +89,38 @@ async fn it_monitor_open_failure_reconnect_false_ends_task() {
         ))
     ));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// MB-R-273, MB-R-258 — each failed serial-open attempt of a monitor logs an Error naming the
+/// configured path and the OS error, whether or not `reconnect` retries it (MB-R-192).
+async fn it_monitor_open_failure_logs_error_naming_path() {
+    use ferrowl_modbus::Level;
+    for reconnect in [false, true] {
+        let lines = Arc::new(MemLock::new(Vec::<(Level, String)>::new()));
+        let sink_lines = lines.clone();
+        let log = move |level: Level, s: String| {
+            let sink_lines = sink_lines.clone();
+            async move {
+                sink_lines.write().push((level, s));
+            }
+        };
+        let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
+        let (handle, _open) = rtu::MonitorBuilder::new(
+            Arc::new(RwLock::new(bad_config(reconnect))),
+            empty_table(),
+            empty_records(),
+        )
+        .spawn(rx, log, sink())
+        .await
+        .expect("spawn always returns Ok");
+        sleep(Duration::from_millis(300)).await;
+        handle.abort();
+        assert!(
+            lines.read().iter().any(|(level, s)| *level == Level::Error
+                && s.contains("'/nonexistent/ferrowl-no-such-serial-port'")
+                && (!cfg!(unix) || s.contains("entity not found"))),
+            "reconnect={reconnect}: got {:?}",
+            lines.read()
+        );
+    }
+}

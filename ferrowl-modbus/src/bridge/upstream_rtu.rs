@@ -7,6 +7,18 @@ use rust_modbus::{
 };
 use tokio::task::JoinHandle;
 
+/// BR-E-001, MB-R-287 — nothing ever requests the upstream link's end, so any return is the
+/// link being lost: an end-of-file (`Ok(())`) becomes `UnexpectedEof`, a failure keeps its error.
+pub(crate) fn link_end(result: rust_modbus::Result<()>) -> Result<(), Error> {
+    match result {
+        Ok(()) => Err(Error::Server(rust_modbus::Error::Io {
+            kind: std::io::ErrorKind::UnexpectedEof,
+            raw_os_error: None,
+        })),
+        Err(e) => Err(Error::Server(e)),
+    }
+}
+
 /// Open the configured upstream serial port and spawn the RTU serve loop, answering from
 /// `service` (BR-R-005 — upstream acts as an ordinary server). One port, one link, no accept
 /// loop, no reconnect (edge-cases.md: "Upstream RTU serial loss ends the bridge task with an
@@ -35,7 +47,7 @@ where
         Ok(transport) => {
             let server = ModbusServer::new(service);
             Ok(tokio::task::spawn(async move {
-                server.serve_link(transport).await.map_err(Error::Server)
+                link_end(server.serve_link(transport).await)
             }))
         }
         Err(e) => Err(SerialError::Error(e).into()),
@@ -186,6 +198,55 @@ mod tests {
         let service = BridgeService::new(downstream, None, sink());
 
         let result = run(&bad_config(), service).await;
+        assert!(result.is_err());
+    }
+
+    /// BR-E-001, MB-R-287 — every end of the upstream link is an error for the relay: an
+    /// end-of-file (`Ok(())`) becomes `UnexpectedEof`, and a failure keeps its error.
+    #[test]
+    fn ut_link_end_maps_every_end_to_error() {
+        match link_end(Ok(())) {
+            Err(Error::Server(rust_modbus::Error::Io { kind, .. })) => {
+                assert_eq!(kind, std::io::ErrorKind::UnexpectedEof);
+            }
+            other => panic!("expected an UnexpectedEof error, got {other:?}"),
+        }
+        match link_end(Err(rust_modbus::Error::Timeout { what: "link" })) {
+            Err(Error::Server(rust_modbus::Error::Timeout { what })) => assert_eq!(what, "link"),
+            other => panic!("expected the failure to be kept, got {other:?}"),
+        }
+    }
+
+    /// BR-E-001 — an upstream serial link reaching end-of-file ends the relay task with an
+    /// error.
+    #[tokio::test]
+    async fn ut_upstream_link_eof_ends_relay_with_error() {
+        let downstream: DownstreamHandle<FrameTransport<DuplexStream, Rtu>, Rtu> =
+            DownstreamHandle::spawn(
+                || async {
+                    std::future::pending::<
+                        Result<rust_modbus::Client<FrameTransport<DuplexStream, Rtu>, Rtu>, Error>,
+                    >()
+                    .await
+                },
+                true,
+                sink(),
+            );
+        let service = BridgeService::new(downstream, None, sink());
+        let (server_end, client_end) = tokio::io::duplex(64);
+        let server = ModbusServer::new(service);
+        let task = tokio::spawn(async move {
+            link_end(
+                server
+                    .serve_link(FrameTransport::<_, Rtu>::new(server_end))
+                    .await,
+            )
+        });
+        drop(client_end);
+        let result = tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("relay must end")
+            .expect("task must not panic");
         assert!(result.is_err());
     }
 }

@@ -766,6 +766,9 @@ where
                         // MB-R-137 — the transport is now actually connected, not merely "a
                         // dial attempt was scheduled": flips the tri-state status to Connected.
                         connected.set(true);
+                        status
+                            .invoke(Level::Info, "Client connected".to_string())
+                            .await;
                         core
                     }
                     Err(e) => {
@@ -1104,10 +1107,10 @@ mod tests {
     fn ut_classify_transport_error_maps_to_modbus_error() {
         let res: ReadResult<u16> = Ok(Err(rust_modbus::Error::Io {
             kind: std::io::ErrorKind::ConnectionReset,
+            raw_os_error: None,
         }));
         let e = classify(res).unwrap_err();
         assert!(matches!(e, ModbusError::Error(_)));
-            raw_os_error: None,
     }
 
     #[tokio::test]

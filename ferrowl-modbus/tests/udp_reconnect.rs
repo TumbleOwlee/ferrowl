@@ -135,3 +135,50 @@ async fn udp_server_terminate_while_backing_off_ends_task_ok() {
         .expect("task must not panic");
     assert!(result.is_ok());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// MB-R-256, MB-R-258, MB-R-267 — a failed Udp bind logs an Error naming the address while the
+/// port is held; once it frees, the server logs that it is listening, at Info.
+async fn udp_server_bind_failure_logs_error_then_listening_info() {
+    use ferrowl_modbus::Level;
+    let occupier = reserve_udp_port();
+    let port = occupier.port();
+    let lines = Arc::new(parking_lot::Mutex::new(Vec::<(Level, String)>::new()));
+    let sink_lines = lines.clone();
+    let log = move |level: Level, s: String| {
+        let sink_lines = sink_lines.clone();
+        async move {
+            sink_lines.lock().push((level, s));
+        }
+    };
+    let has = |level: Level, needle: &str| {
+        lines
+            .lock()
+            .iter()
+            .any(|(l, s)| *l == level && s.contains(needle))
+    };
+    let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
+    let (handle, _bound_addr) =
+        udp::ServerBuilder::<SlaveKey>::new(Arc::new(RwLock::new(config(port, true))), empty_mem())
+            .spawn(rx, log, sink())
+            .await
+            .expect("spawn always returns Ok");
+
+    let addr = format!("127.0.0.1:{port}");
+    ferrowl_test_support::wait_until(
+        "bind failure logged",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || has(Level::Error, &addr).then_some(()),
+    )
+    .await;
+    drop(occupier);
+    ferrowl_test_support::wait_until(
+        "listening logged",
+        Duration::from_millis(50),
+        Duration::from_secs(10),
+        || has(Level::Info, &format!("Server listening on {addr}")).then_some(()),
+    )
+    .await;
+    handle.abort();
+}

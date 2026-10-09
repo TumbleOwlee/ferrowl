@@ -512,3 +512,74 @@ async fn it_client_command_dropped_while_backing_off_logs_warning() {
     let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
     drop(socket);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-256, MB-R-258, MB-R-267, UI-E-170 — while the port is held, every failed bind attempt
+/// logs an Error naming the address; once the holder lets go the server logs that it is
+/// listening, at Info.
+async fn it_server_bind_failure_logs_error_then_listening_info() {
+    use ferrowl_modbus::Level;
+    let occupier = reserve_tcp_port();
+    let port = occupier.port();
+    let (log, lines) = capturing_levels();
+    let (_sender, receiver) = mpsc::channel::<ServerCommand>(1);
+    let (handle, _bound) = ferrowl_modbus::tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(tcp_config(port, true))),
+        server_mem(),
+        ferrowl_modbus::tcp::new_self_signed_cache(),
+    )
+    .spawn(receiver, log, sink())
+    .await
+    .expect("spawn always returns Ok");
+
+    let addr = format!("127.0.0.1:{port}");
+    ferrowl_test_support::wait_until(
+        "bind failure logged",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || has(&lines, Level::Error, &addr).then_some(()),
+    )
+    .await;
+
+    drop(occupier);
+    ferrowl_test_support::wait_until(
+        "listening logged after the port frees",
+        Duration::from_millis(50),
+        Duration::from_secs(10),
+        || has(&lines, Level::Info, &format!("Server listening on {addr}")).then_some(()),
+    )
+    .await;
+    handle.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-256, MB-R-258 — with `reconnect` disabled the one failed bind attempt still logs an
+/// Error naming the address, and the task ends.
+async fn it_server_bind_failure_reconnect_false_logs_one_error() {
+    use ferrowl_modbus::Level;
+    let occupier = reserve_tcp_port();
+    let port = occupier.port();
+    let (log, lines) = capturing_levels();
+    let (_sender, receiver) = mpsc::channel::<ServerCommand>(1);
+    let (handle, _bound) = ferrowl_modbus::tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(tcp_config(port, false))),
+        server_mem(),
+        ferrowl_modbus::tcp::new_self_signed_cache(),
+    )
+    .spawn(receiver, log, sink())
+    .await
+    .expect("spawn always returns Ok");
+
+    let result = tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("the task must end")
+        .expect("task must not panic");
+    assert!(result.is_err());
+    let errors = lines
+        .lock()
+        .iter()
+        .filter(|(l, s)| *l == Level::Error && s.contains(&format!("127.0.0.1:{port}")))
+        .count();
+    assert_eq!(errors, 1);
+    drop(occupier);
+}

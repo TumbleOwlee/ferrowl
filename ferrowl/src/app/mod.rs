@@ -1041,7 +1041,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// MB-R-200 — "recovers automatically once the conflicting instance stops": once one of two
+    /// MB-R-200, MB-R-256 — "recovers automatically once the conflicting instance stops": once one of two
     /// Rtu server instances sharing a path is stopped, the surviving instance's own next attempt
     /// does not report a conflict.
     async fn ut_stopping_one_instance_lets_the_other_recover() {
@@ -1098,29 +1098,28 @@ mod tests {
 
         // Observe "a"'s own subsequent behavior, not just the registry precondition: wait past
         // one full backoff interval (`BackoffPolicy::default().initial` = 1s, see
-        // `ferrowl-util/src/backoff.rs`) so "a" actually re-runs its attempt, then check its log
-        // for a *fresh* conflict line. There is no positive "recovered"/"reconnected" message to
-        // poll for instead — by design (edge-cases.md: "an external holder still surfaces as an
-        // ordinary OS-level open failure/retry, same as before"), an *ordinary* open failure
-        // against this nonexistent path logs nothing at all, both before and after this feature;
-        // only the conflict branch itself ever logs (`rtu::server::run`'s `log.invoke` added for
-        // MB-R-150). So the strongest available end-to-end signal that "a" stopped treating "b"
-        // as a conflict is exactly this: zero *new* conflict lines across an attempt that did
-        // fire — if the stale claim were still consulted, "a" would keep re-logging the same
-        // conflict every attempt, same as it did in the first 200ms above.
+        // `ferrowl-util/src/backoff.rs`) so "a" actually re-runs its attempt. Every OS-level open
+        // attempt logs its failure at Error (MB-R-256), so recovery has a positive signal: a fresh
+        // open-failure line proves "a" reached the open instead of short-circuiting on a stale
+        // conflict, and no fresh conflict line proves it stopped consulting "b"'s claim.
         tokio::time::sleep(Duration::from_millis(1300)).await;
         let after_stop = log_a.read().await;
         let new_count = after_stop.written().saturating_sub(written_before_stop) as usize;
-        let new_lines: Vec<String> = after_stop
-            .peek_n(new_count)
-            .into_iter()
-            .map(|(_, _, l)| l)
+        let window = after_stop.peek_n(crate::app::LOG_SIZE);
+        let new_lines: Vec<(Level, String)> = window[window.len().saturating_sub(new_count)..]
+            .iter()
+            .map(|(_, level, line)| (*level, line.clone()))
             .collect();
         assert!(
             !new_lines
                 .iter()
-                .any(|l| l.contains("already in use by module")),
+                .any(|(_, l)| l.contains("already in use by module")),
             "'a' must not log a fresh conflict once 'b' has released its claim, got: {new_lines:?}"
+        );
+        assert!(
+            new_lines.iter().any(|(level, l)| *level == Level::Error
+                && l.contains("Serial open failed on '/nonexistent/mb-r-150-app-e2e'")),
+            "'a' must reach the OS-level open and log its failure, got: {new_lines:?}"
         );
         drop(after_stop);
 

@@ -207,3 +207,32 @@ async fn bridge_rtu_downstream_open_failure_answers_gateway_path_unavailable_and
     )
     .await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// MB-R-256, MB-R-258 — each failed serial-open attempt of a server logs an Error naming the
+/// configured path, whether or not `reconnect` retries it.
+async fn it_server_open_failure_logs_error_naming_path() {
+    use ferrowl_modbus::Level;
+    let lines = Arc::new(parking_lot::Mutex::new(Vec::<(Level, String)>::new()));
+    let sink_lines = lines.clone();
+    let log = move |level: Level, s: String| {
+        let sink_lines = sink_lines.clone();
+        async move {
+            sink_lines.lock().push((level, s));
+        }
+    };
+    let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
+    let (handle, _open) =
+        rtu::ServerBuilder::new(Arc::new(RwLock::new(bad_config(false))), empty_mem())
+            .spawn(rx, log, sink())
+            .await
+            .expect("spawn always returns Ok");
+    let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
+    assert!(
+        lines.lock().iter().any(|(level, s)| *level == Level::Error
+            && s.contains("'/nonexistent/ferrowl-no-such-serial-port'")
+            && (!cfg!(unix) || s.contains("entity not found"))),
+        "got {:?}",
+        lines.lock()
+    );
+}

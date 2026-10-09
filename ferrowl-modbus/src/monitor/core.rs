@@ -13,7 +13,6 @@ use ferrowl_codec::Kind;
 use ferrowl_util::backoff::{AttemptOutcome, BackoffPolicy, run_with_backoff};
 use rust_modbus::{
     AduReader, Direction, Framing, RegisterValue, RequestPdu, ResponsePdu, TransportConfig, UnitId,
-    open_serial,
 };
 use std::time::Instant;
 
@@ -668,7 +667,7 @@ where
 /// ordinary reconnect setting and is logged before returning, since a `reconnect: true` monitor
 /// would otherwise retry it forever with no observable trace at all.
 #[allow(clippy::too_many_arguments)] // config/table/records/receiver/log/status/path_conflict/open
-pub(crate) async fn run_serial_monitor<F, L, St>(
+pub(crate) async fn run_serial_monitor<F, L, St, Io, O>(
     config: std::sync::Arc<tokio::sync::RwLock<crate::rtu::Config>>,
     table: SharedObservedTable,
     records: SharedRecordLog,
@@ -677,12 +676,22 @@ pub(crate) async fn run_serial_monitor<F, L, St>(
     status: St,
     path_conflict: PathConflictCell,
     open: ConnectedCell,
+    opener: O,
 ) -> Result<(), Error>
 where
     F: Framing<Header = UnitId> + Send + 'static,
     L: LogFn + Clone,
     St: LogFn + Clone,
+    Io: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    O: Fn(
+            &str,
+            rust_modbus::SerialConfig,
+        ) -> rust_modbus::Result<rust_modbus::FrameTransport<Io, F>>
+        + Send
+        + Sync
+        + 'static,
 {
+    let opener = &opener;
     let receiver = tokio::sync::Mutex::new(receiver);
     let activity = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
@@ -744,14 +753,20 @@ where
                         };
                     }
                 };
-                match open_serial::<F>(&path, serial) {
-                    Err(e) => AttemptOutcome::Failed {
-                        error: SerialError::Error(e).into(),
-                        reconnect,
-                        reset: false,
-                    },
+                match opener(&path, serial) {
+                    Err(e) => {
+                        log.invoke(Level::Error, format!("Serial open failed on '{path}': {e}"))
+                            .await;
+                        AttemptOutcome::Failed {
+                            error: SerialError::Error(e).into(),
+                            reconnect,
+                            reset: false,
+                        }
+                    }
                     Ok(transport) => {
                         open.set(true);
+                        log.invoke(Level::Info, format!("Serial port '{path}' opened"))
+                            .await;
                         let stream = transport.into_inner();
                         let reader = AduReader::<_, F>::with_config(
                             stream,
@@ -1447,5 +1462,57 @@ mod tests {
         .await;
         assert!(matches!(end, MonitorEnd::Terminated));
         assert!(!activity.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    fn serial_config(path: &str) -> std::sync::Arc<tokio::sync::RwLock<crate::rtu::Config>> {
+        Arc::new(tokio::sync::RwLock::new(crate::rtu::Config {
+            path: path.to_string(),
+            baud_rate: 9600,
+            reconnect: false,
+            ..Default::default()
+        }))
+    }
+
+    /// MB-R-258, MB-R-272 — a monitor whose serial port opens logs "Serial port '<path>'
+    /// opened" at Info.
+    #[tokio::test]
+    async fn ut_monitor_open_logs_opened() {
+        let log = RecordingLog::default();
+        let (tx, rx) = mpsc::channel::<ServerCommand>(1);
+        let (monitor_end, _peer) = tokio::io::duplex(256);
+        let slot = std::sync::Mutex::new(Some(monitor_end));
+        let task = tokio::spawn(run_serial_monitor::<Rtu, _, _, _, _>(
+            serial_config("/fake/tty"),
+            table(),
+            records(),
+            rx,
+            log.clone(),
+            |_: crate::Level, _: String| async {},
+            PathConflictCell::default(),
+            ConnectedCell::default(),
+            move |_: &str, _| {
+                Ok(rust_modbus::FrameTransport::<_, Rtu>::new(
+                    slot.lock().unwrap().take().expect("opened once"),
+                ))
+            },
+        ));
+        ferrowl_test_support::wait_until(
+            "opened line logged",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(5),
+            || {
+                log.0
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|(l, m)| {
+                        *l == crate::Level::Info && m.contains("Serial port '/fake/tty' opened")
+                    })
+                    .then_some(())
+            },
+        )
+        .await;
+        tx.send(ServerCommand::Terminate).await.unwrap();
+        let _ = task.await;
     }
 }

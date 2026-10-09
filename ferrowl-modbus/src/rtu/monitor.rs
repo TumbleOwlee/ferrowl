@@ -88,7 +88,7 @@ where
     L: LogFn + Clone,
     St: LogFn + Clone,
 {
-    run_serial_monitor::<rust_modbus::Rtu, L, St>(
+    run_serial_monitor::<rust_modbus::Rtu, L, St, _, _>(
         config,
         table,
         records,
@@ -97,6 +97,7 @@ where
         status,
         path_conflict,
         open,
+        rust_modbus::open_serial::<rust_modbus::Rtu>,
     )
     .await
 }

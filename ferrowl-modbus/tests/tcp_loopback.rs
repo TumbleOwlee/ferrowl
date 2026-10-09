@@ -1534,3 +1534,68 @@ async fn it_client_and_server_lines_carry_category_levels() {
     let _ = tokio::time::timeout(Duration::from_secs(5), client).await;
     server.abort();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-258, MB-R-259, MB-R-268 — a connecting client logs "Client connected" through its status
+/// callback, and the server logs the peer's connect and disconnect, all at Info.
+async fn it_connect_and_peer_lines_log_info() {
+    let port = reserve_tcp_port().release();
+    let (srv_log, srv_lines) = capturing_levels();
+    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
+    let (server, bound_addr) = tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        server_mem(),
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(srv_rx, srv_log, sink())
+    .await
+    .expect("server failed to start");
+    wait_until(
+        "listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || *bound_addr.lock(),
+    )
+    .await;
+
+    let operations = Arc::new(RwLock::new(vec![Operation {
+        slave_id: UnitId(1),
+        fn_code: FunctionCode::ReadHoldingRegisters,
+        range: Range::new(0, 2),
+    }]));
+    let (status, status_lines) = capturing_levels();
+    let (tx, rx) = mpsc::channel::<Command>(16);
+    let (client, _connected) = tcp::ClientBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        operations,
+        client_mem(),
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(rx, sink(), status)
+    .await
+    .expect("client failed to connect");
+
+    wait_until(
+        "connect lines",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || {
+            (has(&status_lines, Level::Info, "Client connected")
+                && has(&srv_lines, Level::Info, "Peer 127.0.0.1:")
+                && has(&srv_lines, Level::Info, "connected."))
+            .then_some(())
+        },
+    )
+    .await;
+
+    tx.send(Command::Terminate).await.unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(5), client).await;
+    wait_until(
+        "disconnect line",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || has(&srv_lines, Level::Info, "disconnected").then_some(()),
+    )
+    .await;
+    server.abort();
+}

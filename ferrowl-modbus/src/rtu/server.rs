@@ -89,7 +89,7 @@ where
     L: LogFn + Clone,
     St: LogFn + Clone,
 {
-    run_serial_family::<T, rust_modbus::Rtu, L, St>(
+    run_serial_family::<T, rust_modbus::Rtu, L, St, _, _>(
         config,
         memory,
         receiver,
@@ -99,6 +99,7 @@ where
         open,
         VERBOSE,
         PHYSICAL_SERIAL,
+        rust_modbus::open_serial::<rust_modbus::Rtu>,
     )
     .await
 }
