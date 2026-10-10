@@ -109,7 +109,8 @@ Exit codes:
 | --- | --- |
 | `0` | Ran clean — `--duration` elapsed, or Ctrl-C was received, with no `--exit-on-error` hit. |
 | `1` | Startup failure — a module's device config failed to load, or `start` reported an error. |
-| `2` | `--exit-on-error` was set and a drained log line looked like a Lua script error (matched the `[sim]` prefix those errors are logged under). |
+| `2` | Command-line usage error (a mistyped flag), distinct from the `--exit-on-error` trip below. |
+| `3` | `--exit-on-error` was set and a drained log line had level Error, e.g. a Lua script error (`[sim]` prefix) or the first failed connect, dial, bind or serial-open attempt of any module, even when `reconnect` would have recovered it (start peers first, or omit the flag). All modules are stopped first. |
 
 On any exit, every module that started is stopped first (best-effort).
 
@@ -154,6 +155,8 @@ entirely, letting another device share the same upstream link.
 
 `--duration`, `--log-file`, and `--exit-on-error` behave the same as in `run` mode; a drained log
 line reporting a genuine relay failure is prefixed `[bridge]`.
+
+When the relay ends on an upstream error (for example a lost upstream serial link or a fatal accept error), the bridge logs exactly one Error line `[bridge] upstream ended: <error>` and exits at once, without waiting for `--duration` or Ctrl-C: with code 3 under `--exit-on-error`, otherwise 1. A bind, listen or serial-open failure of the upstream at startup is a setup failure (exit 1).
 
 ## Commands
 
@@ -655,7 +658,7 @@ Session-level Lua scripts run in their own context with access to every module i
 
 All module names in a session are auto-deduplicated on load or rename (duplicates get suffixed like "name (2)"), ensuring `C_Module` can reliably address each one by name.
 
-In headless mode (`ferrowl run`), session scripts execute the same way; their output appears prefixed with the `session` log source, and `[sim]` errors trigger `--exit-on-error` (exit code 2).
+In headless mode (`ferrowl run`), session scripts execute the same way; their output appears prefixed with the `session` log source, and an Error-level `[sim]` line triggers `--exit-on-error` (exit code 3).
 
 #### Module C_Module
 
@@ -739,7 +742,7 @@ Return: nil
 
 Assertion helpers for scripted checks, mainly with the headless mode's
 `--exit-on-error` (a failed assertion raises a Lua error, which the sim loop logs
-with the `[sim]` prefix the headless runner watches for).
+as an Error-level line, which trips it).
 
 ```
 Method:   C_Test:Assert(cond, msg)

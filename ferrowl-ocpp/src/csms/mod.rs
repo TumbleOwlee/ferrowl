@@ -647,9 +647,16 @@ mod tests {
         });
 
         let early = connect(addr, "EARLY").await;
-        while count(&lines, crate::Level::Warning, "CSMS accept error: injected") == 0 {
-            tokio::task::yield_now().await;
-        }
+        ferrowl_test_support::wait_until(
+            "CSMS accept error: injected",
+            Duration::from_millis(5),
+            Duration::from_secs(10),
+            || {
+                (count(&lines, crate::Level::Warning, "CSMS accept error: injected") > 0)
+                    .then_some(())
+            },
+        )
+        .await;
         let error_at = std::time::Instant::now();
         let late = tokio::spawn(async move { connect(addr, "LATE").await });
 
@@ -665,9 +672,13 @@ mod tests {
         let hb = Action16::Heartbeat(serde_json::from_value(serde_json::json!({})).unwrap());
         let reply = early.call(hb).await;
         assert!(matches!(reply, Ok(Response16::Heartbeat(_))), "{reply:?}");
-        while count(&lines, crate::Level::Warning, "CSMS: no such connection") == 0 {
-            tokio::task::yield_now().await;
-        }
+        ferrowl_test_support::wait_until(
+            "CSMS: no such connection",
+            Duration::from_millis(5),
+            Duration::from_secs(10),
+            || (count(&lines, crate::Level::Warning, "CSMS: no such connection") > 0).then_some(()),
+        )
+        .await;
         assert_eq!(
             count(&lines, crate::Level::Info, "Station LATE connected"),
             0
@@ -683,9 +694,13 @@ mod tests {
             .await
             .expect("the connection must be accepted once the wait is over")
             .unwrap();
-        while count(&lines, crate::Level::Info, "Station LATE connected") == 0 {
-            tokio::task::yield_now().await;
-        }
+        ferrowl_test_support::wait_until(
+            "Station LATE connected",
+            Duration::from_millis(5),
+            Duration::from_secs(10),
+            || (count(&lines, crate::Level::Info, "Station LATE connected") > 0).then_some(()),
+        )
+        .await;
         let waited = error_at.elapsed();
         assert!(
             waited >= Duration::from_millis(950) && waited < Duration::from_millis(2500),
