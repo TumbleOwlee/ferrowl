@@ -163,6 +163,7 @@ line reporting a genuine relay failure is prefixed `[bridge]`.
 | `:qa \| :qall` | Close all tabs / Exit application |
 | `:e \| :edit` | Edit current module |
 | `:n \| :new` | Create new module |
+| `:clone` | Clone active module into a new tab |
 | `:l \| :load [PATH]` | Load device configuration |
 | `:a \| :add` | Add new register to module |
 | `:start` | Start module execution |

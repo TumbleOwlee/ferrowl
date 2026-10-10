@@ -1,4 +1,4 @@
-//! Overlay (modal dialog) lifecycle: creation dialog (`:new`/`:load`), tab creation.
+//! Overlay (modal dialog) lifecycle: creation dialog (`:new`/`:clone`/`:load`), tab creation.
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::EventResult;
@@ -10,6 +10,14 @@ use crate::module::type_select::TypeSelectDialog;
 use crate::module::view::ModuleView;
 
 use super::{App, DrawSurface, Focus, Level, Overlay, Tab};
+
+/// UI-R-368, UI-E-169 — `<base>-<N>` for the smallest N ≥ 2 no tab carries; `base` is never parsed.
+fn clone_name(base: &str, existing: &[&str]) -> String {
+    (2usize..)
+        .map(|n| format!("{base}-{n}"))
+        .find(|c| !existing.contains(&c.as_str()))
+        .expect("an unbounded range always yields a free name")
+}
 
 impl<S: DrawSurface> App<S> {
     pub(super) async fn handle_dialog_key(
@@ -88,6 +96,20 @@ impl<S: DrawSurface> App<S> {
     pub(super) fn enter_new(&mut self) {
         self.set_content_focus(false);
         self.overlay = Some(Overlay::TypeSelect(Box::new(TypeSelectDialog::new())));
+        self.focus = Focus::Dialog;
+    }
+
+    /// Open the active tab's setup dialog prefilled from it, name suffixed (`:clone`).
+    pub(super) fn enter_clone(&mut self) {
+        let setup = {
+            let Some(tab) = self.tabs.titles.get(self.tabs.selected_index()) else {
+                return;
+            };
+            let existing: Vec<&str> = self.tabs.titles.iter().map(|t| t.name.as_str()).collect();
+            tab.view.clone_setup(&clone_name(&tab.name, &existing))
+        };
+        self.set_content_focus(false);
+        self.overlay = Some(Overlay::Creation(setup));
         self.focus = Focus::Dialog;
     }
 
@@ -232,5 +254,93 @@ mod tests {
             vec!["start".to_string()],
             "a valid confirm must start the newly created tab's view"
         );
+    }
+
+    /// UI-R-368 — the proposed name is the smallest `<base>-<N>`, N ≥ 2, no tab carries.
+    #[test]
+    fn ut_clone_name_lowest_free_suffix() {
+        assert_eq!(clone_name("pump", &["pump"]), "pump-2");
+        assert_eq!(clone_name("pump", &["pump", "pump-2"]), "pump-3");
+        assert_eq!(clone_name("pump", &["pump", "pump-3"]), "pump-2");
+    }
+
+    /// UI-E-169 — an existing `-<N>` suffix is never parsed.
+    #[test]
+    fn ut_clone_name_never_parses_existing_suffix() {
+        assert_eq!(clone_name("pump-2", &["pump", "pump-2"]), "pump-2-2");
+    }
+
+    /// UI-R-017, UI-R-366, UI-R-368 — `:clone` opens the setup dialog directly, no selector.
+    #[tokio::test]
+    async fn ut_clone_opens_setup_dialog_directly() {
+        let mut app = app_with(&["a"]);
+        app.run_command("clone").await;
+        assert!(matches!(app.overlay, Some(Overlay::Creation(_))));
+        assert_eq!(app.focus, Focus::Dialog);
+        let Some(Overlay::Creation(setup)) = &app.overlay else {
+            unreachable!()
+        };
+        assert_eq!(setup.confirm().unwrap().0, "a-2");
+    }
+
+    /// UI-R-369, UI-E-169 — confirming creates and starts the tab; cloning a clone appends
+    /// to the full name.
+    #[tokio::test]
+    async fn ut_confirmed_clone_creates_and_starts_tab() {
+        let (view, handle) = MockView::pair("a");
+        let mut app = build_app(vec![view.boxed()]);
+        app.run_command("clone").await;
+        app.confirm_overlay().await;
+        assert_eq!(app.tabs.titles.len(), 2);
+        assert_eq!(app.tabs.titles[app.tabs.selected_index()].name, "a-2");
+        assert!(app.overlay.is_none());
+        assert_eq!(
+            handle.clone_handle().unwrap().commands(),
+            vec!["start".to_string()]
+        );
+
+        app.run_command("clone").await;
+        app.confirm_overlay().await;
+        assert_eq!(app.tabs.titles[app.tabs.selected_index()].name, "a-2-2");
+    }
+
+    /// UI-R-369, UI-R-025 — a clone whose proposed name was taken meanwhile is refused.
+    #[tokio::test]
+    async fn ut_clone_name_collision_is_refused() {
+        let mut app = app_with(&["a", "b"]);
+        app.run_command("clone").await;
+        app.tabs.titles[1].name = "a-2".into();
+        app.confirm_overlay().await;
+        assert_eq!(app.tabs.titles.len(), 2);
+        assert!(app.overlay.is_some());
+        assert!(
+            active_log_lines(&app)
+                .await
+                .iter()
+                .any(|l| l.contains("already in use"))
+        );
+    }
+
+    /// UI-R-370 — a clone dialog failing validation stays open.
+    #[tokio::test]
+    async fn ut_invalid_clone_dialog_stays_open() {
+        let mut app = build_app(vec![MockView::pair("a").0.with_invalid_clone().boxed()]);
+        app.run_command("clone").await;
+        app.confirm_overlay().await;
+        assert_eq!(app.tabs.titles.len(), 1);
+        assert!(app.overlay.is_some());
+    }
+
+    /// UI-R-371 — opening, cancelling and confirming a clone never touches the source tab.
+    #[tokio::test]
+    async fn ut_clone_leaves_source_tab_untouched() {
+        let (view, handle) = MockView::pair("a");
+        let mut app = build_app(vec![view.boxed()]);
+        app.run_command("clone").await;
+        app.close_overlay();
+        app.run_command("clone").await;
+        app.confirm_overlay().await;
+        assert!(handle.commands().is_empty());
+        assert_eq!(app.tabs.titles[0].name, "a");
     }
 }

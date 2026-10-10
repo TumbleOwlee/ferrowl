@@ -880,6 +880,7 @@ mod tests {
         let text = app.screen.text();
         assert!(text.contains("quit"), "app-level command listed");
         assert!(text.contains("save"), "app-level :write/:save listed");
+        assert!(text.contains(":clone"), "app-level :clone listed");
         assert!(
             text.contains(MOCK_COMMAND),
             "active view's module command merged into the popup"

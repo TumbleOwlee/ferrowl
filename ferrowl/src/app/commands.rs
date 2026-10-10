@@ -58,6 +58,7 @@ impl<S: DrawSurface> App<S> {
             }
             Cmd::QuitAll => return true,
             Cmd::New => self.enter_new(),
+            Cmd::Clone => self.enter_clone(),
             Cmd::Load(path) => self.enter_load(path.as_deref()),
             Cmd::Session => self.enter_session(),
             Cmd::Write(path) => {
@@ -689,5 +690,20 @@ mod tests {
             }
         }
         panic!("process cwd never stabilized long enough to observe base_dir_of's read");
+    }
+
+    /// UI-E-171, UI-R-018, UI-R-348 — `:clone` with an argument is forwarded to the view and,
+    /// unrecognized there, logged as unknown.
+    #[tokio::test]
+    async fn ut_clone_with_argument_is_forwarded_and_unknown() {
+        use crate::app::testkit::{MockView, build_app};
+        let (v, h) = MockView::pair("a");
+        let mut app = build_app(vec![v.with_command_unhandled().boxed()]);
+        app.run_command("clone foo").await;
+        assert_eq!(h.commands(), vec!["clone foo".to_string()]);
+        assert!(app.overlay.is_none());
+        assert!(active_log_lines(&app).await.iter().any(|(level, msg)| {
+            *level == Level::Warning && msg == "Unknown command ':clone foo'"
+        }));
     }
 }

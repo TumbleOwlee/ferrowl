@@ -8,6 +8,8 @@ pub enum Cmd {
     Quit,
     QuitAll,
     New,
+    /// `:clone` with no argument (UI-R-366); any argument makes it `Unknown` (UI-E-171).
+    Clone,
     Load(Option<String>),
     Write(Option<String>),
     Log(Option<String>),
@@ -31,6 +33,10 @@ pub fn parse(input: &str) -> Cmd {
         "q" | "q!" | "quit" => Cmd::Quit,
         "qa" | "qa!" | "qall" => Cmd::QuitAll,
         "n" | "new" => Cmd::New,
+        "clone" => match parts.next() {
+            None => Cmd::Clone,
+            Some(_) => Cmd::Unknown("clone".to_string()),
+        },
         "l" | "load" => Cmd::Load(first()),
         "s" | "save" | "w" | "write" => Cmd::Write(first()),
         "log" => Cmd::Log(first()),
@@ -130,5 +136,14 @@ mod tests {
         assert_eq!(parse("script copy x"), Cmd::ScriptCopy(None));
         // Bare `:script` stays Unknown so the view opens its script dialog.
         assert_eq!(parse("script"), Cmd::Unknown("script".to_string()));
+    }
+
+    /// UI-R-016, UI-R-017, UI-E-171 — `clone` takes no argument and has no alias.
+    #[test]
+    fn ut_clone_parses_bare_only() {
+        assert_eq!(parse("clone"), Cmd::Clone);
+        assert_eq!(parse("  clone  "), Cmd::Clone);
+        assert_eq!(parse("clone foo"), Cmd::Unknown("clone".into()));
+        assert_eq!(parse("c"), Cmd::Unknown("c".into()));
     }
 }
