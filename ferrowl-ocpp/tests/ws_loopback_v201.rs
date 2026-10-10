@@ -13,8 +13,11 @@ use std::time::Duration;
 use ferrowl_ocpp::cs::{self, CsActionHandler};
 use ferrowl_ocpp::csms::{self, CsmsActionHandler};
 use ferrowl_ocpp::{Action201, CallError, CallErrorCode, Response201, V2_0_1};
-use ferrowl_test_support::wait_until;
+use ferrowl_test_support::{wait_until, within};
 use serde_json::json;
+
+/// Upper bound on each test, sized for coverage-instrumented builds on a loaded machine; each `wait_until` inside polls for up to 10 s.
+const TEST_LIMIT: Duration = Duration::from_secs(60);
 
 /// No-op log sink.
 fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
@@ -88,88 +91,91 @@ async fn start_server() -> csms::Server<V2_0_1> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 /// OC-R-014 — the 2.0.1 connection is full-duplex: CS and CSMS each originate Calls on the same socket.
 async fn cs_calls_csms_and_csms_calls_cs() {
-    let server = start_server().await;
-    let url = format!(
-        "ws://{}/ocpp/CS001",
-        wait_until(
-            "CSMS listener bind",
-            Duration::from_millis(20),
-            Duration::from_secs(10),
-            || server.local_addr()
+    within(TEST_LIMIT, async {
+        let server = start_server().await;
+        let url = format!(
+            "ws://{}/ocpp/CS001",
+            wait_until(
+                "CSMS listener bind",
+                Duration::from_millis(20),
+                Duration::from_secs(10),
+                || server.local_addr()
+            )
+            .await
+        );
+
+        let clear_cache_seen = Arc::new(AtomicBool::new(false));
+        // The client advertises `ocpp2.0.1`; a successful connect proves the server accepted it.
+        let client = cs::ClientBuilder::<V2_0_1>::new(
+            std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
+                extra_headers: Vec::new(),
+                url,
+                reconnect: true,
+                timeout_ms: 2000,
+                basic_auth: None,
+                tls: Default::default(),
+            })),
+            ferrowl_ocpp::new_self_signed_cache(),
+        )
+        .spawn(
+            TestCs {
+                clear_cache_seen: clear_cache_seen.clone(),
+            },
+            sink(),
+            sink(),
         )
         .await
-    );
+        .expect("client failed to connect");
 
-    let clear_cache_seen = Arc::new(AtomicBool::new(false));
-    // The client advertises `ocpp2.0.1`; a successful connect proves the server accepted it.
-    let client = cs::ClientBuilder::<V2_0_1>::new(
-        std::sync::Arc::new(tokio::sync::RwLock::new(cs::Config {
-            extra_headers: Vec::new(),
-            url,
-            reconnect: true,
-            timeout_ms: 2000,
-            basic_auth: None,
-            tls: Default::default(),
-        })),
-        ferrowl_ocpp::new_self_signed_cache(),
-    )
-    .spawn(
-        TestCs {
-            clear_cache_seen: clear_cache_seen.clone(),
-        },
-        sink(),
-        sink(),
-    )
-    .await
-    .expect("client failed to connect");
-
-    // CS -> CSMS: BootNotification.
-    let boot = Action201::BootNotification(
-        serde_json::from_value(json!({
-            "reason": "PowerUp",
-            "chargingStation": {
-                "model": "Model-1",
-                "vendorName": "Ferrowl"
+        // CS -> CSMS: BootNotification.
+        let boot = Action201::BootNotification(
+            serde_json::from_value(json!({
+                "reason": "PowerUp",
+                "chargingStation": {
+                    "model": "Model-1",
+                    "vendorName": "Ferrowl"
+                }
+            }))
+            .unwrap(),
+        );
+        let resp = client.call(boot).await.expect("boot call failed");
+        match resp {
+            Response201::BootNotification(r) => {
+                let v = serde_json::to_value(&r).unwrap();
+                assert_eq!(v["status"], "Accepted");
             }
-        }))
-        .unwrap(),
-    );
-    let resp = client.call(boot).await.expect("boot call failed");
-    match resp {
-        Response201::BootNotification(r) => {
-            let v = serde_json::to_value(&r).unwrap();
-            assert_eq!(v["status"], "Accepted");
+            _ => panic!("unexpected response variant"),
         }
-        _ => panic!("unexpected response variant"),
-    }
 
-    // CS -> CSMS: Heartbeat.
-    let hb = Action201::Heartbeat(serde_json::from_value(json!({})).unwrap());
-    assert!(matches!(
-        client.call(hb).await.unwrap(),
-        Response201::Heartbeat(_)
-    ));
+        // CS -> CSMS: Heartbeat.
+        let hb = Action201::Heartbeat(serde_json::from_value(json!({})).unwrap());
+        assert!(matches!(
+            client.call(hb).await.unwrap(),
+            Response201::Heartbeat(_)
+        ));
 
-    // CSMS -> CS: server-initiated ClearCache (reverse direction).
-    let conn = wait_until(
-        "CS connection",
-        Duration::from_millis(20),
-        Duration::from_secs(10),
-        || server.registry().connection_ids().first().copied(),
-    )
+        // CSMS -> CS: server-initiated ClearCache (reverse direction).
+        let conn = wait_until(
+            "CS connection",
+            Duration::from_millis(20),
+            Duration::from_secs(10),
+            || server.registry().connection_ids().first().copied(),
+        )
+        .await;
+        let clear = Action201::ClearCache(serde_json::from_value(json!({})).unwrap());
+        let resp = server
+            .call(conn, clear)
+            .await
+            .expect("clear cache call failed");
+        assert!(matches!(resp, Response201::ClearCache(_)));
+        assert!(
+            clear_cache_seen.load(Ordering::SeqCst),
+            "CS handler should have seen the server-initiated call"
+        );
+
+        // Graceful shutdown of both sides.
+        client.terminate().await.expect("client terminate failed");
+        server.terminate().await.expect("server terminate failed");
+    })
     .await;
-    let clear = Action201::ClearCache(serde_json::from_value(json!({})).unwrap());
-    let resp = server
-        .call(conn, clear)
-        .await
-        .expect("clear cache call failed");
-    assert!(matches!(resp, Response201::ClearCache(_)));
-    assert!(
-        clear_cache_seen.load(Ordering::SeqCst),
-        "CS handler should have seen the server-initiated call"
-    );
-
-    // Graceful shutdown of both sides.
-    client.terminate().await.expect("client terminate failed");
-    server.terminate().await.expect("server terminate failed");
 }
