@@ -1327,3 +1327,89 @@ async fn it_framing_error_logs_warning() {
     .await;
     server.terminate().await.expect("server terminate failed");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// OC-R-190, OC-R-182 — the CSMS logs a station connecting and leaving at Info, naming the
+/// station identity from the URL path and the connection id; the CS logs "Connected to CSMS."
+async fn it_station_connect_and_disconnect_lines() {
+    use ferrowl_ocpp::Level;
+    let (csms_log, csms_lines) = recording_log();
+    let (cs_status, cs_lines) = recording_log();
+    let server = csms::ServerBuilder::<V1_6>::new(
+        csms::Config {
+            host: "127.0.0.1".to_owned(),
+            port: 0,
+            timeout_ms: 2000,
+            reconnect: true,
+            basic_auth: None,
+            tls: Default::default(),
+        },
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(TestCsms, csms_log)
+    .await
+    .expect("server failed to bind");
+    let addr = wait_until(
+        "CSMS listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || server.local_addr(),
+    )
+    .await;
+    let client = cs::ClientBuilder::<V1_6>::new(
+        Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
+            url: format!("ws://{addr}/ocpp/CS001"),
+            reconnect: false,
+            timeout_ms: 2000,
+            basic_auth: None,
+            tls: Default::default(),
+        })),
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(
+        TestCs {
+            remote_start_seen: Arc::default(),
+        },
+        sink(),
+        cs_status,
+    )
+    .await
+    .expect("spawn always returns Ok");
+    let seen = |lines: &Captured, level: Level, pre: &str| {
+        lines
+            .lock()
+            .iter()
+            .any(|(l, s)| *l == level && s.starts_with(pre))
+    };
+    wait_until(
+        "station connected",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || seen(&csms_lines, Level::Info, "Station CS001 connected (conn#").then_some(()),
+    )
+    .await;
+    wait_until(
+        "CS connected line",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || seen(&cs_lines, Level::Info, "Connected to CSMS.").then_some(()),
+    )
+    .await;
+    let _ = client.terminate().await;
+    wait_until(
+        "station disconnected",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || {
+            seen(
+                &csms_lines,
+                Level::Info,
+                "Station CS001 disconnected (conn#",
+            )
+            .then_some(())
+        },
+    )
+    .await;
+    server.terminate().await.expect("server terminate failed");
+}

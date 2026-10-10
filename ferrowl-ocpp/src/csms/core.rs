@@ -84,5 +84,13 @@ pub(crate) async fn run_connection<V, H, S, L>(
 
     connection.shutdown().await;
     handler.on_disconnected(conn).await;
+    let station = registry
+        .identity(conn)
+        .unwrap_or_else(|| "<no identity>".into());
     registry.remove(conn);
+    log.invoke(
+        crate::Level::Info,
+        format!("Station {station} disconnected ({conn})"),
+    )
+    .await;
 }

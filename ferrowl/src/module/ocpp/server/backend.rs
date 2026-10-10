@@ -404,7 +404,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    /// NF-R-047, NF-R-059, OC-R-139, OC-R-108-109 — `OcppServer::start()` against an occupied port still returns
+    /// NF-R-047, NF-R-059, OC-R-139, OC-R-108-109, OC-R-178, OC-R-181, UI-E-170 — `OcppServer::start()` against an occupied port still returns
     /// `Ok(TlsBinding)`; `bound_addr()`
     /// stays `None` while backing off and becomes `Some(_)` once the port frees up.
     async fn it_csms_start_against_occupied_port_stays_running() {
@@ -426,9 +426,8 @@ mod tests {
             security: OcppSecurityConfig::default(),
         };
 
-        let mut backend = OcppServer::<ferrowl_ocpp::V1_6>::new(Arc::new(
-            tokio::sync::RwLock::new(LogRing::init()),
-        ));
+        let log: SharedLog = Arc::new(tokio::sync::RwLock::new(LogRing::init()));
+        let mut backend = OcppServer::<ferrowl_ocpp::V1_6>::new(log.clone());
         backend
             .start(&spec, NoopCsmsHandler)
             .await
@@ -438,6 +437,17 @@ mod tests {
         assert!(
             backend.bound_addr().is_none(),
             "bound_addr must stay None while the port is occupied and the bind is retrying"
+        );
+
+        let lines = log.read().await.peek_n(50);
+        assert!(
+            lines
+                .iter()
+                .any(|(_, level, s)| *level == crate::app::Level::Error
+                    && s.starts_with(&format!(
+                        "CSMS listener bind failed on 127.0.0.1:{occupied_port}: "
+                    ))),
+            "the bind failure must be visible in the tab log: {lines:?}"
         );
 
         drop(occupier);

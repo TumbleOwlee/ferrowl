@@ -7,6 +7,7 @@ mod core;
 mod registry;
 mod tls_stream;
 
+use std::future::Future;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -36,6 +37,10 @@ pub use registry::{ConnectionId, ConnectionRegistry};
 
 /// Capacity of the server command channel and each per-connection channel.
 const COMMAND_CHANNEL_CAP: usize = 32;
+
+/// OC-R-197 — how long the accept loop stops accepting after an accept error. Fixed, not
+/// configurable.
+const ACCEPT_ERROR_WAIT: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Builds and binds a CSMS server for a specific OCPP [`Version`].
 pub struct ServerBuilder<V: Version> {
@@ -256,6 +261,14 @@ where
                     // listener is not bound and backing off: there is no accept loop left to
                     // hand it to.
                     log_parked_dropped(&log, parked.len()).await;
+                    log.invoke(
+                        crate::Level::Error,
+                        format!(
+                            "CSMS listener bind failed on {}:{}: {e}",
+                            config.host, config.port
+                        ),
+                    )
+                    .await;
                     AttemptOutcome::Failed {
                         error: Error::from(e),
                         reconnect: config.reconnect,
@@ -274,9 +287,11 @@ where
                         }
                     };
                     *local_addr.lock() = Some(addr);
+                    log.invoke(crate::Level::Info, format!("CSMS listening on {addr}"))
+                        .await;
                     let activity = Arc::new(AtomicBool::new(false));
                     let mut commands = crate::cs::Commands::new(&mut receiver, parked);
-                    accept_loop::<V, H, L>(
+                    accept_loop::<V, H, L, _>(
                         listener,
                         handler.clone(),
                         registry.clone(),
@@ -320,10 +335,26 @@ where
     run_with_backoff(BackoffPolicy::default(), attempt, wait_abortable).await
 }
 
+/// Where `accept_loop` takes its next TCP connection from; a seam so tests can inject an accept
+/// failure.
+trait Acceptor: Send {
+    fn accept(
+        &mut self,
+    ) -> impl Future<Output = std::io::Result<(tokio::net::TcpStream, SocketAddr)>> + Send;
+}
+
+impl Acceptor for TcpListener {
+    fn accept(
+        &mut self,
+    ) -> impl Future<Output = std::io::Result<(tokio::net::TcpStream, SocketAddr)>> + Send {
+        TcpListener::accept(self)
+    }
+}
+
 /// The accept loop: hand-shakes new sockets and routes server-level commands.
 #[allow(clippy::too_many_arguments)]
-async fn accept_loop<V, H, L>(
-    listener: TcpListener,
+async fn accept_loop<V, H, L, A>(
+    mut listener: A,
     handler: Arc<H>,
     registry: Arc<ConnectionRegistry<V>>,
     commands: &mut crate::cs::Commands<'_, Command<V>>,
@@ -337,10 +368,16 @@ async fn accept_loop<V, H, L>(
     V::Action: Clone,
     H: CsmsActionHandler<V>,
     L: LogFn + Clone,
+    A: Acceptor,
 {
+    let mut accept_resume: Option<tokio::time::Instant> = None;
     loop {
         tokio::select! {
-            accepted = listener.accept() => match accepted {
+            // A disabled branch's expression is still evaluated, hence no bare `unwrap`.
+            _ = tokio::time::sleep_until(accept_resume.unwrap_or_else(tokio::time::Instant::now)), if accept_resume.is_some() => {
+                accept_resume = None;
+            }
+            accepted = listener.accept(), if accept_resume.is_none() => match accepted {
                 Ok((stream, peer)) => {
                     // OC-R-108: the listener-bind backoff resets once the listener has bound and
                     // accepted at least one connection — recorded here, before the per-connection
@@ -394,15 +431,20 @@ async fn accept_loop<V, H, L>(
                         };
                         let conn = registry.next_id();
                         let identity = identity_cell.lock().clone();
+                        let station = identity.clone().unwrap_or_else(|| "<no identity>".into());
                         let (conn_tx, conn_rx) = mpsc::channel(COMMAND_CHANNEL_CAP);
                         registry.insert(conn, conn_tx, identity);
+                        log.invoke(crate::Level::Info, format!("Station {station} connected ({conn})")).await;
                         core::run_connection::<V, H, _, _>(
                             ws, handler, conn, conn_rx, registry.clone(), log, timeout,
                         )
                         .await;
                     });
                 }
-                Err(e) => log_accept_error(&log, &e).await,
+                Err(e) => {
+                    log_accept_error(&log, &e).await;
+                    accept_resume = Some(tokio::time::Instant::now() + ACCEPT_ERROR_WAIT);
+                }
             },
             cmd = commands.recv() => match cmd {
                 None | Some(Command::Terminate) => {
@@ -486,6 +528,176 @@ pub(crate) async fn log_accept_error<L: LogFn>(log: &L, e: &std::io::Error) {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::{Action16, CallError, CallErrorCode, Response16, V1_6};
+    use std::time::Duration;
+
+    /// Delegates to a real listener, except that its second call fails once.
+    struct FlakyAcceptor {
+        inner: TcpListener,
+        calls: usize,
+    }
+
+    impl Acceptor for FlakyAcceptor {
+        async fn accept(&mut self) -> std::io::Result<(tokio::net::TcpStream, SocketAddr)> {
+            self.calls += 1;
+            if self.calls == 2 {
+                return Err(std::io::Error::other("injected"));
+            }
+            self.inner.accept().await
+        }
+    }
+
+    struct Heartbeats;
+
+    impl CsmsActionHandler<V1_6> for Heartbeats {
+        async fn handle_call(
+            &self,
+            _conn: ConnectionId,
+            action: Action16,
+        ) -> Result<Response16, CallError> {
+            match action {
+                Action16::Heartbeat(_) => Ok(Response16::Heartbeat(
+                    serde_json::from_value(
+                        serde_json::json!({ "currentTime": "2026-01-01T00:00:00Z" }),
+                    )
+                    .unwrap(),
+                )),
+                _ => Err(CallError::new(CallErrorCode::NotImplemented, "unsupported")),
+            }
+        }
+    }
+
+    type Lines = Arc<Mutex<Vec<(crate::Level, String)>>>;
+
+    fn count(lines: &Lines, level: crate::Level, pre: &str) -> usize {
+        lines
+            .lock()
+            .iter()
+            .filter(|(l, s)| *l == level && s.starts_with(pre))
+            .count()
+    }
+
+    async fn connect(addr: SocketAddr, id: &str) -> crate::cs::Client<V1_6> {
+        let config = crate::cs::Config {
+            extra_headers: Vec::new(),
+            url: format!("ws://{addr}/ocpp/{id}"),
+            reconnect: false,
+            timeout_ms: 30_000,
+            basic_auth: None,
+            tls: Default::default(),
+        };
+        crate::cs::ClientBuilder::<V1_6>::new(
+            Arc::new(tokio::sync::RwLock::new(config)),
+            crate::new_self_signed_cache(),
+        )
+        .spawn(
+            {
+                struct Cs;
+                impl crate::cs::CsActionHandler<V1_6> for Cs {
+                    async fn handle_call(&self, _: Action16) -> Result<Response16, CallError> {
+                        Err(CallError::new(CallErrorCode::NotImplemented, "unsupported"))
+                    }
+                }
+                Cs
+            },
+            |_: crate::Level, _: String| async {},
+            |_: crate::Level, _: String| async {},
+        )
+        .await
+        .unwrap()
+    }
+
+    /// OC-R-197, OC-E-033, OC-R-188 — after an accept error the CSMS waits a fixed 1 s before
+    /// accepting again, while commands and already-connected stations are served throughout.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_accept_error_waits_one_second_and_keeps_serving_commands() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let lines: Lines = Arc::default();
+        let rec = lines.clone();
+        let log = move |level: crate::Level, s: String| {
+            let rec = rec.clone();
+            async move {
+                rec.lock().push((level, s));
+            }
+        };
+        let registry = ConnectionRegistry::<V1_6>::new();
+        let (cmd_tx, mut cmd_rx) = mpsc::channel(8);
+        let server = tokio::spawn({
+            let registry = registry.clone();
+            async move {
+                let mut commands = crate::cs::Commands::new(&mut cmd_rx, Default::default());
+                accept_loop::<V1_6, _, _, _>(
+                    FlakyAcceptor {
+                        inner: listener,
+                        calls: 0,
+                    },
+                    Arc::new(Heartbeats),
+                    registry,
+                    &mut commands,
+                    log,
+                    Duration::from_secs(30),
+                    None,
+                    None,
+                    Arc::new(AtomicBool::new(false)),
+                )
+                .await;
+            }
+        });
+
+        let early = connect(addr, "EARLY").await;
+        while count(&lines, crate::Level::Warning, "CSMS accept error: injected") == 0 {
+            tokio::task::yield_now().await;
+        }
+        let error_at = std::time::Instant::now();
+        let late = tokio::spawn(async move { connect(addr, "LATE").await });
+
+        // A command during the wait is answered at once.
+        cmd_tx
+            .send(Command::SendToConnection(
+                ConnectionId(999),
+                Action16::Heartbeat(serde_json::from_value(serde_json::json!({})).unwrap()),
+            ))
+            .await
+            .unwrap();
+        // A station connected before the error still exchanges a message during the wait.
+        let hb = Action16::Heartbeat(serde_json::from_value(serde_json::json!({})).unwrap());
+        let reply = early.call(hb).await;
+        assert!(matches!(reply, Ok(Response16::Heartbeat(_))), "{reply:?}");
+        while count(&lines, crate::Level::Warning, "CSMS: no such connection") == 0 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            count(&lines, crate::Level::Info, "Station LATE connected"),
+            0
+        );
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_eq!(
+            count(&lines, crate::Level::Info, "Station LATE connected"),
+            0
+        );
+
+        let late = tokio::time::timeout(Duration::from_secs(5), late)
+            .await
+            .expect("the connection must be accepted once the wait is over")
+            .unwrap();
+        while count(&lines, crate::Level::Info, "Station LATE connected") == 0 {
+            tokio::task::yield_now().await;
+        }
+        let waited = error_at.elapsed();
+        assert!(
+            waited >= Duration::from_millis(950) && waited < Duration::from_millis(2500),
+            "accepting must resume after the fixed 1 s wait, got {waited:?}"
+        );
+
+        let _ = late.terminate().await;
+        let _ = early.terminate().await;
+        cmd_tx.send(Command::Terminate).await.unwrap();
+        server.await.unwrap();
+    }
+
     /// OC-R-191, OC-E-097 — one Warning per command parked during a failed bind.
     #[tokio::test]
     async fn ut_log_parked_dropped_is_warning_per_command() {
@@ -574,7 +786,7 @@ mod tests {
         let mut commands = crate::cs::Commands::new(&mut cmd_rx, std::collections::VecDeque::new());
         let activity = std::sync::Arc::new(AtomicBool::new(false));
 
-        let accept_fut = super::accept_loop::<V1_6, NoopHandler, _>(
+        let accept_fut = super::accept_loop::<V1_6, NoopHandler, _, _>(
             listener,
             handler,
             registry,

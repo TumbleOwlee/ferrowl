@@ -422,3 +422,73 @@ async fn it_cs_parked_command_dropped_on_failed_dial_logs_warning() {
     let _ = client.terminate().await;
     peer.join().unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// OC-R-182 — "Connected to CSMS." is logged at Info once per successful connect, and again after a reconnect.
+async fn it_cs_logs_connected_once_per_connect() {
+    use ferrowl_ocpp::Level;
+    let server = csms::ServerBuilder::<V1_6>::new(
+        csms::Config {
+            host: "127.0.0.1".to_owned(),
+            port: 0,
+            timeout_ms: 1000,
+            reconnect: true,
+            basic_auth: None,
+            tls: Default::default(),
+        },
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(TestCsms, sink())
+    .await
+    .expect("server failed to bind");
+    let addr = wait_until(
+        "CSMS listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || server.local_addr(),
+    )
+    .await;
+    let (status, lines) = capturing();
+    let client = cs::ClientBuilder::<V1_6>::new(
+        config(format!("ws://{addr}/ocpp/CS001"), true),
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(TestCs, sink(), status)
+    .await
+    .expect("spawn always returns Ok");
+    wait_until(
+        "first connect logged",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || has(&lines, Level::Info, "Connected to CSMS.").then_some(()),
+    )
+    .await;
+    let count = || {
+        lines
+            .lock()
+            .iter()
+            .filter(|(l, s)| *l == Level::Info && s == "Connected to CSMS.")
+            .count()
+    };
+    assert_eq!(count(), 1);
+    // Drop the connection from the CSMS side; the CS reconnects and logs again.
+    let conn = (0..8)
+        .map(csms::ConnectionId)
+        .find(|c| server.registry().identity(*c).is_some())
+        .expect("a registered connection");
+    server
+        .send(csms::Command::DisconnectConnection(conn))
+        .await
+        .unwrap();
+    wait_until(
+        "second connect logged",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || (count() == 2).then_some(()),
+    )
+    .await;
+    sleep(Duration::from_millis(300)).await;
+    assert_eq!(count(), 2);
+    let _ = client.terminate().await;
+    server.terminate().await.expect("server terminate failed");
+}

@@ -235,6 +235,9 @@ where
                     classify_attempt(AttemptResult::DialFailed(e), reconnect)
                 }
                 Ok(ws) => {
+                    status
+                        .invoke(crate::Level::Info, "Connected to CSMS.".to_string())
+                        .await;
                     let mut commands = Commands::new(&mut receiver, parked);
                     let run_end = core::run::<V, H, _, _, _>(
                         ws,

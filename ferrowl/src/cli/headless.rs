@@ -1323,6 +1323,34 @@ mod tests {
     }
 
     #[tokio::test]
+    /// CL-E-031 — with --exit-on-error, a CSMS whose first bind fails exits 3
+    /// well before the duration ends, although `reconnect` would have recovered it.
+    async fn ut_run_exit_on_error_trips_on_first_failed_csms_bind() {
+        let dir = reserve_temp_dir("ferrowl_cl");
+        let device = write_ocpp_device(&dir);
+        let occupier = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = occupier.local_addr().unwrap().port();
+        let args = RunArgs {
+            sessions: vec![],
+            modules: vec![],
+            ocpp: vec![format!(
+                "name=csms,device={device},ip=127.0.0.1,port={port}"
+            )],
+            duration: Some(5),
+            log_file: None,
+            exit_on_error: true,
+        };
+
+        let started = std::time::Instant::now();
+        assert_eq!(run(&args).await, 3);
+        assert!(
+            started.elapsed() < Duration::from_secs(4),
+            "must exit on the first failed bind, not at the deadline"
+        );
+        drop(occupier);
+    }
+
+    #[tokio::test]
     /// CL-R-060 — a drained line keeps the level its producer passed: a Warning whose text
     /// contains "error" does not flag exit-on-error, an Error does.
     async fn ut_drain_log_keeps_producer_level() {

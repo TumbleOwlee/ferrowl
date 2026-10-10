@@ -6,6 +6,7 @@
 #![allow(clippy::unwrap_used)]
 #![cfg(feature = "v1_6")]
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use ferrowl_ocpp::cs::{self, CsActionHandler};
@@ -51,7 +52,7 @@ impl CsActionHandler<V1_6> for TestCs {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// NF-R-047, NF-R-059, OC-R-139, OC-R-179 — a CSMS listener whose bind fails retries with backoff instead of failing
+/// NF-R-047, NF-R-059, OC-R-139, OC-R-179, OC-R-178, OC-R-187, OC-E-032 — a CSMS listener whose bind fails retries with backoff instead of failing
 /// `spawn` synchronously; once the occupying socket is freed, the next attempt lands.
 async fn csms_bind_failure_retries_then_succeeds() {
     // Occupy an ephemeral port ourselves first, then point the CSMS at that exact port.
@@ -60,6 +61,14 @@ async fn csms_bind_failure_retries_then_succeeds() {
         .expect("occupier bind failed");
     let occupied_port = occupier.local_addr().expect("occupier addr").port();
 
+    let lines: Arc<parking_lot::Mutex<Vec<(ferrowl_ocpp::Level, String)>>> = Arc::default();
+    let rec = lines.clone();
+    let log = move |level: ferrowl_ocpp::Level, s: String| {
+        let rec = rec.clone();
+        async move {
+            rec.lock().push((level, s));
+        }
+    };
     let server = csms::ServerBuilder::<V1_6>::new(csms::Config {
         host: "127.0.0.1".to_owned(),
         port: occupied_port,
@@ -68,7 +77,7 @@ async fn csms_bind_failure_retries_then_succeeds() {
         basic_auth: None,
         tls: Default::default(),
     }, ferrowl_ocpp::new_self_signed_cache())
-    .spawn(TestCsms, sink())
+    .spawn(TestCsms, log)
     .await
     .expect("spawn must not fail synchronously on an occupied port — only a TLS-config-build failure does (OC-R-040)");
 
@@ -79,12 +88,32 @@ async fn csms_bind_failure_retries_then_succeeds() {
         "local_addr must stay None while the port is occupied and the bind is retrying"
     );
 
+    assert!(
+        lines
+            .lock()
+            .iter()
+            .any(|(level, s)| *level == ferrowl_ocpp::Level::Error
+                && s.starts_with(&format!(
+                    "CSMS listener bind failed on 127.0.0.1:{occupied_port}: "
+                ))),
+        "bind failure not logged: {:?}",
+        lines.lock()
+    );
+
     // Free the port and wait past the first backoff interval; the retry must land.
     drop(occupier);
     sleep(Duration::from_millis(1200)).await;
     let addr = server
         .local_addr()
         .expect("the CSMS must have bound once the port was freed");
+    assert!(
+        lines.lock().contains(&(
+            ferrowl_ocpp::Level::Info,
+            format!("CSMS listening on 127.0.0.1:{occupied_port}")
+        )),
+        "listening line not logged: {:?}",
+        lines.lock()
+    );
 
     // A real CS can now connect and complete a Call.
     let url = format!("ws://{addr}/ocpp/CS001");
