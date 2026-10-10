@@ -1,5 +1,7 @@
+use crate::log::Level;
 use crate::server_core::{
-    BoundAddr, ResetOn, ServeEnd, Server, drive_serve, wait_reconnect_backoff,
+    BoundAddr, ResetOn, ServeEnd, Server, drive_serve, log_bind_failed, log_listening,
+    log_serve_failed, wait_reconnect_backoff,
 };
 use crate::udp::Config;
 use crate::{Error, Key, KeyParams, LogFn, ServerCommand, TcpError};
@@ -134,11 +136,14 @@ where
             );
             match bind_result {
                 None => AttemptOutcome::Done,
-                Some(Err(e)) => AttemptOutcome::Failed {
-                    error: Error::Server(e.into()),
-                    reconnect,
-                    reset: false,
-                },
+                Some(Err(e)) => {
+                    log_bind_failed(&log, &addr.to_string(), &e).await;
+                    AttemptOutcome::Failed {
+                        error: Error::Server(e.into()),
+                        reconnect,
+                        reset: false,
+                    }
+                }
                 Some(Ok(socket)) => {
                     let bound = match socket.local_addr() {
                         Ok(addr) => addr,
@@ -151,6 +156,7 @@ where
                         }
                     };
                     *bound_addr.lock() = Some(bound);
+                    log_listening(&log, &bound.to_string()).await;
                     let server = ModbusServer::new(
                         Server::new(memory.clone(), log.clone(), VERBOSE, PHYSICAL_SERIAL)
                             .with_reset_on(activity.clone(), ResetOn::Request),
@@ -159,12 +165,15 @@ where
                     let end = drive_serve(server.serve_udp(socket), handle, &mut receiver).await;
                     *bound_addr.lock() = None;
                     match end {
-                        ServeEnd::Terminated => AttemptOutcome::Done,
-                        ServeEnd::Failed(e) => AttemptOutcome::Failed {
-                            error: Error::Server(e),
-                            reconnect,
-                            reset: activity.load(Ordering::Relaxed),
-                        },
+                        ServeEnd::Terminated | ServeEnd::Ended => AttemptOutcome::Done,
+                        ServeEnd::Failed(e) => {
+                            log_serve_failed(&log, &addr.to_string(), &e).await;
+                            AttemptOutcome::Failed {
+                                error: Error::Server(e),
+                                reconnect,
+                                reset: activity.load(Ordering::Relaxed),
+                            }
+                        }
                     }
                 }
             }
@@ -180,7 +189,9 @@ where
     };
 
     let result = run_with_backoff(BackoffPolicy::default(), attempt, wait_abortable).await;
-    status.invoke("Server stopped".to_string()).await;
+    status
+        .invoke(Level::Info, "Server stopped".to_string())
+        .await;
     result
 }
 
@@ -205,7 +216,7 @@ mod tests {
     }
 
     fn sink() -> impl crate::LogFn + Clone {
-        |_s: String| async move {}
+        |_level: crate::Level, _s: String| async move {}
     }
 
     /// MB-R-120 revised (bound_addr companion) — same lifecycle as `tcp::server`'s own test:

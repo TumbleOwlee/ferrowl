@@ -18,8 +18,10 @@ use crate::dialog::lua_help::ScriptContext;
 use crate::dialog::scripts::ScriptDialog;
 use crate::module::modbus::build::Timing;
 use crate::module::modbus::dialog::{EditInputDialog, EditSelectionDialog};
+use crate::module::modbus::setup::ModbusSetupView;
 use crate::module::modbus::setup_dialog::SetupDialog;
 use crate::module::modbus::table::{Definition, TableView, cmp_definitions};
+use crate::module::type_descriptor::SetupView;
 use crate::module::view::{
     CommandDescriptor, CommandFuture, CommandResult, CommandSpec, ModuleView, RefreshFuture,
     SharedLog, StopOutcome, parse_command,
@@ -116,6 +118,20 @@ enum PendingLifecycle {
 }
 
 impl ModbusModuleView {
+    /// The setup dialog `:edit` opens, prefilled from this view's spec and device.
+    fn edit_dialog(&self) -> SetupDialog {
+        let timing = ModbusModule::resolve_timing(&self.device);
+        SetupDialog::edit(
+            &self.spec.name,
+            &self.spec.device,
+            self.spec.role.client_or_server(),
+            &self.spec.endpoint,
+            timing,
+            &self.device.read_ranges,
+            Some(&self.device.tls),
+        )
+    }
+
     pub fn new(module: ModbusModule, spec: ModuleSpec, device: DeviceConfig) -> Self {
         let definitions = module
             .registers()
@@ -959,16 +975,7 @@ impl ModuleView for ModbusModuleView {
             }),
 
             ModbusCmd::Edit => {
-                let timing = ModbusModule::resolve_timing(&self.device);
-                let dialog = SetupDialog::edit(
-                    &self.spec.name,
-                    &self.spec.device,
-                    self.spec.role.client_or_server(),
-                    &self.spec.endpoint,
-                    timing,
-                    &self.device.read_ranges,
-                    Some(&self.device.tls),
-                );
+                let dialog = self.edit_dialog();
                 self.overlay = ModbusViewOverlay::Setup(Box::new(dialog));
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
             }
@@ -1089,6 +1096,12 @@ impl ModuleView for ModbusModuleView {
 
     fn take_stop_outcome(&mut self) -> Option<StopOutcome> {
         self.last_stop_outcome.take()
+    }
+
+    fn clone_setup(&self, name: &str) -> Box<dyn SetupView> {
+        Box::new(ModbusSetupView::from_dialog(
+            self.edit_dialog().into_clone(name),
+        ))
     }
 
     fn session_spec(&self, base: &std::path::Path) -> Option<serde_json::Value> {
@@ -2501,7 +2514,7 @@ mod tests {
     }
 
     #[tokio::test]
-    /// MB-R-153 — a server view whose bind target is already occupied shows RECONNECTING (not
+    /// MB-R-153, MB-R-256, UI-E-170 — a server view whose bind target is already occupied shows RECONNECTING (not
     /// DISCONNECTED) while its task backs off retrying the bind, per the occupier idiom
     /// established in `instance/mod.rs`'s `it_server_stop_on_backing_off_task_ends_promptly`.
     async fn it_modbus_server_view_shows_reconnecting_while_bind_backs_off() {
@@ -2536,6 +2549,23 @@ mod tests {
                 term.draw(|f: &mut Frame| view.render(f, area)).unwrap();
                 let text = buffer_text(term.backend().buffer());
                 text.contains("RECONNECTING").then_some(text)
+            },
+        )
+        .await;
+
+        let log = view.log();
+        let addr = format!("127.0.0.1:{port}");
+        wait_until_async(
+            "bind failure Error line in the tab log",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            async || {
+                log.read()
+                    .await
+                    .peek_n(20)
+                    .iter()
+                    .any(|(_, level, line)| *level == Level::Error && line.contains(&addr))
+                    .then_some(())
             },
         )
         .await;
@@ -3793,5 +3823,87 @@ mod tests {
             "globals survived the reload: first value {first}"
         );
         let _ = view.handle_command("stop").await;
+    }
+
+    fn assert_clone_round_trips(view: &ModbusModuleView) {
+        let base = std::path::Path::new(".");
+        let (name, factory) = view.clone_setup("x-2").confirm().unwrap();
+        assert_eq!(name, "x-2");
+        let clone = factory();
+        let mut expected = view.session_spec(base).unwrap();
+        expected["name"] = "x-2".into();
+        assert_eq!(clone.session_spec(base).unwrap(), expected);
+    }
+
+    /// UI-R-366, UI-R-367, UI-R-371, UI-E-168, UI-E-170 — the clone dialog is the `:edit` dialog
+    /// with a new name; the created view keeps role and endpoint, drops scripts, and the
+    /// source stays untouched.
+    #[tokio::test]
+    async fn ut_clone_setup_matches_edit_prefill_and_round_trips() {
+        let mut view = new_view();
+        view.set_scripts(vec![ScriptDef {
+            name: "s".into(),
+            code: "-- x".into(),
+            enabled: true,
+        }]);
+        let base = std::path::Path::new(".");
+        let before = view.session_spec(base);
+
+        let edit = view.edit_dialog();
+        let clone = view.edit_dialog().into_clone("x-2");
+        macro_rules! same_input {
+            ($($f:ident),*) => {$(
+                assert_eq!(edit.$f.state.input(), clone.$f.state.input(), stringify!($f));
+            )*};
+        }
+        same_input!(
+            ip,
+            port,
+            timeout,
+            delay,
+            interval,
+            holding_ranges,
+            input_ranges,
+            coil_ranges,
+            discrete_ranges,
+            config_path
+        );
+        {
+            use ferrowl_ui::widgets::GetValue;
+            assert_eq!(
+                edit.transport.state.get_value(),
+                clone.transport.state.get_value()
+            );
+            assert_eq!(edit.role.state.get_value(), clone.role.state.get_value());
+            assert_eq!(
+                edit.tls_level.state.get_value(),
+                clone.tls_level.state.get_value()
+            );
+            assert_eq!(
+                edit.reconnect.state.get_value(),
+                clone.reconnect.state.get_value()
+            );
+        }
+
+        assert_clone_round_trips(&view);
+        let (_, factory) = view.clone_setup("x-2").confirm().unwrap();
+        assert_eq!(factory().scripts(), Some(&[][..]));
+        assert_eq!(view.scripts().map(<[_]>::len), Some(1));
+
+        assert_eq!(view.session_spec(base), before);
+        assert!(!view.overlay.is_active());
+    }
+
+    /// UI-R-366, UI-R-367 — a client-role source clones into a client-role tab.
+    #[tokio::test]
+    async fn ut_clone_setup_round_trips_modbus_client() {
+        let device = empty_device();
+        let spec = ModuleSpec {
+            role: Role::Client,
+            ..tcp_server_spec()
+        };
+        let module = super::super::ModbusModule::new(&spec, &device);
+        let view = ModbusModuleView::new(module, spec, device);
+        assert_clone_round_trips(&view);
     }
 }

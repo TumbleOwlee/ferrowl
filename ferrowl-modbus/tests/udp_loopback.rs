@@ -32,7 +32,7 @@ fn key(slave_id: UnitId, kind: RegKind) -> Key<SlaveKey> {
 
 /// A no-op log/status sink. `LogFn + Clone` is satisfied by a capture-free closure.
 fn sink() -> impl ferrowl_modbus::LogFn + Clone {
-    |_s: String| async move {}
+    |_level: ferrowl_modbus::Level, _s: String| async move {}
 }
 
 /// A log sink that records every line, so a test can assert on what the server logged.
@@ -43,7 +43,7 @@ fn capturing() -> (
 ) {
     let log = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
     let sink = log.clone();
-    let f = move |s: String| {
+    let f = move |_level: ferrowl_modbus::Level, s: String| {
         let sink = sink.clone();
         async move {
             sink.lock().push(s);

@@ -52,7 +52,9 @@ use crate::module::ocpp::config::session::{OcppRole, OcppSpec};
 use crate::module::ocpp::lock::{HasState, with_state, with_state_mut};
 use crate::module::ocpp::replace::MergedCommand;
 use crate::module::ocpp::scope::Scope;
+use crate::module::ocpp::setup::OcppSetupView;
 use crate::module::ocpp::setup_dialog::OcppSetupDialog;
+use crate::module::type_descriptor::SetupView;
 use crate::module::view::{CommandDescriptor, CommandSpec, ModuleView, SharedLog};
 
 pub use render::{choice, number, text_input};
@@ -697,6 +699,12 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
 
     fn log(&self) -> SharedLog {
         self.log.clone()
+    }
+
+    fn clone_setup(&self, name: &str) -> Box<dyn SetupView> {
+        Box::new(OcppSetupView::from_dialog(
+            self.edit_dialog().into_clone(name),
+        ))
     }
 
     fn session_spec(&self, base: &std::path::Path) -> Option<serde_json::Value> {
@@ -1414,5 +1422,29 @@ mod tests {
             );
             assert!(matches!(s.cs_get("MeterType"), Some(ValueType::String(v)) if v == "MT-X"));
         });
+    }
+
+    /// UI-R-366, UI-R-367 — the client clone confirms into a tab with the source's endpoint.
+    #[tokio::test]
+    async fn ut_clone_setup_round_trips_client() {
+        let spec = OcppSpec {
+            name: "cs".into(),
+            version: OcppVersion::V1_6,
+            role: OcppRole::Client,
+            protocol: OcppProtocol::Ws,
+            ip: "10.0.0.7".into(),
+            port: 9100,
+            path: "/ocpp/cp7".into(),
+            timeout_ms: None,
+            reconnect: None,
+            security: Default::default(),
+        };
+        let view = ClientView::<V1_6>::new(spec, String::new(), OcppDeviceConfig::default());
+        let base = std::path::Path::new(".");
+        let (name, factory) = view.clone_setup("cs-2").confirm().unwrap();
+        assert_eq!(name, "cs-2");
+        let mut expected = view.session_spec(base).unwrap();
+        expected["name"] = "cs-2".into();
+        assert_eq!(factory().session_spec(base).unwrap(), expected);
     }
 }

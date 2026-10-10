@@ -17,7 +17,7 @@ Boundary behavior, error semantics, intentional constraints.
 
 | ID | Condition | Behavior |
 |---|---|---|
-| **BR-E-001** | Upstream RTU serial link lost | ends the bridge task with an error; no upstream reconnect, unlike an ordinary Modbus server's backoff retry (MB-E-076): bridge holds no store and no session to keep serving from, so a lost upstream link ends the whole relay |
+| **BR-E-001** | Upstream RTU serial link lost, by an I/O error or end-of-file between frames (MB-R-287) | ends the bridge with an error (BR-R-035, BR-R-036); no upstream reconnect, unlike an ordinary Modbus server's backoff retry (MB-E-076): bridge holds no store and no session to keep serving from, so a lost upstream link ends the whole relay |
 | **BR-E-002** | Downstream connection/link lost or unavailable | 1s–30s backoff reconnect while upstream keeps accepting/serving; a request arriving during downstream backoff gets the BR-R-010 exception rather than blocking |
 | **BR-E-003** | Downstream connect fails at startup | not a setup failure: process starts normally, every forwarded request answered `GatewayPathUnavailable` until downstream connects (BR-R-010) |
 | **BR-E-004** | Downstream `reconnect` unset (`false`) and a connect/exchange failure occurs | never retries; every subsequent forwarded request answers `GatewayPathUnavailable` indefinitely (BR-R-006, BR-R-010) |
@@ -41,3 +41,4 @@ Boundary behavior, error semantics, intentional constraints.
 ## Logging and process contract
 
 - **BR-E-011** — **`--exit-on-error` exit code** — `--exit-on-error` exits 3, distinct from the clap usage-error code 2, mirroring `run` (CL-E-003).
+- **BR-E-012** — **Downstream exception responses are not logged** — a Modbus exception response from the downstream device is relayed upstream unchanged and emits no bridge failure line (BR-R-033); only transport failures and a missing downstream produce one. Deliberate — the exception is the device's valid answer, which the bridge passes through.

@@ -148,6 +148,18 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **MB-R-102** — On RTU, RtuOverTcp, Ascii, or AsciiOverTcp, a write command to slave id 0 is transmitted without awaiting a response, logged as executed, no disconnect.
 
+**MB-R-259** — A Modbus client appends a line to its module's log each time its transport connects, at Info (MB-R-258).
+
+**MB-R-264** — A Modbus client's line reporting a request that failed by timeout or transport I/O error carries Error (MB-R-258).
+
+**MB-R-265** — A Modbus client's line reporting a request answered with a Modbus exception response carries Warning (MB-R-258).
+
+**MB-R-266** — A Modbus client's line reporting that the task stopped on terminate carries Info (MB-R-258).
+
+**MB-R-277** — A Modbus client's line reporting that a completed read could not be written into the register store carries Warning (MB-R-258), as MB-R-129 does for a range rejection.
+
+**MB-R-278** — A Modbus client's line reporting a read request skipped because it targets the broadcast address 0 carries Warning (MB-R-258).
+
 ---
 
 ## Reconnect
@@ -180,11 +192,23 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **MB-R-134** — With `reconnect` disabled, a bind failure, serial-open failure, or mid-serve failure ends the server task with that error, after emitting a server-stopped status.
 
+**MB-R-256** — Every failed listener-bind attempt (TCP, `RtuOverTcp`, `Udp`, `AsciiOverTcp`) or serial-port open attempt (RTU, `Ascii`) of a Modbus server module appends an Error-level line to that module's module log (its tab log, UI-R-043), never its message log, naming the configured address or serial path and the OS error, whether or not `reconnect` retries it (MB-R-130, MB-R-134).
+
 **MB-R-153** — A Modbus server module's displayed status follows MB-R-137's three-state rule with "listener bound" (TCP-family) or "serial port open" (RTU/Ascii) for "transport connected": `CONNECTED` while bound/open; `RECONNECTING` while the task runs but is not bound/open (MB-R-071, MB-R-075, MB-R-120, MB-R-130–MB-R-134); `DISCONNECTED` while the task is not running.
 
 **MB-R-220** — A terminate, or the command channel closing, arriving while a client connection attempt is in flight (TCP connect, TLS handshake, UDP local bind, or serial-port open) aborts that attempt immediately and ends the client task with success, without waiting for the attempt to succeed or fail (MB-R-053 covers the same arrival during a backoff wait).
 
 **MB-R-221** — A terminate, or the command channel closing, arriving while a server's listener bind or serial-port open is in flight aborts it immediately and ends the server task with success, without waiting for the bind or the open to complete (MB-R-131 and MB-E-076 keep the separate rule that an already-running serve loop is not torn down early).
+
+**MB-R-260** — A Modbus client's line reporting a failed connection attempt (TCP connect, TLS handshake, UDP local bind/associate, serial-port open) carries Error (MB-R-258), whether or not `reconnect` retries it.
+
+**MB-R-261** — A Modbus client's line reporting that an established transport was lost other than by terminate carries Warning (MB-R-258).
+
+**MB-R-262** — A Modbus client's line announcing a reconnect backoff wait or a reconnect attempt carries Info (MB-R-258).
+
+**MB-R-263** — A Modbus client's line reporting that the task ends on a transport failure because `reconnect` is disabled carries Error (MB-R-258).
+
+**MB-R-279** — A Modbus client's line reporting a command dropped because the client is disconnected and backing off carries Warning (MB-R-258).
 
 ---
 
@@ -215,6 +239,26 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **MB-R-066** — A server logs a "request received" line for every request, including rejected function codes.
 
 **MB-R-067** — A server logs the per-request outcome (success/failure) on every transport.
+
+**MB-R-257** — A Modbus server's network listener (TCP, `RtuOverTcp`, `Udp`, `AsciiOverTcp`) binds its `ip:port` exclusively: a bind on an `ip:port` another socket already holds bound fails with address-in-use, never sharing the port with that socket.
+
+**MB-R-267** — A Modbus server appends a line naming the bound address or opened serial path to its module's log each time its listener binds or its serial port opens, at Info (MB-R-258).
+
+**MB-R-268** — A Modbus server appends a line naming the peer's address to its module's log each time it accepts or closes a peer connection (TCP, `RtuOverTcp`, `AsciiOverTcp`), at Info (MB-R-258).
+
+**MB-R-269** — A Modbus server appends a line naming the error to its module log for each `accept()` error on a bound listener (TCP, `RtuOverTcp`, `AsciiOverTcp`, TLS included) classified `Transient` by the Modbus library's listener-failure classification, at Warning (MB-R-258).
+
+**MB-R-270** — A Modbus server's line reporting a malformed or checksum-failing request frame carries Warning (MB-R-258, MB-E-015).
+
+**MB-R-271** — A Modbus server appends one line naming the error to its module log each time serving ends on a failure — a fatal or unclassified accept error (MB-R-283), a fatal or unclassified `Udp` receive failure (MB-R-286), or its serial link ending unrequested (MB-R-287) — at Error (MB-R-258), whether or not `reconnect` retries it (MB-R-131, MB-R-134).
+
+**MB-R-281** — A transient `accept()` error (MB-R-269) never ends serving: the listener keeps accepting and every live connection keeps being served.
+
+**MB-R-282** — After each transient `accept()` error (MB-R-281), a Modbus server waits a fixed 1 s, not configurable, before accepting again, live connections being served throughout the wait.
+
+**MB-R-283** — An `accept()` error on a bound TCP-family listener (TCP, `RtuOverTcp`, `AsciiOverTcp`, TLS included) that the Modbus library classifies `Fatal`, or leaves unclassified, ends serving once live connections have drained, and is handled as a mid-serve listener failure: logged per MB-R-271, then retried per MB-R-131 or ending the task per MB-R-134.
+
+**MB-R-287** — A serial server's (RTU, `Ascii`) link ending other than by stop or terminate — on an I/O error, or on end-of-file between frames — is a mid-serve serial failure, logged per MB-R-271 with a line naming the serial path and the I/O error or end-of-file, then reopened per MB-R-131 or ending the task per MB-R-134.
 
 ---
 
@@ -278,6 +322,12 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **MB-R-183** — A `Udp` server datagram failing to receive or decode is logged as a failed request (MB-R-066–MB-R-067) and neither ends serving nor affects any other datagram.
 
+**MB-R-284** — A `Udp` server's socket receive failure classified `Transient` by the Modbus library's listener-failure classification appends a line naming the error to its module log at Warning (MB-R-258) and never ends serving; a datagram that fails to decode, or a response that fails to send, is not a receive failure (MB-R-276).
+
+**MB-R-285** — After a transient receive failure (MB-R-284), a `Udp` server receives again at once when the receive before it succeeded, and after a fixed 1 s wait, not configurable, when the receive before it also failed, datagrams already in flight being answered throughout; MB-E-104 states the one case where a receive that succeeded counts as failed.
+
+**MB-R-286** — A `Udp` server's socket receive failure that the Modbus library classifies `Fatal`, or leaves unclassified, ends serving once datagrams in flight have been answered, and is handled as a mid-serve failure: logged per MB-R-271, then retried per MB-R-131 or ending the task per MB-R-134.
+
 ---
 
 ## Transport — Ascii
@@ -333,6 +383,12 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 ---
 
 ## Module lifecycle and device configuration
+
+**MB-R-258** — Every line the Modbus crate passes to a module's log callback carries exactly one severity — Info, Warning or Error — chosen at the site that emits the line, never derived from the line's text.
+
+**MB-R-275** — A Modbus crate line that no other level requirement covers carries Info when it traces a request or response, reports a module status change (e.g. "Server stopped", "Monitor stopped", "Client disconnected"), or reports a configuration fallback (e.g. the ephemeral self-signed certificate fallback) (MB-R-258).
+
+**MB-R-276** — A Modbus crate line that no other level requirement covers carries Warning when it reports a failure confined to one connection, request or frame (e.g. a framing or I/O error while processing one peer, an exception answered to a peer, an unsupported function) (MB-R-258).
 
 ### Store build
 
@@ -486,6 +542,10 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **MB-R-194** — A frame failing CRC (RTU) or LRC (Ascii), or otherwise malformed, is logged by the monitor at Warning level and discarded; decoding resumes at the next frame boundary (MB-R-142).
 
+**MB-R-272** — A Modbus monitor appends a line naming the serial path to its module's log each time its serial port opens, at Info (MB-R-258).
+
+**MB-R-273** — Every failed serial-port open attempt of a Modbus monitor appends a line naming the serial path and the OS error to its module's log, at Error (MB-R-258), whether or not `reconnect` retries it, as MB-R-256 does for a server.
+
 ### Monitor log, observed values and interpretations
 
 **MB-R-143** — The monitor's log carries one entry per completed request/response pairing and one per unmatched request, each with MB-R-142's decoded fields plus a timestamp. A request to slave id 0 (broadcast) is logged complete on its own (MB-R-102's fire-and-forget semantics), never marked unmatched.
@@ -514,6 +574,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **MB-R-217** — Neither editing (MB-R-148) nor removing (MB-R-216) an interpretation writes to the bus or touches the observed-value table (MB-R-144).
 
+**MB-R-280** — A Modbus monitor's line reporting a request observed on the bus with no matching response carries Warning (MB-R-258).
+
 ### Monitor lifecycle and configuration
 
 **MB-R-252** — Stopping a monitor module signals its receive task a graceful terminate and aborts that task only if it has not finished within a 100 ms grace period.
@@ -531,6 +593,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **MB-R-201** — With `reconnect` disabled, an MB-R-150 path match makes the single attempt report the same path-conflict status (MB-R-200) before stopping.
 
 **MB-R-152** — A monitor module's displayed status follows MB-R-137's three-state rule with "serial port open" for "transport connected": `CONNECTED` while the port is open and read; `RECONNECTING` while the task runs but the port is not open (MB-R-130–MB-R-134, MB-R-192); `DISCONNECTED` while the task is not running.
+
+**MB-R-274** — A module instance's path-conflict line (MB-R-200) carries Warning (MB-R-258).
 
 ---
 

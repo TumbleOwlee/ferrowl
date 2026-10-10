@@ -64,17 +64,29 @@ Per [`../README.md`](../README.md)'s ownership rules, this area does **not** own
 --upstream 'transport=tcp,ip=0.0.0.0,port=8502,tls.mode=mutual,tls.identity.source=self-signed,tls.verification.verify=ca-files,tls.verification.ca_files=/etc/ferrowl/a.pem;/etc/ferrowl/b.pem'
 ```
 
+**BR-R-034** — A fatal or unclassified `accept()` error on the bridge's TCP-family upstream listener (MB-R-283) ends the bridge with an error after its upstream connections have drained (BR-R-035, BR-R-036), as a lost upstream serial link does (BR-E-001); the bridge never rebinds its upstream.
+
 ## Logging and process contract
 
 **BR-R-012** — Bridge drains relayed-request and lifecycle log lines to stdout in the `[<timestamp>] <source> | <message>` format (CL-R-040), optionally appends to `--log-file` (CL-R-041), and keeps setup/fatal diagnostics on stderr (CL-R-042).
 
-**BR-R-013** — Exit codes mirror `run` (CL-R-030–032): 1 for setup failure (missing/invalid `--upstream`/`--downstream`, upstream bind/listen/serial-open failure).
+**BR-R-013** — Exit codes mirror `run` (CL-R-030–032): 1 for setup failure (missing/invalid `--upstream`/`--downstream`, upstream bind/listen/serial-open failure) and for the relay ending on an upstream error without `--exit-on-error` (BR-R-036).
 
 **BR-R-025** — The bridge exits 0 on `--duration` deadline or Ctrl-C (exit codes mirror `run`, BR-R-013).
 
-**BR-R-026** — With `--exit-on-error`, the bridge exits 3 on a drained `[bridge]`-sourced error line (exit codes mirror `run`, BR-R-013).
+**BR-R-026** — With `--exit-on-error`, the bridge exits 3 on a drained `[bridge]`-sourced line whose producer-chosen level is Error (CL-R-060; exit codes mirror `run`, BR-R-013).
 
 **BR-R-014** — `bridge` accepts an optional `--duration <secs>`, identical semantics to `run`'s (CL-R-013 family).
+
+**BR-R-031** — A line emitted by a bridge leg's Modbus client or server carries the level the Modbus requirement for that line's category assigns (MB-R-178, MB-R-256, MB-R-259 – MB-R-271, MB-R-275 – MB-R-279).
+
+**BR-R-032** — The bridge's line reporting a relayed request (BR-R-012) carries Info.
+
+**BR-R-033** — The bridge's failure line for a relayed request ("answered with a gateway exception"), emitted only when the downstream request failed by a transport error (timeout, I/O, closed, desync; answered upstream with gateway-target-device-failed-to-respond) or no downstream is connected (answered with gateway-path-unavailable), carries Error in both cases (MB-R-264).
+
+**BR-R-035** — When the bridge's relay ends with an error (BR-R-034, BR-E-001), the bridge emits exactly one Error-level, `[bridge]`-sourced line `[bridge] upstream ended: <error>`, printed and appended to `--log-file` like every drained line (BR-R-012).
+
+**BR-R-036** — After the BR-R-035 line, the bridge exits with code 3 when `--exit-on-error` is set (BR-R-026) and 1 otherwise (BR-R-013), without waiting for `--duration` or Ctrl-C (BR-R-025).
 
 ## Multidrop bus safety
 

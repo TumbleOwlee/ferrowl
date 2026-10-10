@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ferrowl_codec::Kind as RegKind;
+use ferrowl_modbus::Level;
 use ferrowl_modbus::tcp;
 use ferrowl_modbus::{
     Address, Command, FunctionCode, Key, Operation, ServerCommand, SlaveKey, UnitId, Word,
@@ -31,7 +32,7 @@ fn key(kind: RegKind) -> Key<SlaveKey> {
 
 /// A no-op log/status sink. `LogFn + Clone` is satisfied by a capture-free closure.
 fn sink() -> impl ferrowl_modbus::LogFn + Clone {
-    |_s: String| async move {}
+    |_level: ferrowl_modbus::Level, _s: String| async move {}
 }
 
 /// A log sink that records every line, so a test can assert on what the client logged.
@@ -39,13 +40,35 @@ fn sink() -> impl ferrowl_modbus::LogFn + Clone {
 fn capturing() -> (impl ferrowl_modbus::LogFn + Clone, Arc<Mutex<Vec<String>>>) {
     let log = Arc::new(Mutex::new(Vec::<String>::new()));
     let sink = log.clone();
-    let f = move |s: String| {
+    let f = move |_level: ferrowl_modbus::Level, s: String| {
         let sink = sink.clone();
         async move {
             sink.lock().push(s);
         }
     };
     (f, log)
+}
+
+type Lines = Arc<Mutex<Vec<(Level, String)>>>;
+
+/// Like [`capturing`], but keeps each line's level so a test can assert it.
+fn capturing_levels() -> (impl ferrowl_modbus::LogFn + Clone, Lines) {
+    let log = Lines::default();
+    let sink = log.clone();
+    let f = move |level: Level, s: String| {
+        let sink = sink.clone();
+        async move {
+            sink.lock().push((level, s));
+        }
+    };
+    (f, log)
+}
+
+fn has(lines: &Lines, level: Level, needle: &str) -> bool {
+    lines
+        .lock()
+        .iter()
+        .any(|(l, s)| *l == level && s.contains(needle))
 }
 
 fn config(port: u16) -> tcp::Config {
@@ -1196,7 +1219,7 @@ async fn tcp_client_delays_before_first_poll() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-/// MB-R-040 — every read is bounded by `timeout_ms`; a server that accepts the connection but never
+/// MB-R-040, MB-R-258, MB-R-264 — every read is bounded by `timeout_ms`; a server that accepts the connection but never
 /// answers makes the read time out, which (with reconnect off) ends the client task with an error.
 async fn tcp_client_read_times_out_when_server_silent() {
     // A raw TCP listener that accepts connections but never speaks Modbus.
@@ -1220,6 +1243,7 @@ async fn tcp_client_read_times_out_when_server_silent() {
         fn_code: FunctionCode::ReadHoldingRegisters,
         range: Range::new(0, 2),
     }]));
+    let (cli_log, cli_lines) = capturing_levels();
     let (_tx, rx) = mpsc::channel::<Command>(16);
     let (client, _connected) = tcp::ClientBuilder::new(
         Arc::new(RwLock::new(cfg)),
@@ -1227,7 +1251,7 @@ async fn tcp_client_read_times_out_when_server_silent() {
         client_mem(),
         tcp::new_self_signed_cache(),
     )
-    .spawn(rx, sink(), sink())
+    .spawn(rx, cli_log, sink())
     .await
     .expect("connect (TCP handshake) succeeds against the silent listener");
 
@@ -1237,6 +1261,7 @@ async fn tcp_client_read_times_out_when_server_silent() {
         .expect("read did not time out within the bound")
         .expect("client task panicked");
     assert!(joined.is_err());
+    assert!(has(&cli_lines, Level::Error, "timed out"));
     silent.abort();
 }
 
@@ -1379,7 +1404,7 @@ async fn it_missed_tick_delays_not_bursts() {
 
     let hits: Arc<Mutex<Vec<std::time::Instant>>> = Arc::new(Mutex::new(Vec::new()));
     let hits_sink = hits.clone();
-    let log = move |s: String| {
+    let log = move |_level: ferrowl_modbus::Level, s: String| {
         let hits_sink = hits_sink.clone();
         async move {
             if s.contains("successful") {
@@ -1420,5 +1445,157 @@ async fn it_missed_tick_delays_not_bursts() {
          after {gap:?}, too soon for a fresh interval_ms=30ms tick to have been waited for"
     );
 
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-258, MB-R-265, MB-R-275, MB-R-276, MB-R-277 — each client and server line carries the level
+/// of its category: traced requests Info, an exception answer and a rejected request Warning, a
+/// read that cannot be stored Warning.
+async fn it_client_and_server_lines_carry_category_levels() {
+    let port = reserve_tcp_port().release();
+    let (srv_log, srv_lines) = capturing_levels();
+    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
+    let (server, bound_addr) = tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        server_mem(),
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(srv_rx, srv_log, sink())
+    .await
+    .expect("server failed to start");
+    wait_until(
+        "listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || *bound_addr.lock(),
+    )
+    .await;
+
+    // Holding [0, 2) answers; [50, 52) is outside the server's regions (exception); input
+    // registers [0, 2) answer but the client declared no such range, so storing fails.
+    let operations = Arc::new(RwLock::new(vec![
+        Operation {
+            slave_id: UnitId(1),
+            fn_code: FunctionCode::ReadHoldingRegisters,
+            range: Range::new(0, 2),
+        },
+        Operation {
+            slave_id: UnitId(1),
+            fn_code: FunctionCode::ReadHoldingRegisters,
+            range: Range::new(50, 2),
+        },
+        Operation {
+            slave_id: UnitId(1),
+            fn_code: FunctionCode::ReadInputRegisters,
+            range: Range::new(0, 2),
+        },
+    ]));
+    let mut cli_mem = Memory::<Key<SlaveKey>>::default();
+    cli_mem.add_ranges(
+        key(RegKind::HoldingRegister),
+        &CellKind::read_write(CellType::Register),
+        &[Range::new(0, 8)],
+    );
+    let (cli_log, cli_lines) = capturing_levels();
+    let (tx, rx) = mpsc::channel::<Command>(16);
+    let (client, _connected) = tcp::ClientBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        operations,
+        Arc::new(MemLock::new(cli_mem)),
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(rx, cli_log, sink())
+    .await
+    .expect("client failed to connect");
+
+    wait_until(
+        "exception, store failure and traces logged",
+        Duration::from_millis(50),
+        Duration::from_secs(10),
+        || {
+            (has(&cli_lines, Level::Warning, "invalid")
+                && has(&cli_lines, Level::Warning, "failing memory update")
+                && has(&cli_lines, Level::Info, "successful. Received values")
+                && has(&srv_lines, Level::Warning, "failed"))
+            .then_some(())
+        },
+    )
+    .await;
+    assert!(has(&cli_lines, Level::Info, "Perform"));
+    assert!(has(
+        &srv_lines,
+        Level::Info,
+        "request received for slave ID 1"
+    ));
+    assert!(has(&srv_lines, Level::Info, "successful."));
+
+    tx.send(Command::Terminate).await.unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(5), client).await;
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-258, MB-R-259, MB-R-268 — a connecting client logs "Client connected" through its status
+/// callback, and the server logs the peer's connect and disconnect, all at Info.
+async fn it_connect_and_peer_lines_log_info() {
+    let port = reserve_tcp_port().release();
+    let (srv_log, srv_lines) = capturing_levels();
+    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
+    let (server, bound_addr) = tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        server_mem(),
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(srv_rx, srv_log, sink())
+    .await
+    .expect("server failed to start");
+    wait_until(
+        "listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || *bound_addr.lock(),
+    )
+    .await;
+
+    let operations = Arc::new(RwLock::new(vec![Operation {
+        slave_id: UnitId(1),
+        fn_code: FunctionCode::ReadHoldingRegisters,
+        range: Range::new(0, 2),
+    }]));
+    let (status, status_lines) = capturing_levels();
+    let (tx, rx) = mpsc::channel::<Command>(16);
+    let (client, _connected) = tcp::ClientBuilder::new(
+        Arc::new(RwLock::new(config(port))),
+        operations,
+        client_mem(),
+        tcp::new_self_signed_cache(),
+    )
+    .spawn(rx, sink(), status)
+    .await
+    .expect("client failed to connect");
+
+    wait_until(
+        "connect lines",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || {
+            (has(&status_lines, Level::Info, "Client connected")
+                && has(&srv_lines, Level::Info, "Peer 127.0.0.1:")
+                && has(&srv_lines, Level::Info, "connected."))
+            .then_some(())
+        },
+    )
+    .await;
+
+    tx.send(Command::Terminate).await.unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(5), client).await;
+    wait_until(
+        "disconnect line",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || has(&srv_lines, Level::Info, "disconnected").then_some(()),
+    )
+    .await;
     server.abort();
 }

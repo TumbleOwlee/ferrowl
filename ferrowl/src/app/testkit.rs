@@ -121,9 +121,15 @@ pub(crate) struct MockHandle {
     /// `set_serial_paths`, if any.
     serial_paths: Arc<Mutex<Option<SerialPathRegistry>>>,
     keys: Arc<Mutex<Vec<(KeyModifiers, KeyCode)>>>,
+    clone_slot: Arc<Mutex<Option<MockHandle>>>,
 }
 
 impl MockHandle {
+    /// The handle of the view built by the last confirmed `:clone` of this view.
+    pub(super) fn clone_handle(&self) -> Option<MockHandle> {
+        self.clone_slot.lock().unwrap().clone()
+    }
+
     /// How many times `App` called `refresh` on this view.
     pub(super) fn refreshes(&self) -> usize {
         self.refreshes.load(Ordering::Relaxed)
@@ -168,6 +174,8 @@ pub(crate) struct MockView {
     serial_paths: Arc<Mutex<Option<SerialPathRegistry>>>,
     keys: Arc<Mutex<Vec<(KeyModifiers, KeyCode)>>>,
     command_result: Option<CommandResult>,
+    clone_valid: bool,
+    clone_slot: Arc<Mutex<Option<MockHandle>>>,
     /// UI-R-316 — `lifecycle_pending()`'s backing counter: `0` = not pending; `usize::MAX` = a
     /// deferred stop that never settles; otherwise the number of `refresh()` calls still needed
     /// before it clears.
@@ -192,12 +200,14 @@ impl MockView {
         let commands = Arc::new(Mutex::new(Vec::new()));
         let serial_paths = Arc::new(Mutex::new(None));
         let keys = Arc::new(Mutex::new(Vec::new()));
+        let clone_slot = Arc::new(Mutex::new(None));
         let handle = MockHandle {
             refreshes: refreshes.clone(),
             renders: renders.clone(),
             commands: commands.clone(),
             serial_paths: serial_paths.clone(),
             keys: keys.clone(),
+            clone_slot: clone_slot.clone(),
         };
         let view = MockView {
             name: name.to_string(),
@@ -215,11 +225,19 @@ impl MockView {
             serial_paths,
             keys,
             command_result: None,
+            clone_valid: true,
+            clone_slot,
             pending_stop: Arc::new(AtomicUsize::new(0)),
             deferred_log: Arc::new(Mutex::new(None)),
             deferred_outcome: Arc::new(Mutex::new(None)),
         };
         (view, handle)
+    }
+
+    /// Make the dialog `clone_setup` returns fail validation.
+    pub(super) fn with_invalid_clone(mut self) -> Self {
+        self.clone_valid = false;
+        self
     }
 
     /// Make `is_overlay_active()` report true.
@@ -331,6 +349,14 @@ impl IsFocus for MockView {
 }
 
 impl ModuleView for MockView {
+    fn clone_setup(&self, name: &str) -> Box<dyn SetupView> {
+        Box::new(MockSetup {
+            name: name.to_string(),
+            valid: self.clone_valid,
+            handle_slot: Some(self.clone_slot.clone()),
+        })
+    }
+
     fn name(&self) -> String {
         self.name.clone()
     }

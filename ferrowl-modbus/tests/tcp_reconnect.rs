@@ -26,7 +26,7 @@ fn key(kind: RegKind) -> Key<SlaveKey> {
 
 /// A no-op log/status sink. `LogFn + Clone` is satisfied by a capture-free closure.
 fn sink() -> impl ferrowl_modbus::LogFn + Clone {
-    |_s: String| async move {}
+    |_level: ferrowl_modbus::Level, _s: String| async move {}
 }
 
 fn server_mem() -> Mem {
@@ -110,7 +110,7 @@ async fn tcp_server_bind_failure_retries_then_succeeds() {
 }
 
 #[tokio::test]
-/// MB-R-134 — with `reconnect` disabled, a TCP server bind failure ends the task with the
+/// MB-R-134, MB-R-257 — with `reconnect` disabled, a TCP server bind failure (the occupier holds the port, so the bind is exclusive) ends the task with the
 /// error: `spawn()` itself still returns `Ok(handle)`, but awaiting `handle` resolves to
 /// `Err(Error::Server(_))`.
 async fn tcp_server_bind_failure_reconnect_false_ends_task() {
@@ -131,7 +131,13 @@ async fn tcp_server_bind_failure_reconnect_false_ends_task() {
         .await
         .expect("task should end promptly, not retry, with reconnect disabled")
         .expect("task must not panic");
-    assert!(matches!(result, Err(ferrowl_modbus::Error::Server(_))));
+    let Err(ferrowl_modbus::Error::Server(e)) = result else {
+        panic!("expected a server error, got {result:?}");
+    };
+    assert!(
+        format!("{e:?}").contains("AddrInUse"),
+        "not address-in-use: {e:?}"
+    );
 
     drop(occupier);
 }
@@ -284,4 +290,296 @@ async fn it_terminate_while_server_bind_pending_ends_task_ok() {
         .expect("terminate around the bind must not hang")
         .expect("task must not panic");
     assert!(result.is_ok(), "the server task must end with success");
+}
+
+type Lines = Arc<parking_lot::Mutex<Vec<(ferrowl_modbus::Level, String)>>>;
+
+/// A log sink recording each line with its level.
+fn capturing_levels() -> (impl ferrowl_modbus::LogFn + Clone, Lines) {
+    let log = Lines::default();
+    let sink = log.clone();
+    let f = move |level: ferrowl_modbus::Level, s: String| {
+        let sink = sink.clone();
+        async move {
+            sink.lock().push((level, s));
+        }
+    };
+    (f, log)
+}
+
+fn has(lines: &Lines, level: ferrowl_modbus::Level, needle: &str) -> bool {
+    lines
+        .lock()
+        .iter()
+        .any(|(l, s)| *l == level && s.contains(needle))
+}
+
+fn read_op() -> Arc<RwLock<Vec<ferrowl_modbus::Operation>>> {
+    Arc::new(RwLock::new(vec![ferrowl_modbus::Operation {
+        slave_id: UnitId(1),
+        fn_code: ferrowl_modbus::FunctionCode::ReadHoldingRegisters,
+        range: Range::new(0, 2),
+    }]))
+}
+
+/// Spawn a client against `port` with the given log and status sinks.
+async fn spawn_client(
+    port: u16,
+    reconnect: bool,
+    log: impl ferrowl_modbus::LogFn + Clone,
+    status: impl ferrowl_modbus::LogFn + Clone,
+) -> (
+    tokio::task::JoinHandle<Result<(), ferrowl_modbus::Error>>,
+    mpsc::Sender<ferrowl_modbus::Command>,
+) {
+    let (tx, rx) = mpsc::channel(16);
+    let (handle, _connected) = ferrowl_modbus::tcp::ClientBuilder::new(
+        Arc::new(RwLock::new(tcp_config(port, reconnect))),
+        read_op(),
+        server_mem(),
+        ferrowl_modbus::tcp::new_self_signed_cache(),
+    )
+    .spawn(rx, log, status)
+    .await
+    .expect("spawn always returns Ok");
+    (handle, tx)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-258, MB-R-260, MB-R-262, MB-E-098 — a refused connect attempt logs at Error whatever
+/// words the OS error text holds, and the following backoff announcement logs at Info.
+async fn it_client_connect_refused_logs_error() {
+    use ferrowl_modbus::Level;
+    // Bound but never `listen()`ed: connects are refused while the binding stays reserved.
+    let socket = tokio::net::TcpSocket::new_v4().unwrap();
+    socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let port = socket.local_addr().unwrap().port();
+    let (log, lines) = capturing_levels();
+    let (handle, tx) = spawn_client(port, true, log, sink()).await;
+
+    ferrowl_test_support::wait_until(
+        "refused connect and backoff announcement",
+        Duration::from_millis(50),
+        Duration::from_secs(10),
+        || {
+            (has(&lines, Level::Error, "refused") && has(&lines, Level::Info, "Reconnecting in"))
+                .then_some(())
+        },
+    )
+    .await;
+    assert!(
+        !lines
+            .lock()
+            .iter()
+            .any(|(l, s)| *l != Level::Error && s.contains("refused")),
+        "the refused-connect line must not be classified by its text: {:?}",
+        lines.lock()
+    );
+
+    tx.send(ferrowl_modbus::Command::Terminate).await.unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
+    drop(socket);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-258, MB-R-263 — with `reconnect` disabled the line announcing that the task ends on a
+/// failed connect carries Error.
+async fn it_client_reconnect_disabled_logs_error() {
+    use ferrowl_modbus::Level;
+    let socket = tokio::net::TcpSocket::new_v4().unwrap();
+    socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let port = socket.local_addr().unwrap().port();
+    let (log, lines) = capturing_levels();
+    let (handle, _tx) = spawn_client(port, false, log, sink()).await;
+
+    let result = tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("the task must end")
+        .expect("task must not panic");
+    assert!(result.is_err());
+    assert!(has(&lines, Level::Error, "Reconnect disabled"));
+    drop(socket);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-258, MB-R-261, MB-R-262, MB-R-264 — a peer that drops the connection mid-run logs the
+/// failed request at Error, the lost connection at Warning, and the backoff at Info.
+async fn it_client_lost_connection_levels() {
+    use ferrowl_modbus::Level;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let acceptor = tokio::spawn(async move {
+        loop {
+            // Accept and drop at once: the client's first request meets a closed connection.
+            let _ = listener.accept().await;
+        }
+    });
+    let (log, lines) = capturing_levels();
+    let (handle, tx) = spawn_client(port, true, log, sink()).await;
+
+    ferrowl_test_support::wait_until(
+        "lost connection logged",
+        Duration::from_millis(50),
+        Duration::from_secs(10),
+        || {
+            (has(&lines, Level::Error, "Disconnecting client")
+                && has(&lines, Level::Warning, "Modbus error")
+                && has(&lines, Level::Info, "Reconnecting in"))
+            .then_some(())
+        },
+    )
+    .await;
+
+    tx.send(ferrowl_modbus::Command::Terminate).await.unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
+    acceptor.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-258, MB-R-266, MB-R-275 — terminating a connected client logs the graceful stop and the
+/// disconnect status at Info.
+async fn it_client_terminate_logs_info() {
+    use ferrowl_modbus::Level;
+    let port = reserve_tcp_port().release();
+    let (_srv_tx, srv_rx) = mpsc::channel::<ServerCommand>(1);
+    let (server, bound) = ferrowl_modbus::tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(tcp_config(port, true))),
+        server_mem(),
+        ferrowl_modbus::tcp::new_self_signed_cache(),
+    )
+    .spawn(srv_rx, sink(), sink())
+    .await
+    .unwrap();
+    ferrowl_test_support::wait_until(
+        "bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || *bound.lock(),
+    )
+    .await;
+    let (log, lines) = capturing_levels();
+    let (status, status_lines) = capturing_levels();
+    let (handle, tx) = spawn_client(port, true, log, status).await;
+    ferrowl_test_support::wait_until(
+        "first request",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || has(&lines, Level::Info, "Perform").then_some(()),
+    )
+    .await;
+
+    tx.send(ferrowl_modbus::Command::Terminate).await.unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
+    assert!(has(&lines, Level::Info, "Client gracefully terminated."));
+    assert!(has(&status_lines, Level::Info, "Client disconnected"));
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-258, MB-R-279 — a command arriving while the client is disconnected and backing off is
+/// dropped with a Warning line.
+async fn it_client_command_dropped_while_backing_off_logs_warning() {
+    use ferrowl_modbus::Level;
+    let socket = tokio::net::TcpSocket::new_v4().unwrap();
+    socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let port = socket.local_addr().unwrap().port();
+    let (log, lines) = capturing_levels();
+    let (handle, tx) = spawn_client(port, true, log, sink()).await;
+
+    ferrowl_test_support::wait_until(
+        "backoff announced",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || has(&lines, Level::Info, "Reconnecting in").then_some(()),
+    )
+    .await;
+    tx.send(ferrowl_modbus::Command::WriteSingleRegister(
+        UnitId(1),
+        Address(0),
+        ferrowl_modbus::Word(1),
+    ))
+    .await
+    .unwrap();
+    ferrowl_test_support::wait_until(
+        "dropped command logged",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || has(&lines, Level::Warning, "Command dropped").then_some(()),
+    )
+    .await;
+
+    tx.send(ferrowl_modbus::Command::Terminate).await.unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
+    drop(socket);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-256, MB-R-258, MB-R-267, UI-E-170 — while the port is held, every failed bind attempt
+/// logs an Error naming the address; once the holder lets go the server logs that it is
+/// listening, at Info.
+async fn it_server_bind_failure_logs_error_then_listening_info() {
+    use ferrowl_modbus::Level;
+    let occupier = reserve_tcp_port();
+    let port = occupier.port();
+    let (log, lines) = capturing_levels();
+    let (_sender, receiver) = mpsc::channel::<ServerCommand>(1);
+    let (handle, _bound) = ferrowl_modbus::tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(tcp_config(port, true))),
+        server_mem(),
+        ferrowl_modbus::tcp::new_self_signed_cache(),
+    )
+    .spawn(receiver, log, sink())
+    .await
+    .expect("spawn always returns Ok");
+
+    let addr = format!("127.0.0.1:{port}");
+    ferrowl_test_support::wait_until(
+        "bind failure logged",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || has(&lines, Level::Error, &addr).then_some(()),
+    )
+    .await;
+
+    drop(occupier);
+    ferrowl_test_support::wait_until(
+        "listening logged after the port frees",
+        Duration::from_millis(50),
+        Duration::from_secs(10),
+        || has(&lines, Level::Info, &format!("Server listening on {addr}")).then_some(()),
+    )
+    .await;
+    handle.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// MB-R-256, MB-R-258 — with `reconnect` disabled the one failed bind attempt still logs an
+/// Error naming the address, and the task ends.
+async fn it_server_bind_failure_reconnect_false_logs_one_error() {
+    use ferrowl_modbus::Level;
+    let occupier = reserve_tcp_port();
+    let port = occupier.port();
+    let (log, lines) = capturing_levels();
+    let (_sender, receiver) = mpsc::channel::<ServerCommand>(1);
+    let (handle, _bound) = ferrowl_modbus::tcp::ServerBuilder::new(
+        Arc::new(RwLock::new(tcp_config(port, false))),
+        server_mem(),
+        ferrowl_modbus::tcp::new_self_signed_cache(),
+    )
+    .spawn(receiver, log, sink())
+    .await
+    .expect("spawn always returns Ok");
+
+    let result = tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("the task must end")
+        .expect("task must not panic");
+    assert!(result.is_err());
+    let errors = lines
+        .lock()
+        .iter()
+        .filter(|(l, s)| *l == Level::Error && s.contains(&format!("127.0.0.1:{port}")))
+        .count();
+    assert_eq!(errors, 1);
+    drop(occupier);
 }

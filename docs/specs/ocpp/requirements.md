@@ -184,7 +184,17 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **OC-R-119** — `extra_headers` is a client-only device config field, not exposed through the `--ocpp` key=value CLI form, consistent with the other list-shaped client-only fields (`connectors`, `config`).
 
-**OC-R-120** — A CS's connection status lines (e.g. "Client disconnected") go to the module log, not the message log, which records only request/response pairs (data-contract.md `## Message log`).
+**OC-R-120** — Every line the OCPP crate passes to a CS module's log callback — connection status lines (e.g. "Client disconnected") and diagnostic lines alike — goes to the module log at its level (OC-R-180), never the message log, which records only request/response pairs (data-contract.md `## Message log`).
+
+**OC-R-182** — A CS appends a line to its module's log each time its WebSocket connection to the CSMS is established, at Info (OC-R-180).
+
+**OC-R-183** — A CS's line reporting a failed dial (TCP connect, TLS handshake, WebSocket upgrade) carries Error (OC-R-180), whether or not `reconnect` retries it.
+
+**OC-R-184** — A CS's line reporting that an established connection dropped other than by `:stop` or terminate carries Warning (OC-R-180).
+
+**OC-R-185** — A CS's line reporting a disconnect caused by `:stop`, `:restart` or terminate carries Info (OC-R-180).
+
+**OC-R-186** — A CS's line announcing a reconnect backoff wait or a reconnect attempt carries Info (OC-R-180).
 
 ---
 
@@ -298,6 +308,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **OC-R-109** — Terminating a CSMS while backing off from a failed bind aborts the wait immediately and ends the module task successfully (extends OC-R-053).
 
+**OC-R-178** — Every failed listener-bind attempt of a CSMS appends an Error-level line to that module's module log (its tab log, UI-R-043), never its message log, naming the configured host and port and the OS error, whether or not `reconnect` retries it (OC-R-139).
+
 **OC-R-054** — A connection is deregistered when its loop ends, for any reason.
 
 **OC-R-055** — A command addressing an unknown connection id fails that command alone: awaited Call → `InternalError` rejection; fire-and-forget → logged and dropped. Server keeps running.
@@ -307,6 +319,26 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **OC-R-176** — A terminate, or the command channel closing, arriving while a CSMS listener bind is in flight aborts the bind immediately and ends the server task with success, without waiting for it to complete.
 
 **OC-R-177** — A terminate, or the command channel closing, arriving while a CSMS `accept()` is pending aborts it immediately and ends the server task with success, without waiting for a connection to arrive.
+
+**OC-R-179** — A CSMS listener binds its host and port exclusively: a bind on a host and port another socket already holds bound fails with address-in-use, never sharing the port with that socket.
+
+**OC-R-181** — Every line the OCPP crate passes to a CSMS module's log callback is appended to that module's tab log at its level (OC-R-180), none dropped.
+
+**OC-R-187** — A CSMS appends a line naming the bound host and port to its module's log each time its listener binds, at Info (OC-R-180).
+
+**OC-R-188** — A CSMS's line reporting an `accept()` error (OC-E-033) carries Warning (OC-R-180).
+
+**OC-R-189** — A CSMS's line reporting a TLS handshake failure on an accepted socket (OC-E-038) carries Error (OC-R-180), matching MB-R-178.
+
+**OC-R-190** — A CSMS appends a line naming the station identity to its module's log each time a station's connection is registered or deregistered, at Info (OC-R-180).
+
+**OC-R-191** — The line reporting a parked command dropped because the in-flight CS dial or CSMS bind failed (OC-E-097) carries Warning (OC-R-180).
+
+**OC-R-195** — A CSMS's line reporting a failed WebSocket upgrade handshake from an accepted peer carries Error (OC-R-180), matching OC-R-189.
+
+**OC-R-196** — A CSMS's line reporting a command addressed to a station connection that does not exist carries Warning (OC-R-180).
+
+**OC-R-197** — After each `accept()` error (OC-E-033), a CSMS waits a fixed 1 s, not configurable, before accepting again, live station connections being served throughout the wait.
 
 ---
 
@@ -409,6 +441,14 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **OC-R-101** — Encoding an action or response to JSON for the message log never discards an encode failure silently: the failure is logged to the module's error channel before the payload degrades to JSON `null`.
 
 **OC-R-102** — When a module view stops or (re)starts its backend for a settings change, version switch, or `stop`/`restart`, a stop or start failure is reported in the module message log at Error level, not discarded.
+
+**OC-R-180** — Every line the OCPP crate passes to a module's log callback carries exactly one severity — Info, Warning or Error — chosen at the site that emits the line, never derived from the line's text.
+
+**OC-R-192** — An OCPP crate line that no other level requirement covers carries Info when it traces a message, reports a module status change, or reports a configuration fallback (e.g. the ephemeral self-signed certificate fallback, OC-R-095) (OC-R-180).
+
+**OC-R-193** — An OCPP crate line that no other level requirement covers carries Warning when it reports a failure confined to one connection or message (e.g. an OCPP-J framing error, a WebSocket error) (OC-R-180).
+
+**OC-R-194** — A CS's or CSMS's line reporting that sending an action failed carries Error (OC-R-180), matching MB-R-264.
 
 ---
 

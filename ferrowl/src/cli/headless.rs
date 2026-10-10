@@ -1145,6 +1145,10 @@ mod tests {
         }
     }
     impl ModuleView for NeverSettlingView {
+        fn clone_setup(&self, _name: &str) -> Box<dyn crate::module::type_descriptor::SetupView> {
+            unreachable!("headless never opens a setup dialog")
+        }
+
         fn name(&self) -> String {
             "never-settles".to_string()
         }
@@ -1277,6 +1281,90 @@ mod tests {
         let occupier = reserve_tcp_port();
         let args = timing_out_client_run_args(&dir, occupier.port(), 5, true);
         assert_eq!(run(&args).await, 3);
+    }
+
+    #[tokio::test]
+    /// CL-E-031, CL-R-060, MB-R-260 — with --exit-on-error, the first refused connect of a client
+    /// exits 3 well before the duration ends, although `reconnect` would have recovered it.
+    async fn ut_run_exit_on_error_trips_on_first_failed_connect() {
+        let dir = reserve_temp_dir("ferrowl_cl");
+        // Bound but never listening: connects are refused while the binding stays reserved.
+        let socket = tokio::net::TcpSocket::new_v4().unwrap();
+        socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let port = socket.local_addr().unwrap().port();
+        let mut cfg = holding_device_config();
+        cfg.reconnect = Some(true);
+        let device = dir.join("reconnecting-client.toml");
+        crate::convert::Converter::save(
+            &cfg,
+            device.to_str().unwrap(),
+            crate::convert::FileType::Toml,
+        )
+        .unwrap();
+        let args = RunArgs {
+            sessions: vec![],
+            modules: vec![format!(
+                "name=m,device={},transport=tcp,ip=127.0.0.1,port={port},role=client",
+                device.display()
+            )],
+            ocpp: vec![],
+            duration: Some(5),
+            log_file: None,
+            exit_on_error: true,
+        };
+
+        let started = std::time::Instant::now();
+        assert_eq!(run(&args).await, 3);
+        assert!(
+            started.elapsed() < Duration::from_secs(4),
+            "must exit on the first failed attempt, not at the deadline"
+        );
+        drop(socket);
+    }
+
+    #[tokio::test]
+    /// CL-E-031 — with --exit-on-error, a CSMS whose first bind fails exits 3
+    /// well before the duration ends, although `reconnect` would have recovered it.
+    async fn ut_run_exit_on_error_trips_on_first_failed_csms_bind() {
+        let dir = reserve_temp_dir("ferrowl_cl");
+        let device = write_ocpp_device(&dir);
+        let occupier = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = occupier.local_addr().unwrap().port();
+        let args = RunArgs {
+            sessions: vec![],
+            modules: vec![],
+            ocpp: vec![format!(
+                "name=csms,device={device},ip=127.0.0.1,port={port}"
+            )],
+            duration: Some(5),
+            log_file: None,
+            exit_on_error: true,
+        };
+
+        let started = std::time::Instant::now();
+        assert_eq!(run(&args).await, 3);
+        assert!(
+            started.elapsed() < Duration::from_secs(4),
+            "must exit on the first failed bind, not at the deadline"
+        );
+        drop(occupier);
+    }
+
+    #[tokio::test]
+    /// CL-R-060 — a drained line keeps the level its producer passed: a Warning whose text
+    /// contains "error" does not flag exit-on-error, an Error does.
+    async fn ut_drain_log_keeps_producer_level() {
+        let log = new_log();
+        log.write()
+            .await
+            .write(Level::Warning, "request error recovered");
+        let mut last_written = 0;
+        let (_, hit) = drain_log(&log, "m", &mut last_written, true).await;
+        assert!(!hit);
+
+        log.write().await.write(Level::Error, "plain failure");
+        let (_, hit) = drain_log(&log, "m", &mut last_written, true).await;
+        assert!(hit);
     }
 
     #[tokio::test]

@@ -1,6 +1,7 @@
 //! Transport-agnostic Modbus server request handler shared by the TCP and RTU servers.
 
 use crate::common::serial_config_from;
+use crate::log::Level;
 use crate::tcp::Config;
 use crate::tcp::tls::build_server_tls_config;
 use crate::{
@@ -13,13 +14,55 @@ use ferrowl_util::backoff::{AttemptOutcome, BackoffPolicy, run_with_backoff};
 use parking_lot::RwLock;
 use rust_modbus::{
     Connection, ExceptionCode, FunctionCode, Quantity, RegisterValue, RequestPdu, ResponsePdu,
-    Server as ModbusServer, ServerFraming, Service, TcpListener, TlsListener, UnitId, open_serial,
+    Server as ModbusServer, ServerFraming, Service, TcpListener, TlsListener, UnitId,
 };
 use std::fmt::Display;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex as AsyncMutex;
+
+/// MB-R-282, MB-R-285 — fixed, not configurable.
+pub(crate) const LISTENER_ERROR_WAIT: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// MB-R-256 — one Error line per failed bind or serial-open attempt.
+pub(crate) async fn log_bind_failed<L: LogFn>(log: &L, target: &str, e: &(dyn Display + Sync)) {
+    log.invoke(Level::Error, format!("Server bind failed on {target}: {e}"))
+        .await;
+}
+
+/// MB-R-267 — Info line once the listener is bound or the serial port is open.
+pub(crate) async fn log_listening<L: LogFn>(log: &L, target: &str) {
+    log.invoke(Level::Info, format!("Server listening on {target}"))
+        .await;
+}
+
+/// MB-R-271 — the one Error line when serving ends on a failure (MB-R-283, MB-R-286, MB-R-287).
+pub(crate) async fn log_serve_failed<L: LogFn>(log: &L, target: &str, e: &(dyn Display + Sync)) {
+    log.invoke(
+        Level::Error,
+        format!("Server on {target} failed while serving: {e}"),
+    )
+    .await;
+}
+
+/// MB-R-269, MB-R-281, MB-R-282, MB-R-283 — a transient accept error logs a Warning, waits and
+/// keeps serving; any other stops serving, the single Error line coming from the serve-failure
+/// arm (MB-R-271).
+pub(crate) async fn on_listener_accept_error<L: LogFn>(
+    log: &L,
+    error: &rust_modbus::Error,
+) -> rust_modbus::AcceptErrorAction {
+    match error.listener_failure() {
+        Some(rust_modbus::ListenerFailure::Transient) => {
+            log.invoke(Level::Warning, format!("Server accept error: {error}"))
+                .await;
+            tokio::time::sleep(LISTENER_ERROR_WAIT).await;
+            rust_modbus::AcceptErrorAction::Continue
+        }
+        _ => rust_modbus::AcceptErrorAction::Stop,
+    }
+}
 
 /// Shared body of the four read function codes: log the request, read `[addr, addr+cnt)` for the
 /// `(slave, fc)` key as `cell`, log the outcome when `verbose`, and return the raw words. The
@@ -40,11 +83,14 @@ where
     T: KeyParams,
     L: LogFn + Clone,
 {
-    log.invoke(format!(
-        "{name} request received for slave ID {slave} and range [{}, {}).",
-        addr,
-        addr as usize + cnt as usize
-    ))
+    log.invoke(
+        Level::Info,
+        format!(
+            "{name} request received for slave ID {slave} and range [{}, {}).",
+            addr,
+            addr as usize + cnt as usize
+        ),
+    )
     .await;
     let key = Key {
         id: T::from_slave_fn(slave, fc),
@@ -57,22 +103,28 @@ where
     match result {
         Ok(v) => {
             if verbose {
-                log.invoke(format!(
-                    "{name} request for slave ID {slave} and range [{}, {}) successful.",
-                    addr,
-                    addr as usize + cnt as usize
-                ))
+                log.invoke(
+                    Level::Info,
+                    format!(
+                        "{name} request for slave ID {slave} and range [{}, {}) successful.",
+                        addr,
+                        addr as usize + cnt as usize
+                    ),
+                )
                 .await;
             }
             Ok(v)
         }
         Err(e) => {
             if verbose {
-                log.invoke(format!(
-                    "{name} request for slave ID {slave} and range [{}, {}) failed: {e}.",
-                    addr,
-                    addr as usize + cnt as usize
-                ))
+                log.invoke(
+                    Level::Warning,
+                    format!(
+                        "{name} request for slave ID {slave} and range [{}, {}) failed: {e}.",
+                        addr,
+                        addr as usize + cnt as usize
+                    ),
+                )
                 .await;
             }
             Err(ExceptionCode::IllegalDataAddress)
@@ -99,11 +151,14 @@ where
     T: KeyParams,
     L: LogFn + Clone,
 {
-    log.invoke(format!(
-        "{name} request received for slave ID {slave}, range [{}, {}), and values {values:?}.",
-        addr,
-        addr as usize + values.len()
-    ))
+    log.invoke(
+        Level::Info,
+        format!(
+            "{name} request received for slave ID {slave}, range [{}, {}), and values {values:?}.",
+            addr,
+            addr as usize + values.len()
+        ),
+    )
     .await;
     let key = Key {
         id: T::from_slave_fn(slave, fc),
@@ -116,7 +171,7 @@ where
     match result {
         Ok(()) => {
             if verbose {
-                log.invoke(format!(
+                log.invoke(Level::Info, format!(
                     "{name} request for slave ID {slave}, range [{}, {}), and values {values:?} successful.",
                     addr,
                     addr as usize + values.len()
@@ -127,7 +182,7 @@ where
         }
         Err(e) => {
             if verbose {
-                log.invoke(format!(
+                log.invoke(Level::Warning, format!(
                     "{name} request for slave ID {slave}, range [{}, {}), and values {values:?} failed: {e}.",
                     addr,
                     addr as usize + values.len()
@@ -160,9 +215,10 @@ where
     L: LogFn + Clone,
     V: Display,
 {
-    log.invoke(format!(
-        "{name} request received for slave ID {slave}, address {addr}, and value {value}."
-    ))
+    log.invoke(
+        Level::Info,
+        format!("{name} request received for slave ID {slave}, address {addr}, and value {value}."),
+    )
     .await;
     let key = Key {
         id: T::from_slave_fn(slave, fc),
@@ -175,7 +231,7 @@ where
     match result {
         Ok(()) => {
             if verbose {
-                log.invoke(format!(
+                log.invoke(Level::Info, format!(
                     "{name} request for slave ID {slave}, address {addr}, and value {value} successful."
                 ))
                 .await;
@@ -184,7 +240,7 @@ where
         }
         Err(e) => {
             if verbose {
-                log.invoke(format!(
+                log.invoke(Level::Warning, format!(
                     "{name} request for slave ID {slave}, address {addr}, and value {value} failed: {e}."
                 ))
                 .await;
@@ -372,7 +428,7 @@ where
         } => {
             let (read_addr, cnt, write_addr) = (read_address.0, read_quantity.0, write_address.0);
             let values: Vec<u16> = registers.iter().map(|v| v.0).collect();
-            log.invoke(format!(
+            log.invoke(Level::Info, format!(
                 "ReadWriteMultipleRegisrters request received for slave ID {slave}, read address {read_addr}, count {cnt}, write address {write_addr}, and values {values:?}."
             ))
             .await;
@@ -422,7 +478,7 @@ where
             match outcome {
                 Outcome::NotAddressable(e) => {
                     if verbose {
-                        log.invoke(format!(
+                        log.invoke(Level::Warning, format!(
                             "ReadWriteMultipleRegisrters request for slave ID {slave}, read address {read_addr}, count {cnt}, write address {write_addr}, and values {values:?} failed: {e}."
                         ))
                         .await;
@@ -431,7 +487,7 @@ where
                 }
                 Outcome::Rejected(e) => {
                     if verbose {
-                        log.invoke(format!(
+                        log.invoke(Level::Warning, format!(
                             "ReadWriteMultipleRegisrters request for slave ID {slave}, read address {read_addr}, count {cnt}, write address {write_addr}, and values {values:?} failed: {e}."
                         ))
                         .await;
@@ -440,7 +496,7 @@ where
                 }
                 Outcome::Ok(v) => {
                     if verbose {
-                        log.invoke(format!(
+                        log.invoke(Level::Info, format!(
                             "ReadWriteMultipleRegisrters request for slave ID {slave}, read address {read_addr}, count {cnt}, write address {write_addr}, and values {values:?} successful."
                         ))
                         .await;
@@ -457,10 +513,13 @@ where
         // function code the frame layer learns to decode later cannot silently acquire a
         // different answer here. MB-R-066 still requires the received line.
         other => {
-            log.invoke(format!(
-                "{} request received for slave ID {slave}. Unsupported function.",
-                other.function(),
-            ))
+            log.invoke(
+                Level::Warning,
+                format!(
+                    "{} request received for slave ID {slave}. Unsupported function.",
+                    other.function(),
+                ),
+            )
             .await;
             Err(ExceptionCode::IllegalFunction)
         }
@@ -536,6 +595,9 @@ where
     /// harmlessly into the void, not a behavior change.
     activity: Arc<AtomicBool>,
     reset_on: ResetOn,
+    /// MB-R-285 — whether the previous `Udp` receive failed, so a repeated transient failure
+    /// waits instead of spinning.
+    receive_failed: AtomicBool,
 }
 
 impl<T, L> Server<T, L>
@@ -556,7 +618,13 @@ where
             physical_serial,
             activity: Arc::new(AtomicBool::new(false)),
             reset_on: ResetOn::Connect,
+            receive_failed: AtomicBool::new(false),
         }
+    }
+
+    /// MB-R-285 — a datagram (or its decode failure) arrived, so the previous receive succeeded.
+    pub(crate) fn datagram_arrived(&self) {
+        self.receive_failed.store(false, Ordering::Relaxed);
     }
 
     /// Opts this server into MB-R-132's activity tracking: `activity` is the flag a caller's
@@ -585,6 +653,7 @@ where
         unit: UnitId,
         request: RequestPdu,
     ) -> Result<Option<ResponsePdu>, ExceptionCode> {
+        self.datagram_arrived();
         let result = handle_request(
             unit,
             request,
@@ -605,20 +674,64 @@ where
 
     // MB-R-132 (connection-oriented half) — called once per connection, before any request is
     // read (SV-R-032); always accepts (MB-R-057/MB-R-065 untouched, every connection is served).
-    async fn on_connect(&self, _conn: &Connection) -> rust_modbus::Acceptance {
+    async fn on_connect(&self, conn: &Connection) -> rust_modbus::Acceptance {
         if self.reset_on == ResetOn::Connect {
             self.activity.store(true, Ordering::Relaxed);
         }
+        if let Some(peer) = conn.peer() {
+            self.log
+                .invoke(Level::Info, format!("Peer {peer} connected."))
+                .await;
+        }
         rust_modbus::Acceptance::Accept
+    }
+
+    // MB-R-268 — serial links have no peer address and UDP never calls this hook, so only the
+    // TCP family logs.
+    async fn on_disconnect(&self, conn: &Connection, reason: rust_modbus::Disconnect) {
+        if let Some(peer) = conn.peer() {
+            self.log
+                .invoke(
+                    Level::Info,
+                    format!("Peer {peer} disconnected ({reason:?})."),
+                )
+                .await;
+        }
+    }
+
+    // MB-R-269, MB-R-281 — upstream calls this for TCP-family listeners only.
+    async fn on_accept_error(&self, error: &rust_modbus::Error) -> rust_modbus::AcceptErrorAction {
+        on_listener_accept_error(&self.log, error).await
+    }
+
+    // MB-R-284–286 — a transient `Udp` receive failure is logged and receiving continues, with a
+    // wait only when the previous receive also failed; anything else stops serving.
+    async fn on_receive_error(&self, error: &rust_modbus::Error) -> rust_modbus::AcceptErrorAction {
+        match error.listener_failure() {
+            Some(rust_modbus::ListenerFailure::Transient) => {
+                self.log
+                    .invoke(Level::Warning, format!("Server receive error: {error}"))
+                    .await;
+                if self.receive_failed.swap(true, Ordering::Relaxed) {
+                    tokio::time::sleep(LISTENER_ERROR_WAIT).await;
+                }
+                rust_modbus::AcceptErrorAction::Continue
+            }
+            _ => rust_modbus::AcceptErrorAction::Stop,
+        }
     }
 
     // A framing or I/O failure on the wire never reaches `on_request`; this reports it (the
     // former `on_process_error` callback) whenever `verbose` is set — every production caller
     // now sets it (MB-R-067).
     async fn on_error(&self, _conn: &Connection, error: &rust_modbus::Error) {
+        self.datagram_arrived();
         if self.verbose {
             self.log
-                .invoke(format!("Server processing failed. [{error}]"))
+                .invoke(
+                    Level::Warning,
+                    format!("Server processing failed. [{error}]"),
+                )
                 .await;
         }
     }
@@ -650,7 +763,10 @@ where
             other => other.to_string(),
         };
         self.log
-            .invoke(format!("TLS handshake with {peer} failed: {detail}."))
+            .invoke(
+                Level::Error,
+                format!("TLS handshake with {peer} failed: {detail}."),
+            )
             .await;
     }
 }
@@ -685,11 +801,14 @@ pub(crate) type BoundAddr = std::sync::Arc<parking_lot::Mutex<Option<std::net::S
 /// How a driven serve loop ended (MB-R-130/MB-R-131/MB-R-133).
 pub(crate) enum ServeEnd {
     /// A `ServerCommand::Terminate`, or the command channel closing, ended the loop gracefully
-    /// (MB-R-133) — includes the ordinary "serving future returned `Ok(())`" case, since both
-    /// paths mean "no retry is wanted."
+    /// (MB-R-133).
     Terminated,
-    /// The serve loop itself ended with a failure (a bind/open failure surfacing from a listener
-    /// or serial link, MB-R-130/MB-R-131) with no command ever received.
+    /// The serving future returned `Ok(())` on its own, with no command received. A network
+    /// listener treats this like `Terminated` (no retry wanted); a serial link treats it as a
+    /// mid-serve failure (MB-R-287).
+    Ended,
+    /// The serve loop itself ended with a failure (a mid-serve error from a listener, socket or
+    /// serial link, MB-R-130/MB-R-131) with no command ever received.
     Failed(rust_modbus::Error),
 }
 
@@ -697,8 +816,8 @@ pub(crate) enum ServeEnd {
 /// call returns) against a `ServerCommand` channel, racing the two: a `Terminate` (or the channel
 /// closing) requests a graceful `handle.shutdown()` and waits for `serve_fut` to actually end
 /// before returning [`ServeEnd::Terminated`] (MB-R-133); `serve_fut` ending on its own — `Ok(())`
-/// (a graceful stop the caller didn't ask for — treated the same as `Terminated`, since either
-/// way no retry is wanted) or `Err(e)` (MB-R-130/MB-R-131, [`ServeEnd::Failed`]) — returns
+/// ([`ServeEnd::Ended`]: a stop nobody asked for, which a serial caller treats as a lost link,
+/// MB-R-287) or `Err(e)` (MB-R-130/MB-R-131, [`ServeEnd::Failed`]) — returns
 /// immediately without ever touching `handle`.
 pub(crate) async fn drive_serve<Fut>(
     serve_fut: Fut,
@@ -713,7 +832,7 @@ where
         tokio::select! {
             result = &mut serve_fut => {
                 return match result {
-                    Ok(()) => ServeEnd::Terminated,
+                    Ok(()) => ServeEnd::Ended,
                     Err(e) => ServeEnd::Failed(e),
                 };
             }
@@ -827,11 +946,14 @@ where
                     );
                     match bind_result {
                         None => AttemptOutcome::Done,
-                        Some(Err(e)) => AttemptOutcome::Failed {
-                            error: Error::Server(e),
-                            reconnect,
-                            reset: false,
-                        },
+                        Some(Err(e)) => {
+                            log_bind_failed(&log, &addr.to_string(), &e).await;
+                            AttemptOutcome::Failed {
+                                error: Error::Server(e),
+                                reconnect,
+                                reset: false,
+                            }
+                        }
                         Some(Ok(listener)) => {
                             let bound = match listener.local_addr() {
                                 Ok(addr) => addr,
@@ -844,6 +966,7 @@ where
                                 }
                             };
                             *bound_addr.lock() = Some(bound);
+                            log_listening(&log, &bound.to_string()).await;
                             let handle = server.handle();
                             let end = drive_serve(
                                 server.serve_framed::<F>(listener),
@@ -853,12 +976,15 @@ where
                             .await;
                             *bound_addr.lock() = None;
                             match end {
-                                ServeEnd::Terminated => AttemptOutcome::Done,
-                                ServeEnd::Failed(e) => AttemptOutcome::Failed {
-                                    error: Error::Server(e),
-                                    reconnect,
-                                    reset: activity.load(Ordering::Relaxed),
-                                },
+                                ServeEnd::Terminated | ServeEnd::Ended => AttemptOutcome::Done,
+                                ServeEnd::Failed(e) => {
+                                    log_serve_failed(&log, &addr.to_string(), &e).await;
+                                    AttemptOutcome::Failed {
+                                        error: Error::Server(e),
+                                        reconnect,
+                                        reset: activity.load(Ordering::Relaxed),
+                                    }
+                                }
                             }
                         }
                     }
@@ -883,6 +1009,7 @@ where
                         Ok(Some((tls_config, used_fallback))) => {
                             if used_fallback {
                                 log.invoke(
+                                    Level::Info,
                                     "No cert_file/key_file/self_signed configured for this TLS \
                                      server; falling back to an ephemeral self-signed certificate."
                                         .to_string(),
@@ -905,11 +1032,14 @@ where
                             );
                             match bind_result {
                                 None => AttemptOutcome::Done,
-                                Some(Err(e)) => AttemptOutcome::Failed {
-                                    error: Error::Server(e),
-                                    reconnect,
-                                    reset: false,
-                                },
+                                Some(Err(e)) => {
+                                    log_bind_failed(&log, &addr.to_string(), &e).await;
+                                    AttemptOutcome::Failed {
+                                        error: Error::Server(e),
+                                        reconnect,
+                                        reset: false,
+                                    }
+                                }
                                 Some(Ok(listener)) => {
                                     let bound = match listener.local_addr() {
                                         Ok(addr) => addr,
@@ -922,6 +1052,7 @@ where
                                         }
                                     };
                                     *bound_addr.lock() = Some(bound);
+                                    log_listening(&log, &bound.to_string()).await;
                                     let handle = server.handle();
                                     let end = drive_serve(
                                         server.serve_tls::<F>(listener),
@@ -931,12 +1062,17 @@ where
                                     .await;
                                     *bound_addr.lock() = None;
                                     match end {
-                                        ServeEnd::Terminated => AttemptOutcome::Done,
-                                        ServeEnd::Failed(e) => AttemptOutcome::Failed {
-                                            error: Error::Server(e),
-                                            reconnect,
-                                            reset: activity.load(Ordering::Relaxed),
-                                        },
+                                        ServeEnd::Terminated | ServeEnd::Ended => {
+                                            AttemptOutcome::Done
+                                        }
+                                        ServeEnd::Failed(e) => {
+                                            log_serve_failed(&log, &addr.to_string(), &e).await;
+                                            AttemptOutcome::Failed {
+                                                error: Error::Server(e),
+                                                reconnect,
+                                                reset: activity.load(Ordering::Relaxed),
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -956,7 +1092,9 @@ where
     };
 
     let result = run_with_backoff(BackoffPolicy::default(), attempt, wait_abortable).await;
-    status.invoke("Server stopped".to_string()).await;
+    status
+        .invoke(Level::Info, "Server stopped".to_string())
+        .await;
     result
 }
 
@@ -972,7 +1110,7 @@ where
 /// the conflict clears) and is logged before returning, since a `reconnect: true` server would
 /// otherwise retry it forever with no observable trace at all.
 #[allow(clippy::too_many_arguments)] // config/memory/receiver/log/status/path_conflict/open + verbose/physical_serial flags
-pub(crate) async fn run_serial_family<T, F, L, St>(
+pub(crate) async fn run_serial_family<T, F, L, St, Io, O>(
     config: Arc<tokio::sync::RwLock<crate::rtu::Config>>,
     memory: Arc<RwLock<Memory<Key<T>>>>,
     receiver: tokio::sync::mpsc::Receiver<ServerCommand>,
@@ -982,6 +1120,7 @@ pub(crate) async fn run_serial_family<T, F, L, St>(
     open: ConnectedCell,
     verbose: bool,
     physical_serial: bool,
+    opener: O,
 ) -> Result<(), Error>
 where
     T: KeyParams,
@@ -989,101 +1128,133 @@ where
     F::Header: Send + Sync,
     L: LogFn + Clone,
     St: LogFn + Clone,
+    Io: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    O: Fn(
+            &str,
+            rust_modbus::SerialConfig,
+        ) -> rust_modbus::Result<rust_modbus::FrameTransport<Io, F>>
+        + Send
+        + Sync
+        + 'static,
 {
     let receiver = AsyncMutex::new(receiver);
     let activity = Arc::new(AtomicBool::new(false));
+    let opener = &opener;
 
-    let attempt = || {
-        let config = config.clone();
-        let memory = memory.clone();
-        let log = log.clone();
-        let activity = activity.clone();
-        let receiver = &receiver;
-        let path_conflict = path_conflict.clone();
-        let open = open.clone();
-        async move {
-            activity.store(false, Ordering::Relaxed);
-            let guard = config.read().await;
-            let reconnect = guard.reconnect;
-            let serial = match serial_config_from(
-                guard.baud_rate,
-                guard.data_bits,
-                guard.stop_bits,
-                guard.parity.as_deref(),
-            ) {
-                Ok(serial) => serial,
-                Err(e) => {
-                    return AttemptOutcome::Failed {
-                        error: e.into(),
-                        reconnect: false, // a bad serial-config value never fixes itself
-                        reset: false,
-                    };
-                }
-            };
-            let path = guard.path.clone();
-            drop(guard);
-            let expanded = ferrowl_util::path::expand(&path);
-            let expanded = expanded.to_string_lossy().into_owned();
-            if let Some(other) = path_conflict.check(&expanded) {
-                log.invoke(format!(
+    let attempt =
+        || {
+            let config = config.clone();
+            let memory = memory.clone();
+            let log = log.clone();
+            let activity = activity.clone();
+            let receiver = &receiver;
+            let path_conflict = path_conflict.clone();
+            let open = open.clone();
+            async move {
+                activity.store(false, Ordering::Relaxed);
+                let guard = config.read().await;
+                let reconnect = guard.reconnect;
+                let serial = match serial_config_from(
+                    guard.baud_rate,
+                    guard.data_bits,
+                    guard.stop_bits,
+                    guard.parity.as_deref(),
+                ) {
+                    Ok(serial) => serial,
+                    Err(e) => {
+                        return AttemptOutcome::Failed {
+                            error: e.into(),
+                            reconnect: false, // a bad serial-config value never fixes itself
+                            reset: false,
+                        };
+                    }
+                };
+                let path = guard.path.clone();
+                drop(guard);
+                let expanded = ferrowl_util::path::expand(&path);
+                let expanded = expanded.to_string_lossy().into_owned();
+                if let Some(other) = path_conflict.check(&expanded) {
+                    log.invoke(Level::Warning, format!(
                     "Serial path '{expanded}' is already in use by module '{other}' in this \
                      session; skipping open."
                 ))
                 .await;
-                return AttemptOutcome::Failed {
-                    error: Error::PathConflict {
-                        path: expanded,
-                        other,
-                    },
-                    reconnect,
-                    reset: false,
-                };
-            }
-            let mut receiver = receiver.lock().await;
-            let mut parked: std::collections::VecDeque<ServerCommand> =
-                std::collections::VecDeque::new();
-            // MB-E-091 — `open_serial` is synchronous with no await point, so this race cannot
-            // preempt it mid-call; a terminate is honored at the first surrounding await instead.
-            let open_result = crate::common::race_terminate(
-                async { open_serial::<F>(&path, serial) },
-                &mut receiver,
-                |_: &ServerCommand| true,
-                &mut parked,
-            )
-            .await;
-            debug_assert!(
-                parked.is_empty(),
-                "ServerCommand has only one variant; nothing is ever parked"
-            );
-            match open_result {
-                None => AttemptOutcome::Done,
-                Some(Err(e)) => AttemptOutcome::Failed {
-                    error: SerialError::Error(e).into(),
-                    reconnect,
-                    reset: false,
-                },
-                Some(Ok(transport)) => {
-                    open.set(true);
-                    let server = ModbusServer::new(
-                        Server::new(memory.clone(), log.clone(), verbose, physical_serial)
-                            .with_reset_on(activity.clone(), ResetOn::Request),
-                    );
-                    let handle = server.handle();
-                    let end =
-                        drive_serve(server.serve_link(transport), handle, &mut receiver).await;
-                    open.set(false);
-                    match end {
-                        ServeEnd::Terminated => AttemptOutcome::Done,
-                        ServeEnd::Failed(e) => AttemptOutcome::Failed {
-                            error: Error::Server(e),
-                            reconnect,
-                            reset: activity.load(Ordering::Relaxed),
+                    return AttemptOutcome::Failed {
+                        error: Error::PathConflict {
+                            path: expanded,
+                            other,
                         },
+                        reconnect,
+                        reset: false,
+                    };
+                }
+                let mut receiver = receiver.lock().await;
+                let mut parked: std::collections::VecDeque<ServerCommand> =
+                    std::collections::VecDeque::new();
+                // MB-E-091 — `open_serial` is synchronous with no await point, so this race cannot
+                // preempt it mid-call; a terminate is honored at the first surrounding await instead.
+                let open_result = crate::common::race_terminate(
+                    async { opener(&path, serial) },
+                    &mut receiver,
+                    |_: &ServerCommand| true,
+                    &mut parked,
+                )
+                .await;
+                debug_assert!(
+                    parked.is_empty(),
+                    "ServerCommand has only one variant; nothing is ever parked"
+                );
+                match open_result {
+                    None => AttemptOutcome::Done,
+                    Some(Err(e)) => {
+                        log.invoke(Level::Error, format!("Serial open failed on '{path}': {e}"))
+                            .await;
+                        AttemptOutcome::Failed {
+                            error: SerialError::Error(e).into(),
+                            reconnect,
+                            reset: false,
+                        }
+                    }
+                    Some(Ok(transport)) => {
+                        open.set(true);
+                        log.invoke(Level::Info, format!("Serial port '{path}' opened"))
+                            .await;
+                        let server = ModbusServer::new(
+                            Server::new(memory.clone(), log.clone(), verbose, physical_serial)
+                                .with_reset_on(activity.clone(), ResetOn::Request),
+                        );
+                        let handle = server.handle();
+                        let end =
+                            drive_serve(server.serve_link(transport), handle, &mut receiver).await;
+                        open.set(false);
+                        match end {
+                            ServeEnd::Terminated => AttemptOutcome::Done,
+                            // MB-R-287 — nothing requested the end, so the link was lost.
+                            ServeEnd::Ended => {
+                                let target = format!("serial port '{path}'");
+                                log_serve_failed(&log, &target, &"end-of-file").await;
+                                AttemptOutcome::Failed {
+                                    error: Error::Server(rust_modbus::Error::Io {
+                                        kind: std::io::ErrorKind::UnexpectedEof,
+                                        raw_os_error: None,
+                                    }),
+                                    reconnect,
+                                    reset: activity.load(Ordering::Relaxed),
+                                }
+                            }
+                            ServeEnd::Failed(e) => {
+                                log_serve_failed(&log, &format!("serial port '{path}'"), &e).await;
+                                AttemptOutcome::Failed {
+                                    error: Error::Server(e),
+                                    reconnect,
+                                    reset: activity.load(Ordering::Relaxed),
+                                }
+                            }
+                        }
                     }
                 }
             }
-        }
-    };
+        };
 
     let wait_abortable = |backoff: std::time::Duration| {
         let receiver = &receiver;
@@ -1094,7 +1265,9 @@ where
     };
 
     let result = run_with_backoff(BackoffPolicy::default(), attempt, wait_abortable).await;
-    status.invoke("Server stopped".to_string()).await;
+    status
+        .invoke(Level::Info, "Server stopped".to_string())
+        .await;
     result
 }
 
@@ -1140,13 +1313,107 @@ mod tests {
     fn recording_log() -> (impl LogFn + Clone, Arc<Mutex<Vec<String>>>) {
         let buf = Arc::new(Mutex::new(Vec::<String>::new()));
         let sink = buf.clone();
-        let log = move |s: String| {
+        let log = move |_level: crate::Level, s: String| {
             let sink = sink.clone();
             async move {
                 sink.lock().unwrap().push(s);
             }
         };
         (log, buf)
+    }
+
+    /// Like [`recording_log`], but keeps each line's level.
+    type Levels = Arc<Mutex<Vec<(crate::Level, String)>>>;
+
+    fn recording_levels() -> (impl LogFn + Clone, Levels) {
+        let buf = Arc::new(Mutex::new(Vec::<(crate::Level, String)>::new()));
+        let sink = buf.clone();
+        let log = move |level: crate::Level, s: String| {
+            let sink = sink.clone();
+            async move {
+                sink.lock().unwrap().push((level, s));
+            }
+        };
+        (log, buf)
+    }
+
+    fn has_level(buf: &Levels, level: crate::Level, needle: &str) -> bool {
+        buf.lock()
+            .unwrap()
+            .iter()
+            .any(|(l, s)| *l == level && s.contains(needle))
+    }
+
+    #[tokio::test]
+    /// MB-R-258, MB-R-275, MB-R-276 — request traces and successes log at Info; a rejected
+    /// request and an unsupported function log at Warning.
+    async fn ut_request_lines_carry_category_levels() {
+        let mem = seeded(
+            RegKind::HoldingRegister,
+            CellType::Register,
+            4,
+            &[1, 2, 3, 4],
+        );
+        let (log, buf) = recording_levels();
+        let ok = RequestPdu::ReadHoldingRegisters {
+            address: Address(0),
+            quantity: Quantity(2),
+        };
+        handle_request::<SlaveKey, _>(UnitId(1), ok, &mem, &log, true, false)
+            .await
+            .unwrap();
+        assert!(has_level(&buf, crate::Level::Info, "request received"));
+        assert!(has_level(&buf, crate::Level::Info, "successful."));
+
+        let bad = RequestPdu::ReadHoldingRegisters {
+            address: Address(10),
+            quantity: Quantity(2),
+        };
+        let _ = handle_request::<SlaveKey, _>(UnitId(1), bad, &mem, &log, true, false).await;
+        assert!(has_level(&buf, crate::Level::Warning, "failed"));
+
+        let _ = handle_request::<SlaveKey, _>(
+            UnitId(1),
+            RequestPdu::ReportServerId,
+            &mem,
+            &log,
+            true,
+            false,
+        )
+        .await;
+        assert!(has_level(
+            &buf,
+            crate::Level::Warning,
+            "Unsupported function"
+        ));
+    }
+
+    #[tokio::test]
+    /// MB-R-258, MB-R-270, MB-R-276 — a frame the server cannot process logs at Warning.
+    async fn ut_processing_failure_logs_warning() {
+        use tokio::io::AsyncWriteExt;
+        let mem = seeded_memory(&[10, 20]);
+        let (log, buf) = recording_levels();
+        let server = Server::new(mem, log, true, false);
+        let (server_end, mut client_end) = tokio::io::duplex(256);
+        let modbus = ModbusServer::new(server);
+        let handle = modbus.handle();
+        let serving = tokio::spawn(modbus.serve_link(FrameTransport::<_, Tcp>::new(server_end)));
+
+        // An MBAP header announcing a PDU length no frame can have.
+        client_end
+            .write_all(&[0, 1, 0, 0, 0xFF, 0xFF, 1, 3])
+            .await
+            .unwrap();
+        wait_until(
+            "processing failure logged",
+            Duration::from_millis(10),
+            Duration::from_secs(5),
+            || has_level(&buf, crate::Level::Warning, "Server processing failed").then_some(()),
+        )
+        .await;
+        handle.shutdown().await;
+        let _ = serving.await;
     }
 
     #[tokio::test]
@@ -2773,5 +3040,407 @@ mod tests {
 
         assert!(out.is_none(), "the pending bind is abandoned");
         assert!(parked.is_empty(), "ServerCommand has only one variant");
+    }
+
+    fn rtu_config(path: &str, reconnect: bool) -> crate::rtu::Config {
+        crate::rtu::Config {
+            path: path.to_string(),
+            baud_rate: 9600,
+            reconnect,
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    /// MB-R-258, MB-R-267 — a serial server whose port opens logs "Serial port '<path>' opened"
+    /// at Info.
+    async fn ut_serial_open_logs_opened() {
+        let (log, buf) = recording_levels();
+        let (tx, rx) = tokio::sync::mpsc::channel::<ServerCommand>(1);
+        let (server_end, _client_end) = tokio::io::duplex(256);
+        let server_end = Mutex::new(Some(server_end));
+        let task = tokio::spawn(run_serial_family::<SlaveKey, rust_modbus::Rtu, _, _, _, _>(
+            Arc::new(tokio::sync::RwLock::new(rtu_config("/fake/tty", false))),
+            seeded_memory(&[]),
+            rx,
+            log,
+            |_: crate::Level, _: String| async {},
+            PathConflictCell::default(),
+            ConnectedCell::default(),
+            true,
+            false,
+            move |_: &str, _| {
+                Ok(FrameTransport::<_, rust_modbus::Rtu>::new(
+                    server_end.lock().unwrap().take().expect("opened once"),
+                ))
+            },
+        ));
+        wait_until(
+            "opened line logged",
+            Duration::from_millis(10),
+            Duration::from_secs(5),
+            || has_level(&buf, crate::Level::Info, "Serial port '/fake/tty' opened").then_some(()),
+        )
+        .await;
+        tx.send(ServerCommand::Terminate).await.unwrap();
+        let _ = task.await;
+    }
+
+    #[tokio::test]
+    /// MB-R-256, MB-R-258 — a failed serial open logs an Error naming the configured path.
+    async fn ut_serial_open_failure_logs_error() {
+        let (log, buf) = recording_levels();
+        let (_tx, rx) = tokio::sync::mpsc::channel::<ServerCommand>(1);
+        let result =
+            run_serial_family::<SlaveKey, rust_modbus::Rtu, _, _, tokio::io::DuplexStream, _>(
+                Arc::new(tokio::sync::RwLock::new(rtu_config("/fake/tty", false))),
+                seeded_memory(&[]),
+                rx,
+                log,
+                |_: crate::Level, _: String| async {},
+                PathConflictCell::default(),
+                ConnectedCell::default(),
+                true,
+                false,
+                |_: &str, _| Err(rust_modbus::Error::ConnectionClosed),
+            )
+            .await;
+        assert!(result.is_err());
+        assert!(has_level(&buf, crate::Level::Error, "'/fake/tty'"));
+    }
+
+    #[tokio::test]
+    /// MB-R-258, MB-R-271 — the helper the serve-failure arms call logs at Error naming the
+    /// target and the error.
+    async fn ut_log_serve_failed_is_error() {
+        let (log, buf) = recording_levels();
+        log_serve_failed(&log, "127.0.0.1:5020", &"boom").await;
+        let lines = buf.lock().unwrap();
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].0, crate::Level::Error);
+        assert!(lines[0].1.contains("127.0.0.1:5020") && lines[0].1.contains("boom"));
+    }
+
+    /// A listener error the library classifies `Transient` (the connection-aborted OS code).
+    fn transient_error() -> rust_modbus::Error {
+        #[cfg(target_os = "linux")]
+        const CODE: i32 = 103;
+        #[cfg(target_os = "macos")]
+        const CODE: i32 = 53;
+        #[cfg(windows)]
+        const CODE: i32 = 10053;
+        rust_modbus::Error::Io {
+            kind: std::io::ErrorKind::ConnectionAborted,
+            raw_os_error: Some(CODE),
+        }
+    }
+
+    /// The connection-reset code a Windows `Udp` socket reports for a stray ICMP unreachable.
+    fn reset_error() -> rust_modbus::Error {
+        #[cfg(target_os = "linux")]
+        const CODE: i32 = 104;
+        #[cfg(target_os = "macos")]
+        const CODE: i32 = 54;
+        #[cfg(windows)]
+        const CODE: i32 = 10054;
+        rust_modbus::Error::Io {
+            kind: std::io::ErrorKind::ConnectionReset,
+            raw_os_error: Some(CODE),
+        }
+    }
+
+    /// Errors the library classifies `Fatal` (no OS code) or leaves unclassified (not an I/O error).
+    fn stop_errors() -> [rust_modbus::Error; 2] {
+        [
+            rust_modbus::Error::Io {
+                kind: std::io::ErrorKind::Other,
+                raw_os_error: None,
+            },
+            rust_modbus::Error::Timeout { what: "accept" },
+        ]
+    }
+
+    #[tokio::test]
+    /// MB-R-269, MB-R-281, MB-R-282 — a transient accept error logs one Warning, waits a fixed
+    /// second and answers `Continue`.
+    async fn ut_transient_accept_error_warns_waits_and_continues() {
+        let (log, buf) = recording_levels();
+        let server = Server::new(seeded_memory(&[]), log, true, false);
+        let error = transient_error();
+        let fut = server.on_accept_error(&error);
+        tokio::pin!(fut);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(900), &mut fut)
+                .await
+                .is_err(),
+            "must still be waiting before the full second"
+        );
+        let action = tokio::time::timeout(Duration::from_millis(600), &mut fut)
+            .await
+            .expect("must finish after the fixed second");
+        assert_eq!(action, rust_modbus::AcceptErrorAction::Continue);
+        let lines = buf.lock().unwrap();
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].0, crate::Level::Warning);
+        assert!(lines[0].1.contains("os error"), "{}", lines[0].1);
+    }
+
+    #[tokio::test]
+    /// MB-R-283 — a fatal or unclassified accept error stops serving at once, with no wait and no
+    /// line (the one Error line comes from the serve-failure arm, MB-R-271).
+    async fn ut_fatal_or_unclassified_accept_error_stops() {
+        for error in stop_errors() {
+            let (log, buf) = recording_levels();
+            let server = Server::new(seeded_memory(&[]), log, true, false);
+            let action =
+                tokio::time::timeout(Duration::from_millis(200), server.on_accept_error(&error))
+                    .await
+                    .expect("must answer at once");
+            assert_eq!(action, rust_modbus::AcceptErrorAction::Stop, "{error:?}");
+            assert!(buf.lock().unwrap().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    /// MB-R-284, MB-R-285, MB-E-101 — after a good datagram a transient receive error (the
+    /// connection-reset code) is logged at Warning and receiving continues without a wait.
+    async fn ut_udp_transient_receive_error_no_wait_after_success() {
+        let (log, buf) = recording_levels();
+        let server = Server::new(seeded_memory(&[10, 20]), log, true, false);
+        server.datagram_arrived();
+        let error = reset_error();
+        let action =
+            tokio::time::timeout(Duration::from_millis(200), server.on_receive_error(&error))
+                .await
+                .expect("must not wait after a successful receive");
+        assert_eq!(action, rust_modbus::AcceptErrorAction::Continue);
+        assert!(has_level(&buf, crate::Level::Warning, "receive error"));
+    }
+
+    #[tokio::test]
+    /// MB-R-285 — a second consecutive transient receive error waits the full second; a datagram
+    /// in between resets that.
+    async fn ut_udp_transient_receive_error_waits_after_failure() {
+        let (log, _buf) = recording_levels();
+        let server = Server::new(seeded_memory(&[10, 20]), log, true, false);
+        let error = reset_error();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_millis(200), server.on_receive_error(&error))
+                .await
+                .expect("the first failure does not wait"),
+            rust_modbus::AcceptErrorAction::Continue
+        );
+        let second = server.on_receive_error(&error);
+        tokio::pin!(second);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(900), &mut second)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            tokio::time::timeout(Duration::from_millis(600), &mut second)
+                .await
+                .expect("finishes after the second"),
+            rust_modbus::AcceptErrorAction::Continue
+        );
+        server.datagram_arrived();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_millis(200), server.on_receive_error(&error))
+                .await
+                .expect("a datagram in between resets the wait"),
+            rust_modbus::AcceptErrorAction::Continue
+        );
+    }
+
+    #[tokio::test]
+    /// MB-R-286 — a fatal or unclassified receive error stops serving, with no line.
+    async fn ut_udp_fatal_receive_error_stops() {
+        for error in stop_errors() {
+            let (log, buf) = recording_levels();
+            let server = Server::new(seeded_memory(&[]), log, true, false);
+            assert_eq!(
+                server.on_receive_error(&error).await,
+                rust_modbus::AcceptErrorAction::Stop,
+                "{error:?}"
+            );
+            assert!(buf.lock().unwrap().is_empty());
+        }
+    }
+
+    /// An I/O stub whose every read fails.
+    struct BrokenIo;
+
+    impl tokio::io::AsyncRead for BrokenIo {
+        fn poll_read(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+            _: &mut tokio::io::ReadBuf<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Ready(Err(std::io::ErrorKind::BrokenPipe.into()))
+        }
+    }
+
+    impl tokio::io::AsyncWrite for BrokenIo {
+        fn poll_write(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+            buf: &[u8],
+        ) -> std::task::Poll<std::io::Result<usize>> {
+            std::task::Poll::Ready(Ok(buf.len()))
+        }
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+        fn poll_shutdown(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
+
+    fn count_lines(buf: &Levels, level: crate::Level, needles: &[&str]) -> usize {
+        buf.lock()
+            .unwrap()
+            .iter()
+            .filter(|(l, s)| *l == level && needles.iter().all(|n| s.contains(n)))
+            .count()
+    }
+
+    #[tokio::test]
+    /// MB-R-287, MB-R-271, MB-E-103 — a serial link reaching end-of-file between frames is a
+    /// mid-serve failure: one Error line naming the port, then (reconnect on) a reopen; with
+    /// reconnect off the task ends with an error.
+    async fn ut_serial_eof_is_a_mid_serve_failure() {
+        // Reconnect on: the client end drops at once, giving end-of-file; a second open follows.
+        let (log, buf) = recording_levels();
+        let (tx, rx) = tokio::sync::mpsc::channel::<ServerCommand>(1);
+        let opens = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = opens.clone();
+        let task = tokio::spawn(run_serial_family::<SlaveKey, rust_modbus::Rtu, _, _, _, _>(
+            Arc::new(tokio::sync::RwLock::new(rtu_config("/fake/tty", true))),
+            seeded_memory(&[]),
+            rx,
+            log,
+            |_: crate::Level, _: String| async {},
+            PathConflictCell::default(),
+            ConnectedCell::default(),
+            true,
+            false,
+            move |_: &str, _| {
+                counter.fetch_add(1, Ordering::SeqCst);
+                let (server_end, client_end) = tokio::io::duplex(64);
+                drop(client_end);
+                Ok(FrameTransport::<_, rust_modbus::Rtu>::new(server_end))
+            },
+        ));
+        wait_until(
+            "second open attempt",
+            Duration::from_millis(50),
+            Duration::from_secs(10),
+            || (opens.load(Ordering::SeqCst) >= 2).then_some(()),
+        )
+        .await;
+        assert!(
+            count_lines(
+                &buf,
+                crate::Level::Error,
+                &["serial port '/fake/tty'", "end-of-file"]
+            ) >= 1
+        );
+        tx.send(ServerCommand::Terminate).await.unwrap();
+        let _ = task.await;
+        let ends = count_lines(&buf, crate::Level::Error, &["failed while serving"]);
+        assert_eq!(
+            ends,
+            count_lines(
+                &buf,
+                crate::Level::Error,
+                &["serial port '/fake/tty'", "end-of-file"]
+            ),
+            "every failed serve logs exactly one line naming the port and the cause"
+        );
+
+        // Reconnect off: one line, and the task ends with an error.
+        let (log, buf) = recording_levels();
+        let (_tx, rx) = tokio::sync::mpsc::channel::<ServerCommand>(1);
+        let result = run_serial_family::<SlaveKey, rust_modbus::Rtu, _, _, _, _>(
+            Arc::new(tokio::sync::RwLock::new(rtu_config("/fake/tty", false))),
+            seeded_memory(&[]),
+            rx,
+            log,
+            |_: crate::Level, _: String| async {},
+            PathConflictCell::default(),
+            ConnectedCell::default(),
+            true,
+            false,
+            |_: &str, _| {
+                let (server_end, client_end) = tokio::io::duplex(64);
+                drop(client_end);
+                Ok(FrameTransport::<_, rust_modbus::Rtu>::new(server_end))
+            },
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(
+            count_lines(
+                &buf,
+                crate::Level::Error,
+                &[
+                    "failed while serving",
+                    "serial port '/fake/tty'",
+                    "end-of-file"
+                ]
+            ),
+            1
+        );
+    }
+
+    #[tokio::test]
+    /// MB-R-287, MB-R-271 — a serial link failing with an I/O error is a mid-serve failure: one
+    /// Error line naming the port and the error, then a reopen.
+    async fn ut_serial_io_error_is_a_mid_serve_failure() {
+        let (log, buf) = recording_levels();
+        let (tx, rx) = tokio::sync::mpsc::channel::<ServerCommand>(1);
+        let opens = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = opens.clone();
+        let task = tokio::spawn(run_serial_family::<SlaveKey, rust_modbus::Rtu, _, _, _, _>(
+            Arc::new(tokio::sync::RwLock::new(rtu_config("/fake/tty", true))),
+            seeded_memory(&[]),
+            rx,
+            log,
+            |_: crate::Level, _: String| async {},
+            PathConflictCell::default(),
+            ConnectedCell::default(),
+            true,
+            false,
+            move |_: &str, _| {
+                counter.fetch_add(1, Ordering::SeqCst);
+                Ok(FrameTransport::<_, rust_modbus::Rtu>::new(BrokenIo))
+            },
+        ));
+        wait_until(
+            "second open attempt",
+            Duration::from_millis(50),
+            Duration::from_secs(10),
+            || (opens.load(Ordering::SeqCst) >= 2).then_some(()),
+        )
+        .await;
+        assert!(
+            count_lines(
+                &buf,
+                crate::Level::Error,
+                &[
+                    "serial port '/fake/tty'",
+                    "failed while serving",
+                    "roken pipe"
+                ]
+            ) >= 1
+        );
+        tx.send(ServerCommand::Terminate).await.unwrap();
+        let _ = task.await;
     }
 }

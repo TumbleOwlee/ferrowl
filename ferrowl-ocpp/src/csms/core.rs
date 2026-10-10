@@ -72,7 +72,7 @@ pub(crate) async fn run_connection<V, H, S, L>(
                 None | Some(ConnCommand::Terminate) => break,
                 Some(ConnCommand::Fire(action)) => {
                     if let Err(e) = connection.outbound.fire(action).await {
-                        log.invoke(format!("CSMS {conn} failed to send action: {e}")).await;
+                        log.invoke(crate::Level::Error, format!("CSMS {conn} failed to send action: {e}")).await;
                     }
                 }
                 Some(ConnCommand::Call(action, reply_tx)) => {
@@ -84,5 +84,13 @@ pub(crate) async fn run_connection<V, H, S, L>(
 
     connection.shutdown().await;
     handler.on_disconnected(conn).await;
+    let station = registry
+        .identity(conn)
+        .unwrap_or_else(|| "<no identity>".into());
     registry.remove(conn);
+    log.invoke(
+        crate::Level::Info,
+        format!("Station {station} disconnected ({conn})"),
+    )
+    .await;
 }

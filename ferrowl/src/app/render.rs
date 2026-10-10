@@ -196,6 +196,7 @@ fn render_command_help(cmd_area: Rect, buf: &mut Buffer, module_cmds: &[CommandD
         (":q | :quit", "quit tab"),
         (":qa | :qall", "quit all tabs"),
         (":n | :new", "new module tab"),
+        (":clone", "clone active tab"),
         (":l | :load [path]", "load device config"),
         (":s | :save | :w | :write [path]", "save session"),
         (":swap <id> <id>", "swap tabs"),

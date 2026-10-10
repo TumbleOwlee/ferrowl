@@ -264,7 +264,9 @@ async fn reader_task<V, St, D, Stat>(
             Ok(Message::Text(text)) => match codec::decode(text.as_str()) {
                 Ok(msg) => msg,
                 Err(e) => {
-                    status.invoke(format!("OCPP-J framing error: {e}")).await;
+                    status
+                        .invoke(crate::Level::Warning, format!("OCPP-J framing error: {e}"))
+                        .await;
                     // A malformed Call whose id survives is still owed an answer -- without one
                     // the peer waits out its own call timeout. Anything else (unparseable text,
                     // no id, or a malformed CallResult/CallError) has no one to answer.
@@ -284,7 +286,9 @@ async fn reader_task<V, St, D, Stat>(
             Ok(Message::Close(_)) => break,
             Ok(_) => continue, // ping/pong/binary/raw frames are not OCPP-J payloads
             Err(e) => {
-                status.invoke(format!("websocket error: {e}")).await;
+                status
+                    .invoke(crate::Level::Warning, format!("websocket error: {e}"))
+                    .await;
                 break;
             }
         };
@@ -373,7 +377,7 @@ mod tests {
     fn recording_log() -> (impl LogFn + Clone, Arc<parking_lot::Mutex<Vec<String>>>) {
         let lines = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
         let sink = lines.clone();
-        let log = move |s: String| {
+        let log = move |_level: crate::Level, s: String| {
             let sink = sink.clone();
             async move {
                 sink.lock().push(s);
@@ -431,8 +435,8 @@ mod tests {
     }
 
     #[tokio::test]
-    /// OC-R-120 — the reader task's connection-drop reasons are connection-status lines: they go
-    /// to the status sink (the module log), not the message sink.
+    /// OC-R-114 — the reader task's connection-drop reasons are connection-status lines: they go
+    /// to the status sink (the module log), not the log callback.
     async fn ut_reader_drop_reasons_go_to_the_status_sink() {
         let mut items = std::collections::VecDeque::new();
         items.push_back(Ok(Message::text("this is not json")));

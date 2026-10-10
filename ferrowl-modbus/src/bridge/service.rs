@@ -1,5 +1,6 @@
 use crate::LogFn;
 use crate::bridge::{UnitIdFilter, downstream::DownstreamHandle};
+use crate::log::Level;
 use crate::tcp::tls::ClientStream;
 use rust_modbus::{
     Ascii, ClientFraming, ClientTransport, Connection, ExceptionCode, FrameTransport, RequestPdu,
@@ -56,14 +57,20 @@ where
     {
         return Ok(None);
     }
-    log.invoke(format!("relaying request for unit {unit} downstream."))
-        .await;
+    log.invoke(
+        Level::Info,
+        format!("relaying request for unit {unit} downstream."),
+    )
+    .await;
     let result = downstream.forward(unit, request).await;
     if let Err(e) = &result {
-        log.invoke(format!(
-            "{} request for unit {unit} answered with a gateway exception: {e:?}.",
-            crate::bridge::downstream::ERROR_PREFIX
-        ))
+        log.invoke(
+            Level::Error,
+            format!(
+                "{} request for unit {unit} answered with a gateway exception: {e:?}.",
+                crate::bridge::downstream::ERROR_PREFIX
+            ),
+        )
         .await;
     }
     result
@@ -73,6 +80,10 @@ impl<L> Service for BridgeService<FrameTransport<ClientStream, Tcp>, Tcp, L>
 where
     L: LogFn + Clone + Send + Sync + 'static,
 {
+    async fn on_accept_error(&self, error: &rust_modbus::Error) -> rust_modbus::AcceptErrorAction {
+        crate::server_core::on_listener_accept_error(&self.log, error).await
+    }
+
     async fn on_request(
         &self,
         _conn: &Connection,
@@ -94,6 +105,10 @@ impl<L> Service for BridgeService<FrameTransport<ClientStream, RtuOverTcp>, RtuO
 where
     L: LogFn + Clone + Send + Sync + 'static,
 {
+    async fn on_accept_error(&self, error: &rust_modbus::Error) -> rust_modbus::AcceptErrorAction {
+        crate::server_core::on_listener_accept_error(&self.log, error).await
+    }
+
     async fn on_request(
         &self,
         _conn: &Connection,
@@ -115,6 +130,10 @@ impl<L> Service for BridgeService<FrameTransport<ClientStream, Ascii>, Ascii, L>
 where
     L: LogFn + Clone + Send + Sync + 'static,
 {
+    async fn on_accept_error(&self, error: &rust_modbus::Error) -> rust_modbus::AcceptErrorAction {
+        crate::server_core::on_listener_accept_error(&self.log, error).await
+    }
+
     async fn on_request(
         &self,
         _conn: &Connection,
@@ -136,6 +155,10 @@ impl<L> Service for BridgeService<FrameTransport<SerialStream, Rtu>, Rtu, L>
 where
     L: LogFn + Clone + Send + Sync + 'static,
 {
+    async fn on_accept_error(&self, error: &rust_modbus::Error) -> rust_modbus::AcceptErrorAction {
+        crate::server_core::on_listener_accept_error(&self.log, error).await
+    }
+
     async fn on_request(
         &self,
         _conn: &Connection,
@@ -158,6 +181,10 @@ impl<L> Service for BridgeService<FrameTransport<tokio::io::DuplexStream, Rtu>, 
 where
     L: LogFn + Clone + Send + Sync + 'static,
 {
+    async fn on_accept_error(&self, error: &rust_modbus::Error) -> rust_modbus::AcceptErrorAction {
+        crate::server_core::on_listener_accept_error(&self.log, error).await
+    }
+
     async fn on_request(
         &self,
         _conn: &Connection,
@@ -186,13 +213,15 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 
     /// A `LogFn` that records every line into a shared buffer for assertions.
-    fn recording_log() -> (impl LogFn + Clone, Arc<parking_lot::Mutex<Vec<String>>>) {
-        let lines = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
+    type Lines = Arc<parking_lot::Mutex<Vec<(crate::Level, String)>>>;
+
+    fn recording_log() -> (impl LogFn + Clone, Lines) {
+        let lines = Arc::new(parking_lot::Mutex::new(Vec::<(crate::Level, String)>::new()));
         let sink = lines.clone();
-        let log = move |s: String| {
+        let log = move |level: crate::Level, s: String| {
             let sink = sink.clone();
             async move {
-                sink.lock().push(s);
+                sink.lock().push((level, s));
             }
         };
         (log, lines)
@@ -236,14 +265,15 @@ mod tests {
         handle
     }
 
-    /// BR-R-007 — a `BridgeService` forwards an upstream request downstream and relays the
-    /// downstream response back to the upstream client unmodified.
+    /// BR-R-007, BR-R-032 — a `BridgeService` forwards an upstream request downstream and relays
+    /// the downstream response back to the upstream client unmodified, logging the relayed
+    /// request at Info.
     #[tokio::test]
     async fn ut_service_forwards_and_relays_response_unmodified() {
         let expected = ResponsePdu::ReadHoldingRegisters {
             registers: vec![RegisterValue(99)],
         };
-        let (log, _lines) = recording_log();
+        let (log, lines) = recording_log();
         let downstream = downstream_with_fixed_responder(expected.clone(), log.clone());
         tokio::time::sleep(Duration::from_millis(20)).await;
 
@@ -260,6 +290,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(registers, vec![RegisterValue(99)]);
+        assert!(lines.lock().iter().any(|(level, l)| {
+            *level == crate::Level::Info && l.contains("relaying request for unit 1")
+        }));
 
         handle.shutdown().await;
         let _ = serving.await;
@@ -329,8 +362,8 @@ mod tests {
         let _ = serving.await;
     }
 
-    /// BR-R-012 — a downstream gateway exception is logged with the
-    /// `[bridge]` prefix, naming the unit id.
+    /// BR-R-012, BR-R-033 — a downstream gateway exception is logged at Error with
+    /// the `[bridge]` prefix, naming the unit id.
     #[tokio::test]
     async fn ut_service_gateway_exception_logged_with_bridge_prefix() {
         let (log, lines) = recording_log();
@@ -366,12 +399,117 @@ mod tests {
             lines
                 .lock()
                 .iter()
-                .any(|l| l.starts_with(crate::bridge::ERROR_PREFIX) && l.contains("unit 1")),
+                .any(|(level, l)| *level == crate::Level::Error
+                    && l.starts_with(crate::bridge::ERROR_PREFIX)
+                    && l.contains("unit 1")),
             "expected a [bridge]-prefixed line naming the unit id: {:?}",
             lines.lock()
         );
 
         handle.shutdown().await;
         let _ = serving.await;
+    }
+
+    /// BR-E-012, BR-R-033 — a Modbus exception response from the downstream device is relayed
+    /// upstream unchanged and emits no failure line; only the Info relaying line is logged.
+    #[tokio::test]
+    async fn ut_downstream_exception_relayed_without_line() {
+        let exception = ResponsePdu::Exception(rust_modbus::ExceptionResponse {
+            function: rust_modbus::FunctionCode::ReadHoldingRegisters,
+            exception: ExceptionCode::IllegalDataAddress,
+        });
+        let (log, lines) = recording_log();
+        let downstream = downstream_with_fixed_responder(exception, log.clone());
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let service = BridgeService::new(downstream, None, log);
+
+        let (server_end, client_end) = tokio::io::duplex(256);
+        let modbus = ModbusServer::new(service);
+        let handle = modbus.handle();
+        let serving = tokio::spawn(modbus.serve_link(FrameTransport::<_, Rtu>::new(server_end)));
+
+        let mut client: RmClient<_, Rtu> = RmClient::new(FrameTransport::new(client_end));
+        let result = client
+            .read_holding_registers(UnitId(1), Address(0), Quantity(1))
+            .await;
+        assert!(
+            format!("{result:?}").contains("IllegalDataAddress"),
+            "the downstream exception reaches the upstream client unchanged: {result:?}"
+        );
+
+        let logged = lines.lock().clone();
+        assert!(
+            logged
+                .iter()
+                .all(|(level, l)| *level == crate::Level::Info && !l.contains("gateway exception")),
+            "only the relaying line is logged: {logged:?}"
+        );
+        assert!(!logged.is_empty());
+
+        handle.shutdown().await;
+        let _ = serving.await;
+    }
+
+    /// MB-R-281, MB-R-283, BR-R-031, BR-R-034 — every `BridgeService` impl answers a transient
+    /// upstream `accept()` error with a Warning and `Continue`, and a fatal or unclassified one
+    /// with `Stop`; an impl lacking the hook would answer the upstream default `Stop` for both.
+    #[tokio::test]
+    async fn ut_bridge_accept_error_policy() {
+        use rust_modbus::{AcceptErrorAction, Service};
+
+        #[cfg(target_os = "linux")]
+        const TRANSIENT_CODE: i32 = 103;
+        #[cfg(target_os = "macos")]
+        const TRANSIENT_CODE: i32 = 53;
+        #[cfg(windows)]
+        const TRANSIENT_CODE: i32 = 10053;
+        let transient = rust_modbus::Error::Io {
+            kind: std::io::ErrorKind::ConnectionAborted,
+            raw_os_error: Some(TRANSIENT_CODE),
+        };
+        let fatal = rust_modbus::Error::Io {
+            kind: std::io::ErrorKind::Other,
+            raw_os_error: None,
+        };
+
+        macro_rules! check {
+            ($stream:ty, $framing:ty) => {{
+                let (log, lines) = recording_log();
+                let downstream: DownstreamHandle<FrameTransport<$stream, $framing>, $framing> =
+                    DownstreamHandle::spawn(
+                        || async {
+                            std::future::pending::<
+                                Result<
+                                    rust_modbus::Client<
+                                        FrameTransport<$stream, $framing>,
+                                        $framing,
+                                    >,
+                                    crate::Error,
+                                >,
+                            >()
+                            .await
+                        },
+                        true,
+                        log.clone(),
+                    );
+                let service = BridgeService::new(downstream, None, log);
+                assert_eq!(
+                    service.on_accept_error(&transient).await,
+                    AcceptErrorAction::Continue
+                );
+                assert_eq!(
+                    service.on_accept_error(&fatal).await,
+                    AcceptErrorAction::Stop
+                );
+                let logged = lines.lock().clone();
+                assert_eq!(logged.len(), 1, "{logged:?}");
+                assert_eq!(logged[0].0, crate::Level::Warning);
+            }};
+        }
+        check!(ClientStream, Tcp);
+        check!(ClientStream, RtuOverTcp);
+        check!(ClientStream, Ascii);
+        check!(SerialStream, Rtu);
+        check!(DuplexStream, Rtu);
     }
 }

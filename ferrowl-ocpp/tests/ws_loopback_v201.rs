@@ -18,7 +18,7 @@ use serde_json::json;
 
 /// No-op log sink.
 fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
-    |_s: String| async move {}
+    |_level: ferrowl_ocpp::Level, _s: String| async move {}
 }
 
 /// CSMS handler answering the two CS-initiated actions used by this test.

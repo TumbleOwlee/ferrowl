@@ -610,7 +610,7 @@ mod tests {
 
     /// No-op log/status sink satisfying `LogFn + Clone`.
     fn sink() -> impl LogFn + Clone {
-        |_s: String| async move {}
+        |_level: ferrowl_modbus::Level, _s: String| async move {}
     }
 
     /// A `tcp::Config` pointed at a local port nothing is listening on. `start()` still

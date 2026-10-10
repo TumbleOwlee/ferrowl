@@ -196,7 +196,7 @@ mod tests {
     #[test]
     fn ut_logfn_impl_for_closure_returning_async_block() {
         fn assert_logfn<L: LogFn>(_: &L) {}
-        let f = move |s: String| async move {
+        let f = move |_level: crate::Level, s: String| async move {
             let _ = s.len();
         };
         assert_logfn(&f);
@@ -207,10 +207,10 @@ mod tests {
     #[test]
     fn ut_logfn_future_is_send() {
         fn assert_send_fut<F: Future + Send>(_: &F) {}
-        let f = |s: String| async move {
+        let f = |_level: crate::Level, s: String| async move {
             let _ = s;
         };
-        let fut = f.invoke("hi".to_string());
+        let fut = f.invoke(crate::log::Level::Info, "hi".to_string());
         assert_send_fut(&fut);
     }
 

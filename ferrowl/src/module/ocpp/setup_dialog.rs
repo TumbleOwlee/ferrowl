@@ -307,6 +307,14 @@ impl OcppSetupDialog {
         d
     }
 
+    /// UI-R-367 — turn an `:edit`-prefilled dialog into a `:clone` dialog: name
+    /// replaced, every other field untouched. `edit` already builds from `new()`, so there is
+    /// no mode to switch.
+    pub fn into_clone(mut self, name: &str) -> Self {
+        set_input(&mut self.name, name);
+        self
+    }
+
     /// Validate every field and produce the spec, or an error message for the live display.
     pub fn resolve(&self) -> Result<OcppSpec, String> {
         let name = self.name.state.input().trim().to_string();
@@ -2751,5 +2759,31 @@ mod tests {
     fn ut_blank_config_path_stays_blank() {
         let d = OcppSetupDialog::new();
         assert_eq!(d.config_path(), "");
+    }
+
+    /// UI-R-367 — `into_clone` replaces only the name.
+    #[test]
+    fn ut_into_clone_replaces_only_the_name() {
+        let spec = OcppSpec {
+            name: "cs-1".into(),
+            version: OcppVersion::V1_6,
+            role: OcppRole::Client,
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".into(),
+            port: 9100,
+            path: String::new(),
+            timeout_ms: None,
+            reconnect: None,
+            security: Default::default(),
+        };
+        let headers = vec![ferrowl_ocpp::HeaderDef {
+            name: "X-Token".into(),
+            value: "abc".into(),
+        }];
+        let dialog = OcppSetupDialog::edit(&spec, "", &headers).into_clone("cs-2");
+        assert_eq!(dialog.name.state.input(), "cs-2");
+        assert_eq!(dialog.port.state.input(), "9100");
+        assert_eq!(dialog.extra_headers, headers);
+        assert_eq!(dialog.resolve().unwrap().name, "cs-2");
     }
 }

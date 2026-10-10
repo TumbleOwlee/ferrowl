@@ -17,6 +17,10 @@ pub struct MonitorSetupView {
 }
 
 impl MonitorSetupView {
+    pub fn from_dialog(dialog: MonitorSetupDialog) -> Self {
+        Self { dialog }
+    }
+
     pub fn new_create() -> Self {
         Self {
             dialog: MonitorSetupDialog::create(),

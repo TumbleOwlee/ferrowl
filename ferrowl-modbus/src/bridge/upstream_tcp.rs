@@ -1,4 +1,5 @@
 use crate::bridge::service::BridgeService;
+use crate::log::Level;
 use crate::tcp::Config;
 use crate::tcp::tls::build_server_tls_config;
 use crate::{Error, LogFn, TcpError};
@@ -70,6 +71,7 @@ where
         Some((tls_config, used_fallback)) => {
             if used_fallback {
                 log.invoke(
+                    Level::Info,
                     "No cert_file/key_file/self_signed configured for this TLS server; \
                      falling back to an ephemeral self-signed certificate."
                         .to_string(),
@@ -109,7 +111,7 @@ mod tests {
     use tokio::sync::mpsc;
 
     fn sink() -> impl LogFn + Clone {
-        |_s: String| async move {}
+        |_level: crate::Level, _s: String| async move {}
     }
 
     fn config(port: u16) -> Config {

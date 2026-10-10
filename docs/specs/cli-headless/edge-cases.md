@@ -52,6 +52,7 @@ Boundary and error behavior of the process command line and headless runner, plu
 
 - **CL-E-018** — Keys off the drained line's level (`Level::Error`), not message text. A Lua error never reaching the log, or logged lower, does not trip it.
 - **CL-E-019** — Assertions: `C_Test:Assert` failures surface through the sim's `[sim] <error>` line at Error. Without `--exit-on-error`, an assertion failure does **not** change the exit code. CI that must fail on assertions passes `--exit-on-error` ([`../scripting/`](../scripting/)).
+- **CL-E-031** — With `--exit-on-error`, the first failed connect, dial, bind or serial-open attempt of any module (MB-R-256, MB-R-260, MB-R-273, OC-R-178, OC-R-183) exits 3 even when `reconnect` would have recovered, e.g. a client started before its peer is listening. Deliberate — a failed attempt is an Error-level line; start peers first or omit the flag.
 
 ---
 

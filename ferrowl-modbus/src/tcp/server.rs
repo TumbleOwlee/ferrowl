@@ -141,7 +141,7 @@ mod tests {
     }
 
     fn sink() -> impl crate::LogFn + Clone {
-        |_s: String| async move {}
+        |_level: crate::Level, _s: String| async move {}
     }
 
     /// MB-R-130 (bound_addr companion) — `spawn()` only guarantees the task was scheduled, not

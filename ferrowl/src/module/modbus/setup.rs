@@ -19,6 +19,10 @@ pub struct ModbusSetupView {
 }
 
 impl ModbusSetupView {
+    pub fn from_dialog(dialog: SetupDialog) -> Self {
+        Self { dialog }
+    }
+
     pub fn new_create() -> Self {
         Self {
             dialog: SetupDialog::create(Timing {

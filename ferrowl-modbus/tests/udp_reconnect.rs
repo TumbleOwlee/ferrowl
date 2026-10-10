@@ -23,7 +23,7 @@ use tokio::time::sleep;
 type Mem = Arc<MemLock<Memory<ferrowl_modbus::Key<SlaveKey>>>>;
 
 fn sink() -> impl ferrowl_modbus::LogFn + Clone {
-    |_s: String| async move {}
+    |_level: ferrowl_modbus::Level, _s: String| async move {}
 }
 
 fn empty_mem() -> Mem {
@@ -85,7 +85,7 @@ async fn udp_server_bind_failure_retries_then_succeeds() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-/// MB-R-120, MB-R-134 — with `reconnect` disabled, a Udp bind failure fails the
+/// MB-R-120, MB-R-134, MB-R-257 — with `reconnect` disabled, a Udp bind failure fails the
 /// server: `spawn()` still returns `Ok(handle)`, but the joined task carries the bind error.
 async fn udp_server_bind_failure_reconnect_false_ends_task() {
     let occupier = reserve_udp_port();
@@ -104,7 +104,13 @@ async fn udp_server_bind_failure_reconnect_false_ends_task() {
         .await
         .expect("task should end promptly, not retry, with reconnect disabled")
         .expect("task must not panic");
-    assert!(matches!(result, Err(Error::Server(_))));
+    let Err(Error::Server(e)) = result else {
+        panic!("expected a server error, got {result:?}");
+    };
+    assert!(
+        format!("{e:?}").contains("AddrInUse"),
+        "not address-in-use: {e:?}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -128,4 +134,51 @@ async fn udp_server_terminate_while_backing_off_ends_task_ok() {
         .expect("Terminate did not end the retrying server in time")
         .expect("task must not panic");
     assert!(result.is_ok());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// MB-R-256, MB-R-258, MB-R-267 — a failed Udp bind logs an Error naming the address while the
+/// port is held; once it frees, the server logs that it is listening, at Info.
+async fn udp_server_bind_failure_logs_error_then_listening_info() {
+    use ferrowl_modbus::Level;
+    let occupier = reserve_udp_port();
+    let port = occupier.port();
+    let lines = Arc::new(parking_lot::Mutex::new(Vec::<(Level, String)>::new()));
+    let sink_lines = lines.clone();
+    let log = move |level: Level, s: String| {
+        let sink_lines = sink_lines.clone();
+        async move {
+            sink_lines.lock().push((level, s));
+        }
+    };
+    let has = |level: Level, needle: &str| {
+        lines
+            .lock()
+            .iter()
+            .any(|(l, s)| *l == level && s.contains(needle))
+    };
+    let (_tx, rx) = mpsc::channel::<ServerCommand>(1);
+    let (handle, _bound_addr) =
+        udp::ServerBuilder::<SlaveKey>::new(Arc::new(RwLock::new(config(port, true))), empty_mem())
+            .spawn(rx, log, sink())
+            .await
+            .expect("spawn always returns Ok");
+
+    let addr = format!("127.0.0.1:{port}");
+    ferrowl_test_support::wait_until(
+        "bind failure logged",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || has(Level::Error, &addr).then_some(()),
+    )
+    .await;
+    drop(occupier);
+    ferrowl_test_support::wait_until(
+        "listening logged",
+        Duration::from_millis(50),
+        Duration::from_secs(10),
+        || has(Level::Info, &format!("Server listening on {addr}")).then_some(()),
+    )
+    .await;
+    handle.abort();
 }

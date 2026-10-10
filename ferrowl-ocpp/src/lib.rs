@@ -20,7 +20,7 @@ pub use action::{ConnectorScope, Version};
 pub use error::{
     CallError, Error, FramingError, HeaderError, OcppError, TlsError, ValidationError, WsError,
 };
-pub use log::LogFn;
+pub use log::{Level, LogFn};
 pub use ocppj::{CallErrorCode, MessageTypeId, OcppJMessage, UniqueId};
 pub use security::{BasicAuth, HeaderDef, SelfSignedCache, new_self_signed_cache};
 

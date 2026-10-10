@@ -29,6 +29,15 @@ fn cs_string_field<S: ClientFields>(s: &S, name: &str) -> Option<String> {
 }
 
 impl<V: ClientVersion> ClientView<V> {
+    /// The setup dialog `:edit` opens, prefilled from this view's spec and device.
+    pub(super) fn edit_dialog(&self) -> crate::module::ocpp::setup_dialog::OcppSetupDialog {
+        crate::module::ocpp::setup_dialog::OcppSetupDialog::edit(
+            &self.spec,
+            &self.device_path,
+            &self.device.extra_headers,
+        )
+    }
+
     pub(super) fn start_sim(&mut self) {
         self.stop_sim();
         self.runtime.handle = run_client_sim(
@@ -712,13 +721,7 @@ impl<V: ClientVersion> ClientView<V> {
                 }
             }),
             OcppClientCmd::Edit => {
-                self.overlay = super::ClientOverlay::Setup(Box::new(
-                    crate::module::ocpp::setup_dialog::OcppSetupDialog::edit(
-                        &self.spec,
-                        &self.device_path,
-                        &self.device.extra_headers,
-                    ),
-                ));
+                self.overlay = super::ClientOverlay::Setup(Box::new(self.edit_dialog()));
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
             }
             OcppClientCmd::Compact => {
@@ -775,7 +778,7 @@ mod tests {
 
     /// No-op log sink for the CSMS side, mirroring `ferrowl-ocpp/tests/ws_loopback_v16.rs::sink`.
     fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
-        |_s: String| async move {}
+        |_level: ferrowl_ocpp::Level, _s: String| async move {}
     }
 
     fn client_view<V: ClientVersion>(version: OcppVersion, port: u16) -> ClientView<V> {

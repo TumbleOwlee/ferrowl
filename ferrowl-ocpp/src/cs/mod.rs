@@ -226,14 +226,18 @@ where
                     // off: there is no connection loop left to hand it to.
                     for _ in 0..parked.len() {
                         log.invoke(
+                            crate::Level::Warning,
                             "Command dropped: client is disconnected and reconnecting.".to_string(),
                         )
                         .await;
                     }
-                    status.invoke(format!("{e}")).await;
+                    status.invoke(crate::Level::Error, format!("{e}")).await;
                     classify_attempt(AttemptResult::DialFailed(e), reconnect)
                 }
                 Ok(ws) => {
+                    status
+                        .invoke(crate::Level::Info, "Connected to CSMS.".to_string())
+                        .await;
                     let mut commands = Commands::new(&mut receiver, parked);
                     let run_end = core::run::<V, H, _, _, _>(
                         ws,
@@ -253,7 +257,9 @@ where
                             // drops, but a clean peer-initiated close carries none, so OC-R-114's
                             // "log the failure reason" is satisfied here with a fixed reason
                             // string covering every path uniformly.
-                            status.invoke("Connection dropped.".to_string()).await;
+                            status
+                                .invoke(crate::Level::Warning, "Connection dropped.".to_string())
+                                .await;
                             AttemptResult::Disconnected
                         }
                     };
@@ -269,7 +275,10 @@ where
         let status = status.clone();
         async move {
             status
-                .invoke(format!("Reconnecting in {}s.", backoff.as_secs()))
+                .invoke(
+                    crate::Level::Info,
+                    format!("Reconnecting in {}s.", backoff.as_secs()),
+                )
                 .await;
             let mut receiver = receiver.lock().await;
             // Any command other than `Terminate` received while disconnected is dropped with a
@@ -282,14 +291,16 @@ where
                 backoff,
                 "Command dropped: client is disconnected and reconnecting.",
                 |cmd: &Command<V>| matches!(cmd, Command::Terminate),
-                |msg| log.invoke(msg),
+                |msg| log.invoke(crate::Level::Warning, msg),
             )
             .await
         }
     };
 
     let result = run_with_backoff(BackoffPolicy::default(), attempt, wait_abortable).await;
-    status.invoke("Client disconnected".to_string()).await;
+    status
+        .invoke(crate::Level::Info, "Client disconnected".to_string())
+        .await;
     result
 }
 
@@ -499,7 +510,7 @@ mod tests {
     fn recording_log() -> (impl LogFn + Clone, Arc<parking_lot::Mutex<Vec<String>>>) {
         let lines = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
         let sink = lines.clone();
-        let log = move |s: String| {
+        let log = move |_level: crate::Level, s: String| {
             let sink = sink.clone();
             async move {
                 sink.lock().push(s);
@@ -531,9 +542,9 @@ mod tests {
         }))
     }
 
-    /// OC-R-114, OC-R-120 — a failed dial (`reconnect: false`, so the task ends after the single
+    /// OC-R-114 — a failed dial (`reconnect: false`, so the task ends after the single
     /// attempt) logs the dial error's `Display` text as a connection-status line, on the status
-    /// sink rather than the message sink.
+    /// callback rather than the log callback.
     #[tokio::test]
     async fn ut_dial_failure_logs_reason() {
         let (log, lines) = recording_log();
@@ -555,7 +566,7 @@ mod tests {
         );
         assert!(
             !lines.lock().iter().any(|l| l.contains(&err_text)),
-            "the dial failure reason must not land on the message sink, got: {:?}",
+            "the dial failure reason must not land on the log callback, got: {:?}",
             lines.lock()
         );
     }
@@ -590,7 +601,7 @@ mod tests {
                 .lock()
                 .iter()
                 .any(|l| l.contains("Reconnecting in 1s.")),
-            "the backoff-wait duration line must not land on the message sink, got: {:?}",
+            "the backoff-wait duration line must not land on the log callback, got: {:?}",
             lines.lock()
         );
     }

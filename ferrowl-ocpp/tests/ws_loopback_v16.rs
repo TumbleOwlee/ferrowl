@@ -21,20 +21,21 @@ const TEST_LIMIT: Duration = Duration::from_secs(60);
 
 /// No-op log sink.
 fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
-    |_s: String| async move {}
+    |_level: ferrowl_ocpp::Level, _s: String| async move {}
 }
 
+type Captured = Arc<parking_lot::Mutex<Vec<(ferrowl_ocpp::Level, String)>>>;
+
 /// A `LogFn` that records every line into a shared buffer for assertions.
-fn recording_log() -> (
-    impl ferrowl_ocpp::LogFn + Clone,
-    Arc<parking_lot::Mutex<Vec<String>>>,
-) {
-    let lines = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
+fn recording_log() -> (impl ferrowl_ocpp::LogFn + Clone, Captured) {
+    let lines = Arc::new(parking_lot::Mutex::new(
+        Vec::<(ferrowl_ocpp::Level, String)>::new(),
+    ));
     let sink = lines.clone();
-    let log = move |s: String| {
+    let log = move |level: ferrowl_ocpp::Level, s: String| {
         let sink = sink.clone();
         async move {
-            sink.lock().push(s);
+            sink.lock().push((level, s));
         }
     };
     (log, lines)
@@ -1082,7 +1083,7 @@ impl CsActionHandler<V1_6> for HookCs {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 /// OC-R-023 — a peer's WebSocket close ends the connection: the connection is torn down and the CS's disconnect hook fires.
 /// OC-R-046 — the CS exposes connect and disconnect lifecycle hooks (both observed here).
-/// OC-R-120 — the dropped-connection reason lands on the status sink, not the message sink.
+/// OC-R-114 — the dropped-connection reason lands on the status sink, not the log callback.
 async fn peer_close_ends_connection_and_fires_disconnect_hook() {
     within(TEST_LIMIT, async {
         let connected = Arc::new(AtomicBool::new(false));
@@ -1149,13 +1150,16 @@ async fn peer_close_ends_connection_and_fires_disconnect_hook() {
                 status_lines
                     .lock()
                     .iter()
-                    .any(|l| l == "Connection dropped.")
+                    .any(|(_, l)| l == "Connection dropped.")
                     .then_some(())
             },
         )
         .await;
         assert!(
-            !log_lines.lock().iter().any(|l| l == "Connection dropped."),
+            !log_lines
+                .lock()
+                .iter()
+                .any(|(_, l)| l == "Connection dropped."),
             "the dropped-connection reason must not land on the message sink, got: {:?}",
             log_lines.lock()
         );
@@ -1219,4 +1223,193 @@ async fn ws_client_ignores_configured_tls_material() {
         server.terminate().await.expect("server terminate");
     })
     .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// OC-R-195 — non-HTTP bytes to a ws CSMS fail the WebSocket handshake, logged at Error.
+async fn it_ws_handshake_failure_logs_error() {
+    use tokio::io::AsyncWriteExt;
+    let (log, lines) = recording_log();
+    let server = csms::ServerBuilder::<V1_6>::new(
+        csms::Config {
+            host: "127.0.0.1".to_owned(),
+            port: 0,
+            timeout_ms: 2000,
+            reconnect: true,
+            basic_auth: None,
+            tls: Default::default(),
+        },
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(TestCsms, log)
+    .await
+    .expect("server failed to bind");
+    let addr = wait_until(
+        "CSMS listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || server.local_addr(),
+    )
+    .await;
+    let mut raw = tokio::net::TcpStream::connect(addr).await.unwrap();
+    raw.write_all(b"not http at all\r\n\r\n").await.unwrap();
+    wait_until(
+        "handshake failure logged",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || {
+            lines
+                .lock()
+                .iter()
+                .any(|(level, l)| {
+                    *level == ferrowl_ocpp::Level::Error
+                        && l.starts_with("CSMS handshake failed from ")
+                })
+                .then_some(())
+        },
+    )
+    .await;
+    server.terminate().await.expect("server terminate failed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// OC-R-193 — an OCPP-J framing error is logged at Warning.
+async fn it_framing_error_logs_warning() {
+    use futures_util::SinkExt;
+    use tokio_tungstenite::tungstenite::Message;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    let (log, lines) = recording_log();
+    let server = csms::ServerBuilder::<V1_6>::new(
+        csms::Config {
+            host: "127.0.0.1".to_owned(),
+            port: 0,
+            timeout_ms: 2000,
+            reconnect: true,
+            basic_auth: None,
+            tls: Default::default(),
+        },
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(TestCsms, log)
+    .await
+    .expect("server failed to bind");
+    let addr = wait_until(
+        "CSMS listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || server.local_addr(),
+    )
+    .await;
+    let mut request = format!("ws://{addr}/ocpp/CS001")
+        .into_client_request()
+        .unwrap();
+    request
+        .headers_mut()
+        .insert("Sec-WebSocket-Protocol", "ocpp1.6".parse().unwrap());
+    let (mut ws, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    ws.send(Message::text("[2, \"bad-1\", \"Heartbeat\"]"))
+        .await
+        .unwrap();
+    wait_until(
+        "framing error logged",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || {
+            lines
+                .lock()
+                .iter()
+                .any(|(level, l)| {
+                    *level == ferrowl_ocpp::Level::Warning && l.starts_with("OCPP-J framing error")
+                })
+                .then_some(())
+        },
+    )
+    .await;
+    server.terminate().await.expect("server terminate failed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// OC-R-190, OC-R-182 — the CSMS logs a station connecting and leaving at Info, naming the
+/// station identity from the URL path and the connection id; the CS logs "Connected to CSMS."
+async fn it_station_connect_and_disconnect_lines() {
+    use ferrowl_ocpp::Level;
+    let (csms_log, csms_lines) = recording_log();
+    let (cs_status, cs_lines) = recording_log();
+    let server = csms::ServerBuilder::<V1_6>::new(
+        csms::Config {
+            host: "127.0.0.1".to_owned(),
+            port: 0,
+            timeout_ms: 2000,
+            reconnect: true,
+            basic_auth: None,
+            tls: Default::default(),
+        },
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(TestCsms, csms_log)
+    .await
+    .expect("server failed to bind");
+    let addr = wait_until(
+        "CSMS listener bind",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || server.local_addr(),
+    )
+    .await;
+    let client = cs::ClientBuilder::<V1_6>::new(
+        Arc::new(tokio::sync::RwLock::new(cs::Config {
+            extra_headers: Vec::new(),
+            url: format!("ws://{addr}/ocpp/CS001"),
+            reconnect: false,
+            timeout_ms: 2000,
+            basic_auth: None,
+            tls: Default::default(),
+        })),
+        ferrowl_ocpp::new_self_signed_cache(),
+    )
+    .spawn(
+        TestCs {
+            remote_start_seen: Arc::default(),
+        },
+        sink(),
+        cs_status,
+    )
+    .await
+    .expect("spawn always returns Ok");
+    let seen = |lines: &Captured, level: Level, pre: &str| {
+        lines
+            .lock()
+            .iter()
+            .any(|(l, s)| *l == level && s.starts_with(pre))
+    };
+    wait_until(
+        "station connected",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || seen(&csms_lines, Level::Info, "Station CS001 connected (conn#").then_some(()),
+    )
+    .await;
+    wait_until(
+        "CS connected line",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || seen(&cs_lines, Level::Info, "Connected to CSMS.").then_some(()),
+    )
+    .await;
+    let _ = client.terminate().await;
+    wait_until(
+        "station disconnected",
+        Duration::from_millis(20),
+        Duration::from_secs(10),
+        || {
+            seen(
+                &csms_lines,
+                Level::Info,
+                "Station CS001 disconnected (conn#",
+            )
+            .then_some(())
+        },
+    )
+    .await;
+    server.terminate().await.expect("server terminate failed");
 }

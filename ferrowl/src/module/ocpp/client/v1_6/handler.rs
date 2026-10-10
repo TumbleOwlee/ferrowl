@@ -645,7 +645,7 @@ mod tests {
 
     /// No-op log sink for the CSMS side.
     fn sink() -> impl ferrowl_ocpp::LogFn + Clone {
-        |_s: String| async move {}
+        |_level: ferrowl_ocpp::Level, _s: String| async move {}
     }
 
     /// CSMS handler answering `StartTransaction`/`StatusNotification`, recording the ordered list

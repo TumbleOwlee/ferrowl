@@ -45,17 +45,19 @@ fn memory() -> Mem {
 
 /// A no-op log/status sink. `LogFn + Clone` is satisfied by a capture-free closure.
 fn sink() -> impl ferrowl_modbus::LogFn + Clone {
-    |_s: String| async move {}
+    |_level: ferrowl_modbus::Level, _s: String| async move {}
 }
 
 /// A log sink that records every line, so a test can assert on what the server logged.
-fn capturing() -> (impl ferrowl_modbus::LogFn + Clone, Arc<Mutex<Vec<String>>>) {
-    let log = Arc::new(Mutex::new(Vec::<String>::new()));
+type Lines = Arc<Mutex<Vec<(ferrowl_modbus::Level, String)>>>;
+
+fn capturing() -> (impl ferrowl_modbus::LogFn + Clone, Lines) {
+    let log = Arc::new(Mutex::new(Vec::<(ferrowl_modbus::Level, String)>::new()));
     let sink = log.clone();
-    let f = move |s: String| {
+    let f = move |level: ferrowl_modbus::Level, s: String| {
         let sink = sink.clone();
         async move {
-            sink.lock().push(s);
+            sink.lock().push((level, s));
         }
     };
     (f, log)
@@ -128,7 +130,7 @@ async fn raw_connect(
 }
 
 #[tokio::test]
-/// MB-R-106, MB-R-166, OC-R-095 — with an `Ephemeral` identity (the variant standing for "no TLS
+/// MB-R-106, MB-R-166, MB-R-258, MB-R-275, OC-R-095 — with an `Ephemeral` identity (the variant standing for "no TLS
 /// material configured"), the server falls back to an ephemeral self-signed certificate,
 /// and logs that fallback.
 async fn self_signed_fallback_is_used_and_logged() {
@@ -164,7 +166,8 @@ async fn self_signed_fallback_is_used_and_logged() {
         captured
             .lock()
             .iter()
-            .any(|line| line.contains("self-signed")),
+            .any(|(level, line)| *level == ferrowl_modbus::Level::Info
+                && line.contains("self-signed")),
         "expected a fallback log line, got: {:?}",
         captured.lock()
     );
@@ -208,7 +211,7 @@ async fn explicit_self_signed_is_used_without_fallback_log() {
         !captured
             .lock()
             .iter()
-            .any(|line| line.contains("self-signed")),
+            .any(|(_, line)| line.contains("self-signed")),
         "expected no fallback log line when SelfSigned was explicitly requested, got: {:?}",
         captured.lock()
     );
@@ -446,8 +449,8 @@ async fn require_client_cert_rejection_does_not_kill_accept_loop() {
 }
 
 #[tokio::test]
-/// MB-R-178 (server logging half) — a rejected mTLS handshake (no client
-/// certificate presented) is logged with the peer address and a failure reason.
+/// MB-R-178, MB-R-258 (server logging half) — a rejected mTLS handshake (no client
+/// certificate presented) is logged at Error with the peer address and a failure reason.
 async fn require_client_cert_rejection_is_logged() {
     let dir = reserve_temp_dir("ferrowl_modbus_tcp_tls_server");
     let (server_cert_pem, server_key_pem) = self_signed_pem();
@@ -509,9 +512,12 @@ async fn require_client_cert_rejection_is_logged() {
 
     let lines = captured.lock();
     assert!(
-        lines.iter().any(|line| line.contains("TLS handshake")
-            && line.contains("127.0.0.1:")
-            && line.contains("failed")),
+        lines
+            .iter()
+            .any(|(level, line)| *level == ferrowl_modbus::Level::Error
+                && line.contains("TLS handshake")
+                && line.contains("127.0.0.1:")
+                && line.contains("failed")),
         "expected a TLS handshake failure log line naming the peer, got: {lines:?}"
     );
 

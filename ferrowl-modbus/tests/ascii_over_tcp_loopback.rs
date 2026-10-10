@@ -31,7 +31,7 @@ fn key(kind: RegKind) -> Key<SlaveKey> {
 
 /// A no-op log/status sink. `LogFn + Clone` is satisfied by a capture-free closure.
 fn sink() -> impl ferrowl_modbus::LogFn + Clone {
-    |_s: String| async move {}
+    |_level: ferrowl_modbus::Level, _s: String| async move {}
 }
 
 fn config(port: u16) -> tcp::Config {

@@ -253,6 +253,14 @@ impl SetupDialog {
         dialog
     }
 
+    /// UI-R-367 — turn an `:edit`-prefilled dialog into a `:clone` dialog: create mode,
+    /// name replaced, every other field untouched.
+    pub fn into_clone(mut self, name: &str) -> Self {
+        set_input(&mut self.name, name);
+        self.mode = DialogMode::New;
+        self
+    }
+
     /// Create a new module (`:n`/`:new`), with an optional device-config path. `timing` prefills
     /// the timeout/delay/interval/reconnect inputs with the global app defaults.
     pub fn create(timing: Timing) -> Self {
@@ -2448,5 +2456,35 @@ mod tests {
         set_input(&mut dialog.name, "dev");
         let outcome = dialog.resolve().unwrap();
         assert_eq!(outcome.values.config_path, "");
+    }
+
+    /// UI-R-367 — `into_clone` replaces only the name and switches to create mode.
+    #[test]
+    fn ut_into_clone_switches_to_create_mode_and_replaces_name() {
+        let timing = Timing {
+            timeout_ms: 100,
+            delay_ms: 10,
+            interval_ms: 50,
+            reconnect: false,
+        };
+        let endpoint = Endpoint::Tcp {
+            ip: "10.0.0.5".to_string(),
+            port: 1502,
+        };
+        let dialog = SetupDialog::edit(
+            "pump",
+            "",
+            ClientOrServer::Server,
+            &endpoint,
+            timing,
+            &ReadRanges::default(),
+            None,
+        )
+        .into_clone("pump-2");
+        assert_eq!(dialog.name.state.input(), "pump-2");
+        assert!(matches!(dialog.mode, DialogMode::New));
+        assert_eq!(dialog.ip.state.input(), "10.0.0.5");
+        assert_eq!(dialog.port.state.input(), "1502");
+        assert!(dialog.resolve().unwrap().device.is_some());
     }
 }

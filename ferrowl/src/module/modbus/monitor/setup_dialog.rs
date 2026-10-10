@@ -200,6 +200,14 @@ impl MonitorSetupDialog {
         dialog
     }
 
+    /// UI-R-367 — turn an `:edit`-prefilled dialog into a `:clone` dialog: create mode,
+    /// name replaced, every other field untouched.
+    pub fn into_clone(mut self, name: &str) -> Self {
+        set_input(&mut self.name, name);
+        self.mode = DialogMode::New;
+        self
+    }
+
     fn build(name: &str, config_path: &str, mode: DialogMode) -> Self {
         let selection_style = SelectionStyle::default();
         let input_style = InputFieldStyle::default();
@@ -956,5 +964,29 @@ mod tests {
         set_suggest_input(&mut dialog.path, "/dev/ttyS0");
         let outcome = dialog.resolve().unwrap();
         assert_eq!(outcome.values.config_path, "");
+    }
+
+    /// UI-R-367 — `into_clone` replaces only the name and switches to create mode.
+    #[test]
+    fn ut_into_clone_switches_monitor_to_create_mode_and_replaces_name() {
+        let spec = ModuleSpec {
+            name: "mon1".to_string(),
+            device: String::new(),
+            role: crate::config::Role::Monitor,
+            endpoint: Endpoint::Rtu {
+                path: "/dev/ttyS0".to_string(),
+                baud_rate: 19200,
+                parity: None,
+                data_bits: Some(8),
+                stop_bits: Some(1),
+            },
+        };
+        let dialog = MonitorSetupDialog::edit("mon1", &spec, &MonitorDeviceConfig::default())
+            .into_clone("mon1-2");
+        assert_eq!(dialog.name.state.input(), "mon1-2");
+        assert!(matches!(dialog.mode, DialogMode::New));
+        assert_eq!(dialog.path.state.input(), "/dev/ttyS0");
+        assert_eq!(dialog.baud.state.input(), "19200");
+        assert!(dialog.resolve().unwrap().device.is_some());
     }
 }
