@@ -156,6 +156,14 @@ impl MockHandle {
     }
 }
 
+/// What makes a `MockView` open its dialog.
+enum DialogTrigger {
+    /// The `:` command with this exact text.
+    Command(String),
+    /// The next `refresh()`; one-shot.
+    Refresh,
+}
+
 /// A `ModuleView` test double: renders nothing, records `refresh`/`handle_command`, and can be
 /// pre-loaded with a session spec, a one-shot replacement, and a module host.
 pub(crate) struct MockView {
@@ -163,6 +171,7 @@ pub(crate) struct MockView {
     log: SharedLog,
     focused: bool,
     overlay_active: bool,
+    dialog_trigger: Option<DialogTrigger>,
     session_spec: Option<serde_json::Value>,
     device_for_spec: Option<String>,
     replacement: Option<Box<dyn ModuleView>>,
@@ -214,6 +223,7 @@ impl MockView {
             log: Arc::new(tokio::sync::RwLock::new(LogRing::init())),
             focused: false,
             overlay_active: false,
+            dialog_trigger: None,
             session_spec: None,
             device_for_spec: None,
             replacement: None,
@@ -243,6 +253,18 @@ impl MockView {
     /// Make `is_overlay_active()` report true.
     pub(super) fn with_overlay_active(mut self) -> Self {
         self.overlay_active = true;
+        self
+    }
+
+    /// Open the dialog when the `:` command `cmd` is handled.
+    pub(super) fn with_dialog_on_command(mut self, cmd: &str) -> Self {
+        self.dialog_trigger = Some(DialogTrigger::Command(cmd.to_string()));
+        self
+    }
+
+    /// Open the dialog on the next `refresh()`.
+    pub(super) fn with_dialog_on_refresh(mut self) -> Self {
+        self.dialog_trigger = Some(DialogTrigger::Refresh);
         self
     }
 
@@ -369,10 +391,18 @@ impl ModuleView for MockView {
 
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
         self.keys.lock().unwrap().push((modifiers, code));
+        if self.overlay_active && code == KeyCode::Esc {
+            self.overlay_active = false;
+            return EventResult::Consumed;
+        }
         EventResult::Unhandled(modifiers, code)
     }
 
     fn refresh<'a>(&'a mut self) -> RefreshFuture<'a> {
+        if matches!(self.dialog_trigger, Some(DialogTrigger::Refresh)) {
+            self.dialog_trigger = None;
+            self.overlay_active = true;
+        }
         let refreshes = self.refreshes.clone();
         let pending_stop = self.pending_stop.clone();
         let deferred_log = self.deferred_log.clone();
@@ -408,6 +438,9 @@ impl ModuleView for MockView {
     }
 
     fn handle_command<'a>(&'a mut self, cmd: &'a str) -> CommandFuture<'a> {
+        if matches!(&self.dialog_trigger, Some(DialogTrigger::Command(c)) if c == cmd) {
+            self.overlay_active = true;
+        }
         let commands = self.commands.clone();
         let cmd = cmd.to_string();
         let result = self.command_result.take();
