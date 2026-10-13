@@ -6,7 +6,7 @@
 #   - unpiped `cat` of a markdown file, or of any file over LARGE_LINES lines
 #   - unpiped `git show`/`git diff` with no --stat and no pathspec
 #   - unpiped `find` with -type f/d and no -name/-path/-iname/-regex
-#   - raw `gh issue view` (AGENTS.workflow.md gate 1b: always issue-view.sh)
+#   - raw `gh issue view` (AGENTS.md Conventions — reading: always issue-view.sh)
 #   - raw `gh pr view` (always pr-view.sh — same GraphQL projectCards bug)
 #   - `git commit` while the checkout is on `main` (branch off main, never
 #     commit to it — the safety net for an agent that missed the worktree)
@@ -127,7 +127,7 @@ for seg in $segments; do
   case "$seg" in
     *gh\ issue\ view*)
       offender="$seg"
-      reason="Raw 'gh issue view' bypasses this repo's issue-view.sh convention (AGENTS.workflow.md gate 1b: read any issue with 'bash .claude/scripts/issue-view.sh <number|url>', never raw 'gh issue view' — it also sidesteps a GitHub Projects-Classic API bug that crashes the raw form on some repos). Use: bash .claude/scripts/issue-view.sh <number>"
+      reason="Raw 'gh issue view' bypasses this repo's issue-view.sh convention (AGENTS.md Conventions — reading: read any issue with 'bash .claude/scripts/issue-view.sh <number|url>', never raw 'gh issue view' — it also sidesteps a GitHub Projects-Classic API bug that crashes the raw form on some repos). Use: bash .claude/scripts/issue-view.sh <number>"
       ;;
   esac
   [ -z "$offender" ] || break

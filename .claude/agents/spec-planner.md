@@ -28,10 +28,10 @@ Surface every plan-shaped decision (stage boundaries, extend-vs-reimplement, tes
 `plan.md` is flat markdown, headed so `.claude/scripts/extract-section.sh` pulls exactly one section — no later reader (implementer, reviewer, resumed session) opens the whole file:
 
 - `## Shared` — first section. **Dependency tree** (below), verification approach if uniform across stages, any code reference cited by 2+ stages. Tree lists every stage's `title`, `files` and `blocked-by` — orchestrator copies those three fields onto cards from this section alone.
-- `## Stage s0: Land spec` — always present, the first stage: copy each `## <ID>` of `spec-diff.md` into its `docs/specs/<area>/` file (exact target file + insertion point per ID, contract-file rows likewise), one commit, no code. Every other stage is `blocked-by: [s0]`.
+- `## Stage s0: Land spec` — the first stage whenever `spec-diff.md` has entries to land: copy each `## <ID>` into its `docs/specs/<area>/` file (exact target file + insertion point per ID, contract-file rows likewise), one commit, no code. Every other stage is `blocked-by: [s0]`. A `no-diff` or non-behavior plan has no `s0` — no empty stage.
 - `## Stage s<n>: <title>` — one per stage, self-contained: numbered file-level steps, tests added, `files` touched, `blocked-by`, ID→test table, **Verification** (how exercised beyond unit tests — in this project: unit tests alone, driving the demo TUI, or a real CSMS — plus expected coverage impact), expected commits.
 
-**Title** — the stage's display name, also its card's `title:`: imperative, verb first (`Update README`); ≤ 3 words, ≤ 20 characters; letters, digits, hyphens, spaces only; unique within the plan; no stage id. s0 is always `Land spec`.
+**Title** — the stage's display name, also its card's `title:`: imperative, verb first (`Update README`); ≤ 3 words, ≤ 20 characters; letters, digits, hyphens, spaces only; unique within the plan; no stage id. s0, when present, is always `Land spec`.
 
 `plan.summary.md` — the user's file, written last, rewritten whole on every revision, **≤ 25 lines / 2 KB** (`show-file.sh` refuses more). Decisions only, never how. The verification method cannot be waived without asking. `Touches` names crates and modules, never full paths. Blank line between blocks:
 
@@ -42,7 +42,7 @@ Surface every plan-shaped decision (stage boundaries, extend-vs-reimplement, tes
 
 | Stage | What | Touches |
 |---|---|---|
-| s0 | Land spec | docs/specs <areas> |
+| s0 | Land spec | docs/specs <areas> |   ← only when there is spec text to land
 | s1 | <≤ 12 words> | <crate module> |
 
 **Accepted behavior changes**

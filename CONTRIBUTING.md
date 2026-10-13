@@ -104,12 +104,20 @@ Three interactions recur at every gate and are drawn as one arrow each:
 
 - **approval stop** — the orchestrator opens the file in a viewer outside the conversation and halts. A requested change goes back to the same, still-alive agent; only an explicit approval lets the run continue.
 - **fresh review** — a new `spec-reviewer` with no shared context reads one scope (plan, stage, wave or branch), writes its review and is gone. Findings go back to the agent that wrote the work, never to the orchestrator, and another fresh review follows.
-- **reopen gate 1** — approved spec text turned out not to cover something the planner or implementer found. A `spec-author` amends the spec diff and drafts a comment for the tracking issue, the user approves, the orchestrator posts the comment, and the paused agent resumes with the amended text. The issue body itself is never edited.
+- **reopen gate 1** — the spec text turned out not to cover something the planner or implementer found. A `spec-author` revises the spec diff and classifies the revision: *editorial* (no meaning changes) goes through without a stop; *normative* (the goal needs it) gets an approval stop; *beyond* (needed only for something outside the goal) is split off into its own issue by default, the triggering entry narrowed to what holds today. Once the tracking issue exists, every revision rewrites its body — the body is always the current spec — and adds a three-line changelog comment.
 
 The entry point depends on the kind of change: a behavior change of any size starts
 at gate 1; a non-behavior change (refactor, rename, test-only, docs, tooling) skips
 gate 1 and starts at gate 2; a trivial edit (one file, no semantics) needs no gates,
 just a branch and a PR.
+
+Every run also picks a **lane** at its first approval stop; the user chooses, and
+size sets the recommended default. The diagram draws the **full** lane. The **fast**
+lane (default for a fix that changes no spec text or at most 3 entries) folds the
+gate 1 approval into gate 2's, commits and pushes each stage on green without a
+per-stage review or stop, and ends in one stop showing the branch review and the PR
+body. The tracking issue is filed in both lanes only at gate 2 approval, once the
+planner has checked the spec against the code.
 
 ```mermaid
 %%{init: {'themeVariables': {'activationBkgColor': '#3f9a6c', 'activationBorderColor': '#1f5a3c'}}}%%
@@ -126,7 +134,7 @@ sequenceDiagram
     activate Orch
 
     rect rgba(47,111,78,0.10)
-    Note over User,Git: Gate 1 - spec diff and tracking issue (behavior change only)
+    Note over User,Git: Gate 1 - spec diff (behavior change only)
     Orch->>Author: spawn: goal, affected areas
     activate Author
     loop one decision at a time
@@ -136,20 +144,12 @@ sequenceDiagram
         Orch->>Author: answer
     end
     Author-->>Orch: ready, spec diff written
-    Orch->>User: approval stop: spec diff
-    User->>Orch: approved
-    Orch->>Git: list existing issues
-    Orch->>Author: candidate issue numbers
-    Author->>Git: read candidate issues
-    Author-->>Orch: reuse existing, or ready, issue draft written
-    deactivate Author
-    Orch->>User: approval stop: issue draft
-    User->>Orch: approved
-    Orch->>Git: create issue from draft
+    Orch->>User: approval stop: spec diff, and lane (fast or full)
+    User->>Orch: approved, full lane
     end
 
     rect rgba(29,78,216,0.10)
-    Note over User,Git: Gate 2 - implementation plan
+    Note over User,Git: Gate 2 - implementation plan and tracking issue
     Orch->>Planner: spawn: spec diff path, affected areas
     activate Planner
     Note over Planner: explores the code itself
@@ -157,7 +157,7 @@ sequenceDiagram
         Planner-->>Orch: spec gap, reason
         Note over Orch,Author: reopen gate 1, then the same planner resumes
     end
-    Planner-->>Orch: ready, plan written (stage 0 lands the spec, stages, dependencies, verification)
+    Planner-->>Orch: ready, plan written (stage 0 lands any spec text, stages, dependencies, verification)
     loop until clean
         Orch->>Reviewer: fresh review: plan
         activate Reviewer
@@ -166,12 +166,16 @@ sequenceDiagram
         Orch->>Planner: findings, review path
         Planner-->>Orch: ready, plan revised
     end
-    Orch->>User: approval stop: plan, sequential or parallel
-    User->>Orch: approved
     deactivate Planner
+    Orch->>Git: list existing issues
+    Orch->>Author: candidate issue numbers
+    Author->>Git: read candidate issues
+    Author-->>Orch: reuse or new, issue draft written (current spec)
+    Orch->>User: approval stop: plan and issue draft, sequential or parallel
+    User->>Orch: approved
+    Orch->>Git: create or rewrite the issue from the draft
     Orch->>Git: create feature branch and worktree, one stage card per plan stage
-    Orch->>Author: spawn: draft PR body from the issue and the plan summary
-    activate Author
+    Orch->>Author: draft PR body from the issue and the plan summary
     Author-->>Orch: ready, draft PR body written (no approval stop, gate 4 replaces it)
     deactivate Author
     end
@@ -181,7 +185,7 @@ sequenceDiagram
     Orch->>Impl: spawn: worktree path, plan path, stage card paths
     activate Impl
     loop every stage, in plan order
-        Impl->>Git: in worktree: failing test, minimum pass, refactor (stage 0 = spec text)
+        Impl->>Git: in worktree: failing test, minimum pass, refactor (stage 0, if any = spec text)
         Impl-->>Orch: stage green, stage id
         opt behavior must differ from approved spec
             Impl-->>Orch: spec gap, reason
@@ -228,7 +232,7 @@ sequenceDiagram
     deactivate Reviewer
     Orch->>Git: run the full check suite on the branch
     opt findings
-        Note over Orch,Impl: fresh implementer with the review path, checks again, fresh review again
+        Note over Orch,Impl: the same implementer (sequential) or a fresh one per card (parallel) with the review path, checks again, fresh review again
     end
     Orch->>User: approval stop: review and check result
     User->>Orch: approved
@@ -236,13 +240,11 @@ sequenceDiagram
 
     rect rgba(47,111,78,0.10)
     Note over User,Git: Gate 4 - pull request
-    Orch->>User: approval stop: mark the draft PR ready, or manual run first?
-    User->>Orch: approved
     Orch->>Author: spawn: spec diff, plan, review, check log, branch commit log
     activate Author
     Author-->>Orch: ready, full PR body written
     deactivate Author
-    Orch->>User: approval stop: PR body
+    Orch->>User: approval stop: PR body, mark ready or manual run first?
     User->>Orch: approved
     Orch->>Git: push, replace the draft PR's title and body, link the issue, mark ready
     end

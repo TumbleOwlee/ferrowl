@@ -11,7 +11,7 @@ Criteria and output shape are `spec-reviewer.md`'s (`## Four axes, reported sepa
 
 ## Gather inputs — no shared session
 
-- **Ticket** — the GitHub issue (`issue-view.sh`, `AGENTS.md` `## Conventions — reading`). Ticket is self-contained: full current normative text, including updates landed via "Reconcile the spec". This *is* the approved spec — `artifacts/<slug>/spec-diff.md` may not exist on this machine or may be gone.
+- **Ticket** — the GitHub issue (`issue-view.sh`, `AGENTS.md` `## Conventions — reading`). Ticket is self-contained: its body's `## Spec (rev N)` is the full current normative text, rewritten on every "Reconcile the spec" revision; comments are only the changelog. This *is* the approved spec — `artifacts/<slug>/spec-diff.md` may not exist on this machine or may be gone.
 - **Branch/PR** — from the ticket's linked PR, or ask the user for PR number/branch.
 - **Base ref** — PR's target branch (usually `main`).
 
