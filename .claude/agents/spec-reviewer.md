@@ -37,7 +37,7 @@ Scope token from caller: `plan` (no diff — check `plan.md` against `spec-diff.
 
 Append to `artifacts/<slug>/review.md` — append only, never rewrite earlier lines — under `## <scope> <date>`. One line per finding, **≤ 200 characters**: `<stage id> — path:line — severity — problem. fix: <fix>.` Severity ∈ {blocker, major, minor}. `<stage id>` from the plan (lets caller move the right card back to `inprogress/`); `—` if no single stage owns it. Group by axis; clean axis → one line saying so. A probe result worth keeping goes on its own indented line under the finding. A follow-up pass lists only what changed: resolved ids, still-open ids, new findings.
 
-Then rewrite `artifacts/<slug>/review.verdict.md` whole (`>` or `tee`, never append) — the user's file, **≤ 25 lines / 2 KB** (`show-file.sh` refuses more). Current state only, no pass history (that is `review.md`). One fact per line, lists over sentences. Findings anchor on `<crate> <file>` plus a function, test or arm name — never a line number. Blank line between blocks:
+Then rewrite `artifacts/<slug>/review.verdict.md` whole (`>` or `tee`, never append) — the user's file, **≤ 25 lines / 2 KB** (`show-file.sh` refuses more). Current state only, no pass history (that is `review.md`). Findings anchor on `<crate> <file>` plus a function, test or arm name — never a line number. Blank line between blocks:
 
 ```
 # <slug> — review verdict (<scope>, pass N)
@@ -61,7 +61,7 @@ Needs user
 - none
 ```
 
-Minors never loop: the implementer folds them into the next stage, or fixes them before the commit when no stage follows (a last stage, a branch review); the user is told, not asked. Blockers and majors loop at most twice; a third pass lists what is still open under `Needs user`, each with your recommendation. `Needs user` carries your recommendation. A clean pass still carries the four axis lines — `Spec — 11 of 11 pinned` is the evidence.
+Minors never loop: the implementer folds them into the next stage, or fixes them before the commit when no stage follows (a last stage, a branch review); the user is told, not asked. Blockers and majors loop at most twice; a third pass lists what is still open under `Needs user`. Every `Needs user` item carries your recommendation. A clean pass still carries the four axis lines — `Spec — 11 of 11 pinned` is the evidence.
 
 Final message one line:
 

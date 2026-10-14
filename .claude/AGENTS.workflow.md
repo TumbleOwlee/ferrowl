@@ -1,27 +1,33 @@
 # AGENTS.workflow.md
 
-Gate/task-board mechanics for the orchestrator. Subagents (spec-author/planner/implementer/reviewer) never read it. Every heading below is one `extract-section.sh` pull.
+Gate/task-board mechanics for the orchestrator. Subagents (spec-author/planner/implementer/reviewer) never read it.
 
 ### Principles
+
+Every run, `/spec-request` included.
 
 - Replaces any generic workflow skill (`/workflow`); `docs/specs/` is already the PRD and design record.
 - Branch off `main`, never commit to `main`. `<type>/<slug>`, type ∈ {`feat`, `fix`, `docs`}. **Enforced:** `.claude/scripts/hook-guard-shell.sh` denies `git commit` on `main` and `git push` targeting `main`.
 - **Orchestrator never changes spec or code and never reads spec, code, or any agent-written file.** It spawns agents, relays one question at a time between agent and user, runs git/`gh` plumbing (worktree add/remove, merge, push, `gh … --body-file`), runs `.claude/scripts/gauntlet.sh`, moves cards. Every other output is an agent's file (*Agent hand-off*).
 - **Gate 1 is a dialog with the user, drafted by `spec-author`.** Existing spec + goal, nothing about current code.
-- **Non-behavior change (`AGENTS.md` `## Workflow`) skips gate 1:** no `spec-diff.md`; parent card records `gate1: skipped`. Gate 2 planning finds a spec gap → stop, run gate 1, continue.
 - **Every run picks a lane** — fast or full — at its first approval stop (*Lane*). The user chooses; size sets the recommended default.
-- **Nothing is published before the plan is approved.** The planner is the first agent to check the spec against the code, so the tracking issue is filed at gate 2 approval, never earlier (*Tracking issue*). Sole exception: `/spec-request`, which has no plan.
-- **The issue body is the current spec.** Every spec revision after filing rewrites the body and posts a short changelog comment; GitHub's edit history keeps every earlier body. A reader never replays comments to learn what is approved.
+- **The issue body is the current spec** (*Tracking issue*). A reader never replays comments to learn what is approved.
+- **Issue and PR are the orchestrator's alone**, from files scripts assemble (`issue-body.sh`, `pr-body.sh`), title = line 1 with its `# ` stripped, body = the rest, never retyped. No agent but `spec-author` learns an issue or PR number exists — spawn briefs never carry one.
+- **An agent's self-reported verification is not verification.** Re-run the tools.
+- **A split of an area whose spec costs real context is `spec-author`'s to propose** at gate 1 (rules in its file) and the user's to approve, never silent.
+
+### Principles — implementation
+
+Gate 2 onward.
+
+- **Non-behavior change (`AGENTS.md` `## Workflow`) skips gate 1:** no `spec-diff.md`; parent card records `gate1: skipped`. Gate 2 planning finds a spec gap → stop, run gate 1, continue.
+- **Nothing is published before the plan is approved** (*Tracking issue*).
 - **A spec gap that serves something other than the run's goal is split off, not folded in** (*Reconcile the spec*). Folding it in is the user's explicit override.
 - Gate 2 onward delegates to agents. **All agents Sonnet or better.**
-- **Issue and PR are the orchestrator's alone**, from files scripts assemble (`issue-body.sh`, `pr-body.sh`), title = line 1 with its `# ` stripped, body = the rest, never retyped. No agent but `spec-author` learns an issue or PR number exists — spawn briefs never carry one.
-- **Every text a human reads is one fact per line** — lists and sub-lists, never `;`-joined sentences; normative spec text (one entry, one line) is the sole exception. Holds for the approval prompt as much as for files.
-- **The draft PR is the user's review surface** (opened by the first push, *Implement*; promoted, never replaced, at *Gate 4*). Feedback re-enters the run only through `bash .claude/scripts/pr-feedback.sh` (*PR feedback*): the file it writes goes to the implementer like `review.md`.
+- **The draft PR is the user's review surface** (*Every stage*; promoted, never replaced, at *Gate 4*). Feedback re-enters the run only through `bash .claude/scripts/pr-feedback.sh` (*PR feedback*): the file it writes goes to the implementer like `review.md`.
 - **One git worktree per issue per agent**, `.claude/worktrees/<slug>` — inside project dir (agent-reachable), gitignored. Created only once gate 2 is approved (first thing to touch disk); removed after merge.
 - **Plan is a contract; planner never implements.** A wrong plan stops the implementer (`spec-implementer.md` `## Stop and report — never improvise`), never gets improvised around.
-- **An agent's self-reported verification is not verification.** Re-run the tools.
 - **Every state change moves a task-board card.** State living only in conversation dies with the session.
-- **An area whose spec costs real context to read gets a split proposed** by `spec-author` at gate 1 (rules in its file); user approves, never silent.
 
 ### Lane — fast or full
 
@@ -104,16 +110,15 @@ Parent frontmatter: `issue`, `pr` (number, set when the draft opens), `branch`, 
 
 | Card | `open` | `inprogress` | `inreview` | `done` |
 |---|---|---|---|---|
-| stage | created from plan | agent took it | green; under review | full lane: reviewed, approved or auto-continued, on the feature branch, orchestrator-verified; fast lane: committed + pushed + orchestrator-verified (reviewed at gate 3) |
+| stage | created from plan | agent took it | green; under review (fast lane: already committed) | on the feature branch — pushed (sequential) or merged (parallel) — and orchestrator-verified; full lane also reviewed and approved or auto-continued |
 | wave gate | not started | stages running | all done; reviewing wave diff | clean — next wave unblocks |
 | parent | gate 1 or 2 pending | implementing | gate 3/4 | PR squash-merged |
 
 Rules:
-- **No agent writes its own `done`.** Implementer stops at `inreview/` — in the fast lane with its stage already committed (`status=committed`). Orchestrator verifies with `gauntlet.sh`, only then `done`.
-- **Runnable** = every `blocked-by` id in `done/`. Stage `done` = on the feature branch: pushed (sequential) or merged (parallel).
+- **No agent writes its own `done`** — the orchestrator moves a card there after `gauntlet.sh` passes on the pushed or merged result.
+- **Runnable** = every `blocked-by` id in `done/`.
 - No `blocked/` directory — blocking derives from `blocked-by`.
-- Card is intent, git is fact — see *Resume*.
-- `done/` is not an archive — every card is deleted at gate 4 approval.
+- Card is intent, git is fact — see *Resume*. Cards end at *Gate 4*.
 
 ### Agent hand-off
 
@@ -208,12 +213,10 @@ Answers go back to the same agent in one message, numbered. A decision that depe
 Spawn `spec-planner` with: `artifacts/<slug>/spec-diff.md` path (none for a non-behavior change), affected area(s), anything the user volunteered at gate 1. Nothing else; the agent explores the repo itself. It writes `plan.md` (shape: `spec-planner.md`'s `## Output`) and `plan.summary.md`.
 
 - `status=question` → relay, resume same agent.
-- `status=spec-gap` (approved text doesn't cover something the plan needs) → agent stays paused; run *Reconcile the spec*, resume the *same* planner.
-- `status=ready` → fresh `spec-reviewer`, scope `plan`. Any finding, minors included → resume the planner with the `review.md` path, it revises the plan, fresh review — no user interaction, at most two such rounds. Still findings after the second round → the stop below also shows `review.verdict.md`, its findings as `Needs user`. A clean verdict is never shown: there is nothing in it to approve.
+- `status=spec-gap` → *Reconcile the spec*.
+- `status=ready` → fresh `spec-reviewer`, scope `plan`. Any finding, minors included → resume the planner with the `review.md` path, it revises the plan, fresh review — no user interaction; rounds and their end per *Verify before an approval stop*. A clean verdict is never shown: there is nothing in it to approve.
 - The plan's `Stop` column (which stages stop for approval beyond the *Stage stop* rules) is settled at this stop: the user may tick or untick stages in the answer.
 - `clean`, or `findings` with `count=0` → `spec-author` drafts `issue.md` (*Tracking issue*; no stop of its own; a non-behavior run spawns one now with the goal verbatim, `plan.summary.md`, `artifacts/<slug>/`), then **one** `show-file.sh` call: `plan.summary.md`, `review.verdict.md` only when findings survived two rounds, and — fast lane — `spec-diff.md`. `issue.md` is not opened: its title and goal restate approved text, and the prompt's `Issue:` line (new or reuse #n, title) is the one decision in it. One *Approval prompt*: approve, plus mode (full lane), plus lane for a non-behavior change.
-
-The plan's dependency tree reads as waves: a stage is runnable once its dependencies merge.
 
 Mode, full lane only — unanswered = not approved:
 - **Sequential** — one fresh `spec-implementer` runs every stage in plan order.
@@ -258,6 +261,7 @@ The body is also reassembled and edited when the status line changes (`pr` set, 
 
 #### Every stage
 
+- One fresh `spec-implementer`, spawned with worktree path, plan path, its stage cards and `lane=fast|full`; it reads its own rules (`.claude/agents/spec-implementer.md`, `AGENTS.md`) and works stages in plan order, one plan section at a time.
 - Not done until the plan's Verification method has run and its outcome is reported. Waiving it requires asking.
 - **The draft PR body is the board, rendered**: `sh .claude/scripts/pr-body.sh <slug> draft > artifacts/<slug>/pr-draft.md` (status line, one-line why, one checklist line per stage card with its state or sha, where to review) — regenerated and pushed with `gh pr edit <pr> --body-file <(tail -n +2 artifacts/<slug>/pr-draft.md)` on **every card move** once the PR exists. Nobody writes PR-body text by hand.
 - **The first push opens the draft PR** from that file; orchestrator records `pr` on the parent card, logs `pr=draft`, reassembles the issue body (*Tracking issue*). Every later push updates it; the user reviews there (*PR feedback*).
@@ -269,17 +273,17 @@ gh pr create --draft --title "$(head -1 artifacts/<slug>/pr-draft.md | sed 's/^#
 
 #### Fast lane
 
-One fresh `spec-implementer`, spawned with worktree path, plan path, its stage cards, `lane=fast`. Per stage, in plan order:
+Per stage:
 
 1. Start: card `open`→`inprogress`. Green: the implementer commits, card → `inreview/`, answers `status=committed stage=s<n>` — no per-stage review, no approval stop.
-2. Orchestrator runs `gauntlet.sh`, pushes (the first push opens the draft PR), logs `gauntlet=pass sha=<sha>` on the parent card, card → `done`, resumes the implementer for the next stage. Red gauntlet → card → `inprogress/`, resume the implementer with the gauntlet line.
+2. Orchestrator runs `gauntlet.sh`, pushes, logs `gauntlet=pass sha=<sha>` on the parent card, card → `done`, resumes the implementer for the next stage. Red gauntlet → card → `inprogress/`, resume the implementer with the gauntlet line.
 3. Last stage `done` → *PR feedback*, then *Gate 3*: its branch review is the only review of a fast-lane run.
 
 Fixes in the fast lane (gate 3 findings, PR feedback, red gauntlet) are committed on green too: the implementer answers `status=committed`, the orchestrator runs `gauntlet.sh` and pushes before any re-review — a review diffs commits, never a dirty worktree.
 
 #### Sequential
 
-Full lane. One fresh `spec-implementer`, spawned with worktree path, plan path, its stage cards, `lane=full`. It reads its own rules (`.claude/agents/spec-implementer.md`, `AGENTS.md`) and works stages in plan order, one plan section at a time:
+Full lane. Per stage:
 
 1. Start: stage card `open`→`inprogress`.
 2. Green: card → `inreview`, `status=inreview stage=s<n>`. Orchestrator runs `gauntlet.sh` and the per-stage review below.
@@ -290,8 +294,8 @@ Full lane. One fresh `spec-implementer`, spawned with worktree path, plan path, 
 
 Full lane, sequential only; parallel's equivalent is the wave gate (parallel step 5). Every green stage, before its approval stop:
 - Fresh `spec-reviewer`. Base ref = previous stage's commit (branch point for the first stage); scope = that stage id; gate 3's four axes on one stage's diff.
-- `clean`, or `findings` with `count=0` → approval stop (the verdict is opened in the viewer only when it has a `Needs user` item; the prompt's `Review:`/`Minors` lines carry a clean one), forward the gauntlet line; its `Minors` go onto the next stage's card as `minor=` log lines, or are fixed before the commit when no stage follows.
-- `count>0` → card → `inprogress/`, resume implementer with `review.md` path and stage id, re-run `gauntlet.sh`, fresh reviewer — twice at most; after that the open findings are `Needs user` and the stage stops. An unreviewed stage is never committed.
+- `clean`, or `findings` with `count=0` → approval stop (the verdict is opened in the viewer only when it has a `Needs user` item; the prompt's `Review:`/`Minors` lines carry a clean one), forward the gauntlet line; minors per *Verify before an approval stop*.
+- `count>0` → card → `inprogress/`, resume implementer with `review.md` path and stage id, re-run `gauntlet.sh`, fresh reviewer; rounds per *Verify before an approval stop*. An unreviewed stage is never committed.
 - **The last code stage**: review in scope `branch` instead — it is gate 3's review, and the stage's approval stop is gate 3's stop. Gate 3 re-runs only if code changed after it.
 
 #### Stage stop
@@ -324,7 +328,7 @@ Full lane only. One worktree+branch per agent, branched off the feature branch's
 1. Runnable stage cards (`blocked-by` all in `done/`) up to approved count. Wave-gate card → `inprogress/`.
 2. One implementer per stage: its worktree path, its stage only, its own card's absolute path. It commits its stage on green in its own worktree (a merge needs a commit) — unreviewed, never leaves the worktree until step 4 clears it.
 3. Wait for the whole wave; each card lands in `inreview/`.
-4. Per card: `gauntlet.sh` in its worktree, fresh `spec-reviewer` in `stage s<n>` scope (base = wave's branch point). `clean` → merge into feature branch — **this merge is the new base** every later wave branches from — `gauntlet.sh` on the merged result, push the feature branch (the first push opens the draft PR, *Every stage*), card → `done/`, remove worktree. `findings` → card → `inprogress/`, same implementer resumes with `review.md` path, fixes, amends its stage commit, back to this step.
+4. Per card: `gauntlet.sh` in its worktree, fresh `spec-reviewer` in `stage s<n>` scope (base = wave's branch point). `clean` → merge into feature branch — **this merge is the new base** every later wave branches from — `gauntlet.sh` on the merged result, push the feature branch, card → `done/`, remove worktree. `findings` → card → `inprogress/`, same implementer resumes with `review.md` path, fixes, amends its stage commit, back to this step.
 5. All `done` → wave gate → `inreview/`: fresh `spec-reviewer`, scope `wave w<n>`. `clean` → wave gate `done/`, then *Stage stop* rules on the wave — a rule fires → **stop: ask the user for approval before the next wave**; none → auto-continue — after *PR feedback* has run; its merge is the next wave's base, a fresh checkpoint. `findings`, red gauntlet, or merge conflict → stop, forward the status line, implicated stage cards → `inprogress/`; fresh implementer per card gets `review.md` path.
 
 Merge conflict between two stages in a wave = dependency tree was wrong — report, fix the tree, never hand-resolve and continue. Mid-wave stop stops that wave only: finished branches still merge, the rest re-plans.
@@ -354,21 +358,21 @@ A thread the user resolves themselves, or one whose `reply:` they answer on the 
 
 ### Reconcile the spec
 
-Planner or implementer returns `status=spec-gap reason=…` — the spec text doesn't cover what the plan needs, or behavior must differ from it. The paused agent stays paused. Orchestrator resumes `spec-author` with the reason verbatim. The author classifies (rules in its file); a normative or beyond revision is decided through a question batch whose block quotes the affected entry in full, and the user's answer *is* the approval — the revised text is never shown again:
+Planner or implementer returns `status=spec-gap reason=…` — the spec text doesn't cover what the plan needs, or behavior must differ from it. Orchestrator resumes `spec-author` with the reason verbatim. The author classifies (rules in its file); a normative or beyond revision is decided through a question batch whose block quotes the affected entry in full, and the user's answer *is* the approval — the revised text is never shown again:
 
 | `class` | What | Stop |
 |---|---|---|
 | `editorial` | no normative meaning changes: wording, a cross-reference, a violated ID added to or dropped from a `no-diff`, an entry moved | none — orchestrator logs `spec-rev=<N> class=editorial` and continues |
 | `normative` | an entry added, changed or dropped that the run's goal needs | the author's `question`: the entry's current text in full, the proposed text, the alternative; the answer settles it, no further stop |
-| `beyond` | needed only because of something outside the goal: an area the gate 1 Summary didn't name, an upstream change, or more than 5 entries | the author's `question`: the entry's current text in full, **split** (recommended) or fold in. The answer comes back as `class=split` or `class=normative`, no further stop |
+| `beyond` | needed only because of something outside the goal: an area the gate 1 Summary didn't name, an upstream change, or more than 5 entries | the author's `question`: **split** (recommended) or fold in; the answer comes back as `class=split` or `class=normative`, no further stop |
 
-- **Split** (`class=split`) — the author narrows the triggering entry to what holds today, or states the gap as a deliberate edge case, and drafts `split-issue.md` for the rest (goal, what was found, existing IDs only). No stop — the split was the user's answer. Orchestrator files `split-issue.md` (`gh issue create`, as in *Tracking issue*) with `Split from #<issue>` appended as its last line — at once if the tracking issue is filed, else right after gate 2 approval step 1 — appends it to the parent card's `split:` and reassembles the issue body. The run continues on the narrowed spec; the new issue is its own later run. The split issue's body is `split-issue.md` with the status line `Split from #<issue> (rev <N>) · no spec yet` prepended.
+- **Split** (`class=split`) — the author narrows the spec and drafts `split-issue.md` (rules in its file). Orchestrator files `split-issue.md` (`gh issue create`, as in *Tracking issue*) with `Split from #<issue>` appended as its last line — at once if the tracking issue is filed, else right after gate 2 approval step 1 — appends it to the parent card's `split:` and reassembles the issue body. The run continues on the narrowed spec; the new issue is its own later run. The split issue's body is `split-issue.md` with the status line `Split from #<issue> (rev <N>) · no spec yet` prepended.
 - **Fold in** — the user's explicit override: handled as `normative`, and the author rewrites the goal line to state the widened scope.
 
 The author answers `status=ready class=<class> file=artifacts/<slug>/revision.md` (the touched sections, for the record and the reviewer). Then, in order:
-1. Issue already filed → body rewrite + changelog comment (*Tracking issue*). Not filed yet → nothing to post.
-1. One notice line: `Spec rev N · <slug> · <class> · <IDs> · issue #<n> rewritten · split #<m> filed` — no answer awaited.
-2. The *same* paused agent resumes. An implementer revision after `s0` (or in a plan without one) lands in `docs/specs/` before it continues, inside its current stage's commit; the revision's `docs/specs/` files join that stage's `files` (orchestrator appends them to the card and logs `files+=…`). Parallel: never inside a wave stage — a fresh implementer lands it as its own commit on the feature branch before the next wave branches.
+1. Issue already filed → *Tracking issue*'s rewrite. Not filed yet → nothing to post.
+2. One notice line: `Spec rev N · <slug> · <class> · <IDs> · issue #<n> rewritten · split #<m> filed` — no answer awaited.
+3. The *same* paused agent resumes. An implementer revision after `s0` (or in a plan without one) lands in `docs/specs/` before it continues, inside its current stage's commit; the revision's `docs/specs/` files join that stage's `files` (orchestrator appends them to the card and logs `files+=…`). Parallel: never inside a wave stage — a fresh implementer lands it as its own commit on the feature branch before the next wave branches.
 
 Gate 3's reviewer diffs the branch's spec against `spec-diff.md` — the final spec report, never one the orchestrator composes.
 
@@ -378,7 +382,7 @@ Before proposing a PR, whole-branch pass — cross-stage bugs, spec drift across
 - Fresh `spec-reviewer`, scope `branch`. Give it base ref, artifact dir, worktree path, all stage ids; it reads its own rules (`AGENTS.md`, `spec-reviewer.md`'s `## Four axes, reported separately`). Already run, with its stop, as a one-code-stage run's stage review (*Per-stage review*) → skip to gate 4 unless code changed since.
 - Orchestrator runs `gauntlet.sh` on the branch, forwards both status lines; `review.verdict.md` is opened only when it has a `Needs user` item.
 - `count>0` → as *Per-stage review*, the same implementer (fast lane, sequential) or one fresh implementer per implicated card (parallel), then a fresh branch review. Findings needing a user decision are relayed as questions, never fixed unasked.
-- Log `review=clean` or `review=<n>-resolved` on the parent card once the branch review is clean (the PR status line reads it). Minors from it are fixed before commit: the implementer is resumed with them before `spec-author` writes `pr.md` (fast lane: committed on green), gauntlet re-run, `gauntlet=pass sha=<sha>` logged on the parent card. Findings still open after two fix-and-review rounds are `Needs user` items at this stop.
+- Log `review=clean` or `review=<n>-resolved` on the parent card once the branch review is clean (the PR status line reads it). Minors (*Verify before an approval stop*, fixed before commit) are resolved before `spec-author` writes `pr.md`; gauntlet re-run, `gauntlet=pass sha=<sha>` logged on the parent card.
 - **Fast lane:** no stop here — clean goes straight to gate 4, whose stop shows the verdict.
 - **Board:** reviewer appends to `artifacts/<slug>/review.md`, keyed to stage id, and rewrites `review.verdict.md`. Parent card → `inreview/` when review starts.
 
@@ -399,12 +403,12 @@ gh pr ready <pr>
 ```
 
 - No draft exists (run predates this rule, or resumed from a board that lacks `pr`): `gh pr create` with the same title and body file instead of `edit`+`ready`.
-- **The run ends here.** The PR is marked ready; the human reviews and merges in the GitHub UI. Every card of the run is deleted (`done/` was never the archive); `artifacts/<slug>/` and the worktree stay until *After merge*.
+- **The run ends here.** The PR is marked ready; the human reviews and merges in the GitHub UI, never the orchestrator. Every card of the run is deleted (`done/` was never the archive); `artifacts/<slug>/` and the worktree stay until *After merge*.
 - CI fails after mark-ready → `bash .claude/scripts/failed-workflow.sh <branch>`, never raw `gh run view`; recreate the implicated stage card from the plan in `inprogress/`, a fresh implementer fixes, gauntlet, push, cards deleted again.
 
 ### After merge
 
-The merge is the human's, in the GitHub UI, after their own review; the orchestrator never merges. When the user says the PR is merged (or `pr-feedback.sh fetch` reports `state=merged` on a resume):
+When the user says the PR is merged (or `pr-feedback.sh fetch` reports `state=merged` on a resume):
 
 ```sh
 git worktree remove .claude/worktrees/<slug>

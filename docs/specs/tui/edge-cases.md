@@ -6,6 +6,8 @@ Boundary behavior, error semantics, intentional or known constraints.
 
 ## Command line mechanism
 
+### Parsing and dispatch
+
 | ID | Condition | Behavior |
 |---|---|---|
 | **UI-E-001** | Unknown first token (`:bogus`) | forwarded to the active view; if the view also does not recognize it, app logs `Unknown command ':bogus'` at Warning |
@@ -23,18 +25,27 @@ Boundary behavior, error semantics, intentional or known constraints.
 | **UI-E-139** | `Enter` on an empty command line (UI-R-191) | a submit outcome carrying the empty string, and the line closes; the widget does not special-case empty input, the consumer does |
 | **UI-E-140** | Command line with both an error and a notice set (UI-R-194, UI-R-195) | the error is shown and the notice is retained, appearing once the consumer clears the error |
 | **UI-E-093** | Command-line help box taller than the rows available above the line (UI-R-196) | the box is clipped to the available rows and stays anchored to the bottom, matching the app's no-minimum-size stance (UI-E-047) |
+
+### Lifecycle commands in flight
+
+| ID | Condition | Behavior |
+|---|---|---|
 | **UI-E-147** | `:stop` submitted while the module's connection attempt is still in flight | the command line closes and the application keeps processing keys and redrawing; the module's status stays `RECONNECTING` until the abort completes, then becomes `DISCONNECTED` (UI-R-314, UI-R-315) |
 | **UI-E-160** | Module configuration edit applied while that module's connection attempt is still in flight (UI-R-350) | the dialog closes and the application keeps processing keys and redrawing; the module reconnects with the new configuration once the abandoned attempt has been torn down (OC-R-175, MB-R-220) |
 | **UI-E-161** | Any module configuration apply, between the dialog closing and the deferred stop settling (UI-R-350) | the view keeps rendering the pre-edit configuration — the charging station's and CSMS's pre-edit spec, the Modbus client's, server's and monitor's pre-edit table, records and status — for one or more redraw ticks with the dialog already closed; the reconfigured or rebuilt module is installed only once the stop settles, the CSMS rebinding on the following auto-bind tick. The swap is deliberately no longer instantaneous, the alternative being the blocking apply UI-R-350 removes |
 | **UI-E-163** | `:stop` issued during a pending configuration edit apply (UI-R-354, UI-R-356) | the module reports stopped immediately while its configuration is still changing underneath — the view keeps rendering the pre-edit configuration until the stop settles (UI-E-161), then shows the edited configuration on a stopped module. A module that is stopped and simultaneously adopting a new configuration is the price of honouring the confirmed edit; discarding the edit instead is the silent data loss UI-R-354 removes |
 | **UI-E-164** | `:reload` issued during a pending configuration edit apply (UI-R-357) | the confirmed edit is discarded even though its dialog already reported the apply accepted, the Warning line in the module's message log being the user's only signal. Deliberate — `:reload` names the on-disk configuration as the wanted one, and silently keeping the edit would make `:reload` not reload |
+
+### Clone
+
+| ID | Condition | Behavior |
+|---|---|---|
 | **UI-E-168** | Tab created from a `:clone` dialog (UI-R-367, UI-R-369) | holds only what its setup-dialog fields resolve to: register changes made in the source tab but not saved to its device config, and the source tab's Lua script list, are not carried over; `:script copy <idx>` copies scripts afterwards. Deliberate — `:clone` reuses `:edit`'s prefill rather than copying in-memory module state |
 | **UI-E-169** | `:clone` on a tab whose name already ends in `-<N>` (UI-R-368) | the suffix is appended to the full name, never parsed: cloning `pump-2` prefills `pump-2-2` (or the lowest free `pump-2-<N>`), not `pump-3` |
 | **UI-E-170** | `:clone` of a Modbus server or CSMS confirmed with its listen address unchanged while the source tab still holds it, `reconnect` enabled (UI-R-369) | the tab is created and started; its bind fails (MB-R-257, OC-R-179), its status reads `RECONNECTING` (MB-R-153, OC-R-124), each failed attempt appends an Error line to its log (MB-R-256, OC-R-178), and it binds once the address frees per the backoff (MB-R-051); no address or port is changed automatically. With `reconnect` disabled the bind failure ends the task instead (MB-R-134, OC-R-139) |
 | **UI-E-171** | `:clone` followed by any argument | not an app-level command; forwarded to the active view and, unrecognized there, logged as `Unknown command ':clone …'` at Warning (UI-R-018, UI-R-348) |
 
 ---
-
 ## Navigation & tab switching
 
 | ID | Condition | Behavior |

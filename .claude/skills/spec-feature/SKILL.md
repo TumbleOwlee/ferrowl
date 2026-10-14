@@ -15,11 +15,12 @@ Check `.claude/tasks/` against `### Resume an interrupted run` before starting f
 
 ## Where each step lives
 
-One section at a time: `sh .claude/scripts/extract-section.sh '<heading>' .claude/AGENTS.workflow.md`.
+Headings of `.claude/AGENTS.workflow.md`, one pull each (`AGENTS.md` `## Conventions — reading`).
 
 | Step | Heading |
 |---|---|
-| Orchestrator role, branch/worktree/agent rules — read once per run | `### Principles` |
+| Orchestrator role — read once per run | `### Principles` |
+| Branch/worktree/agent/plan rules — read once per run | `### Principles — implementation` |
 | What runs before any approval stop | `### Verify before an approval stop` |
 | Card files, states, artifacts directory | `### Task board` |
 | Agent hand-off (status lines, file paths) | `### Agent hand-off` |
@@ -30,7 +31,10 @@ One section at a time: `sh .claude/scripts/extract-section.sh '<heading>' .claud
 | Gate 1 — spec diff | `### Gate 1 — spec diff. Stop for approval.` |
 | Gate 2 — plan and tracking issue | `### Gate 2 — plan and tracking issue. Stop for approval.` |
 | Tracking issue — draft, file, rewrite on every spec revision | `### Tracking issue` |
-| Implement, stage by stage — fast lane pulls `#### Every stage`, `#### Fast lane`; full sequential pulls `#### Every stage`, `#### Sequential`, `#### Per-stage review` | `### Implement, stage by stage` |
+| Implement — every lane: spawn brief, draft PR | `#### Every stage` |
+| Implement — fast lane | `#### Fast lane` |
+| Implement — full lane, sequential mode | `#### Sequential`, `#### Per-stage review`, `#### Stage stop` |
+| Implement — full lane, parallel mode | `#### Parallel waves`, `#### Stage stop` |
 | PR feedback — draft PR comments back into the run, before every approval stop once the draft exists | `### PR feedback` |
 | Reconcile the spec | `### Reconcile the spec` |
 | Gate 3 — independent review | `### Gate 3 — review. Stop for approval.` |
