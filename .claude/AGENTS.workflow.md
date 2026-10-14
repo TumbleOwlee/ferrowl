@@ -256,7 +256,7 @@ gh issue edit <n> --body-file <(tail -n +2 artifacts/<slug>/issue-body.md)
 gh issue comment <n> --body-file artifacts/<slug>/issue-comment.md
 ```
 
-The body is also reassembled and edited when the status line changes (`pr` set, a split filed). A revision before filing posts nothing. Every resume of `spec-author` for a revision says whether the issue is **filed** (changelog comment wanted) or **unfiled** (no comment) — including a change requested at gate 2's stop.
+The body is also reassembled and edited when a split is filed (the status line changes). The PR link is never added by hand: the PR's `Closes #<n>` line makes GitHub cross-link issue and PR. A revision before filing posts nothing. Every resume of `spec-author` for a revision says whether the issue is **filed** (changelog comment wanted) or **unfiled** (no comment) — including a change requested at gate 2's stop.
 
 ### Implement, stage by stage
 
@@ -265,7 +265,7 @@ The body is also reassembled and edited when the status line changes (`pr` set, 
 - One fresh `spec-implementer`, spawned with worktree path, plan path, its stage cards and `lane=fast|full`; it reads its own rules (`.claude/agents/spec-implementer.md`, `AGENTS.md`).
 - Not done until the plan's Verification method has run and its outcome is reported. Waiving it requires asking.
 - **The draft PR body is the board, rendered** by `pr-body.sh <slug> draft` — regenerated and pushed with `gh pr edit <pr> --body-file <(tail -n +2 artifacts/<slug>/pr-draft.md)` on **every card move** once the PR exists.
-- **The first push opens the draft PR** from that file; orchestrator records `pr` on the parent card, logs `pr=draft`, reassembles the issue body (*Tracking issue*). Every later push updates it; the user reviews there (*PR feedback*).
+- **The first push opens the draft PR** from that file; orchestrator records `pr` on the parent card, logs `pr=draft`. Every later push updates it; the user reviews there (*PR feedback*).
 
 ```sh
 sh .claude/scripts/pr-body.sh <slug> draft > artifacts/<slug>/pr-draft.md
