@@ -9,7 +9,7 @@ description: PO-facing entrypoint — derive spec text from a requirement via di
 
 `.claude/AGENTS.workflow.md` is authority for gate 1 and the tracking issue — the headings in the table below, followed exactly. Conflict → `.claude/AGENTS.workflow.md` wins.
 
-Single-session, no resume: skip gate 1's **Board** bullet, its lane question (always the full-lane approval), and every "record … on the parent card" step — no `open/<slug>.md`, no task card. `spec-author` still needs a scratch `artifacts/<slug>/` (deleted once the ticket exists). The ticket is the only surviving artifact; approved spec text lives in its self-contained body (`## Spec (rev N)`), not `docs/specs/`.
+Single-session, no resume: skip gate 1's **Board** bullet, its lane question (always the full-lane approval), and every "record … on the parent card" step — no `open/<slug>.md`, no task card. `spec-author` still needs a scratch `artifacts/<slug>/` (deleted once the ticket exists). The ticket is the only surviving artifact; approved spec text lives in its self-contained body (`## Spec (rev N)`, one list item per entry), not `docs/specs/`. The parent-card fields `issue-body.sh` reads are absent here; its status line reads `Spec rev N` alone.
 
 ## Where each step lives
 
@@ -20,7 +20,7 @@ One section at a time: `sh .claude/scripts/extract-section.sh '<heading>' .claud
 | Orchestrator role — read once | `### Principles` |
 | Agent hand-off | `### Agent hand-off` |
 | Gate 1 — spec diff, dialogue only, no board | `### Gate 1 — spec diff. Stop for approval.` |
-| Tracking issue — runs right after gate 1 approval here (no plan); `spec-author` writes `issue.md`, user approves it, orchestrator files it | `### Tracking issue` |
+| Tracking issue — runs right after gate 1 approval here (no plan); `spec-author` writes `issue.md`, the orchestrator assembles the body with `issue-body.sh` (no plan decisions, no stage count), shows it, files it on approval | `### Tracking issue` |
 
 ## Stop condition
 

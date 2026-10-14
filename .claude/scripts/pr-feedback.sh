@@ -11,13 +11,17 @@
 #       pr=<n> state=<open|merged|closed|declined> draft=<true|false> threads=<count> file=<out-file>
 #     The orchestrator holds only that line; the implementer reads the file.
 #
-#   pr-feedback.sh reply <number> <file>
-#     For every thread in <file> whose `reply:` line is non-empty, posts that
-#     text as a reply on the thread and marks the thread resolved. Threads
-#     with an empty `reply:` line are left untouched. Prints
-#       pr=<n> replied=<count> skipped=<count>
+#   pr-feedback.sh reply <number> <file> [<stage> <sha>]
+#     For every thread in <file> whose `reply:` block is filled, posts it on
+#     the thread. `reply: fixed` posts "Fixed in <stage> (<sha>)" plus the
+#     block's bullets and resolves the thread — <stage> and <sha> (the pushed
+#     head) are required when any thread is `fixed`. `reply: declined` posts
+#     "Not changed — <first bullet>" plus the remaining bullets and leaves
+#     the thread open for the user. An empty `reply:` is left untouched. Prints
+#       pr=<n> fixed=<count> declined=<count> open=<count>
 #
-# File shape written by `fetch` (agents fill `reply:` only, never the rest):
+# File shape written by `fetch` (agents fill the `reply:` block only, never
+# the rest; bullets are two-space-indented `- ` lines directly under it):
 #
 #   # PR feedback — fetched 2026-01-02T14:02
 #   ## thread <thread-id>
@@ -27,11 +31,13 @@
 #   <comment body, verbatim>
 #   [bob @ 2026-01-02T13:55]
 #   <comment body, verbatim>
-#   reply:
+#   reply: fixed
+#     - `App::clone_name`: probe starts at N=2
+#     - test: `ut_clone_name_lowest_free_suffix`
 set -euo pipefail
 
 usage() {
-  echo "Usage: pr-feedback.sh fetch <number> <out-file> | reply <number> <file>" >&2
+  echo "Usage: pr-feedback.sh fetch <number> <out-file> | reply <number> <file> [<stage> <sha>]" >&2
   exit 1
 }
 
@@ -106,26 +112,50 @@ fetch_bitbucket() {
 }
 
 # ---------------------------------------------------------------- reply
-# Emits "thread-id<TAB>comment-id<TAB>reply text" per thread with a reply.
+# Emits "thread-id<TAB>comment-id<TAB>kind<TAB>bullets" per filled thread;
+# bullets are the block's `- ` lines without the marker, joined by \x1f.
 pending_replies() {
   awk '
-    /^## thread /  { tid=$3; cid="" }
+    function flush() { if (kind != "") print tid "\t" cid "\t" kind "\t" body; kind = "" }
+    /^## thread /  { flush(); tid=$3; cid=""; body="" }
     /^comment: /   { cid=$2 }
-    /^reply: ./    { sub(/^reply: */, ""); print tid "\t" cid "\t" $0 }
+    /^reply: (fixed|declined)$/ { kind=$2; inblock=1; next }
+    /^reply:/      { inblock=0 }
+    inblock && /^  - / { sub(/^  - /, ""); body = body (body == "" ? "" : "\037") $0; next }
+    inblock && !/^  - / { inblock=0 }
+    END { flush() }
   ' "$file"
 }
 
+# Builds the posted comment: first line by kind, then one `- ` line per bullet.
+reply_body() {
+  local kind="$1" bullets="$2" first rest
+  case "$kind" in
+    fixed)
+      printf 'Fixed in %s (%s)\n' "$stage" "$sha"
+      rest="$bullets" ;;
+    declined)
+      first="${bullets%%$'\037'*}"
+      printf 'Not changed — %s\n' "$first"
+      rest="${bullets#"$first"}"; rest="${rest#$'\037'}" ;;
+  esac
+  [ -n "$rest" ] && printf '%s\n' "$rest" | tr '\037' '\n' | sed 's/^/- /'
+  return 0
+}
+
 reply_github() {
-  local tid="$1" cid="$2" text="$3"
+  local tid="$1" cid="$2" kind="$3" text="$4"
   gh api "repos/{owner}/{repo}/pulls/$pr/comments/$cid/replies" -f body="$text" >/dev/null
+  [ "$kind" = fixed ] || return 0
   gh api graphql -F id="$tid" -f query='
     mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }' >/dev/null
 }
 
 reply_bitbucket() {
-  local tid="$1" cid="$2" text="$3"
+  local tid="$1" cid="$2" kind="$3" text="$4"
   jq -n --arg t "$text" --argjson p "$cid" '{content: {raw: $t}, parent: {id: $p}}' \
     | curl -sf -u "$user:$pass" -H 'Content-Type: application/json' -d @- "$api/comments" >/dev/null
+  [ "$kind" = fixed ] || return 0
   curl -sf -u "$user:$pass" -X POST "$api/comments/$cid/resolve" >/dev/null
 }
 
@@ -138,12 +168,16 @@ case "$mode" in
     ;;
   reply)
     [ -f "$file" ] || { echo "No such file: $file" >&2; exit 1; }
-    replied=0; skipped=$(grep -c '^## thread ' "$file" || true)
-    while IFS=$'\t' read -r tid cid text; do
+    stage="${4:-}"; sha="${5:-}"
+    if grep -q '^reply: fixed$' "$file" && { [ -z "$stage" ] || [ -z "$sha" ]; }; then
+      echo "reply: a 'reply: fixed' thread needs <stage> <sha> (the pushed head)" >&2; exit 1
+    fi
+    fixed=0; declined=0; total=$(grep -c '^## thread ' "$file" || true)
+    while IFS=$'\t' read -r tid cid kind bullets; do
       [ -n "$tid" ] || continue
-      "reply_$host" "$tid" "$cid" "$text"
-      replied=$((replied + 1))
+      "reply_$host" "$tid" "$cid" "$kind" "$(reply_body "$kind" "$bullets")"
+      case "$kind" in fixed) fixed=$((fixed + 1)) ;; declined) declined=$((declined + 1)) ;; esac
     done < <(pending_replies)
-    echo "pr=$pr replied=$replied skipped=$((skipped - replied))"
+    echo "pr=$pr fixed=$fixed declined=$declined open=$((total - fixed))"
     ;;
 esac

@@ -23,6 +23,8 @@ One section at a time: `sh .claude/scripts/extract-section.sh '<heading>' .claud
 | What runs before any approval stop | `### Verify before an approval stop` |
 | Card files, states, artifacts directory | `### Task board` |
 | Agent hand-off (status lines, file paths) | `### Agent hand-off` |
+| Approval prompt — the fixed shape of every stop, built from `show-file.sh`'s lines | `### Approval prompt` |
+| Relayed question — an agent's batch of decisions | `### Relayed question` |
 | Parent card | `### Gate 1 — spec diff. Stop for approval.` (the **Board:** bullet) |
 | Lane — fast or full, asked at the first approval stop | `### Lane — fast or full` |
 | Gate 1 — spec diff | `### Gate 1 — spec diff. Stop for approval.` |
@@ -33,5 +35,5 @@ One section at a time: `sh .claude/scripts/extract-section.sh '<heading>' .claud
 | Reconcile the spec | `### Reconcile the spec` |
 | Gate 3 — independent review | `### Gate 3 — review. Stop for approval.` |
 | Gate 4 — pull request | `### Gate 4 — pull request. Stop for approval.` |
-| Merge and clean up | `### Merge` |
+| After the human merges on GitHub — worktree and artifacts | `### After merge` |
 | Resume a dead run | `### Resume an interrupted run` |
