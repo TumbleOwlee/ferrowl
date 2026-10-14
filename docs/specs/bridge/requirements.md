@@ -2,6 +2,8 @@
 
 `ferrowl bridge`: a headless subcommand relaying Modbus requests between two independently configured interfaces — an **upstream** (server role) and a **downstream** (client role). No persistent register store, no TUI, no Lua/`C_*` module — a pure protocol relay.
 
+## Area boundaries
+
 Per [`../README.md`](../README.md)'s ownership rules, this area does **not** own: the Modbus wire protocol, register codec, or client/server behavior bridge reuses unchanged ([`../modbus/`](../modbus/)); the `--module`/`--ocpp` mini-language grammar or the headless `run` exit-code/log contract bridge mirrors ([`../cli-headless/`](../cli-headless/)).
 
 ---

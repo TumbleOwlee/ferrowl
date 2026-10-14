@@ -62,7 +62,7 @@
 
 ---
 
-## Known limitations and findings
+## Known limitations
 
 ### Execution ceiling — an infinite loop is interrupted mid-cycle
 

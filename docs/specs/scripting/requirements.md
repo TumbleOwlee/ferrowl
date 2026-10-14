@@ -4,7 +4,9 @@ Embedded Lua simulation model, per-context runtime and sandbox, `C_*` host API s
 
 See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contract.md) (exhaustive `C_*` API), [`edge-cases.md`](./edge-cases.md).
 
-**Area boundaries.** Lua API surface and semantics owned here. The in-TUI code editor (vim-modal editing, syntax highlighting, `:script` dialog) is `tui/`. The device/session file *envelope* carrying scripts is `config-session/`; the script-bearing fields (`scripts`, `script_interval`, session `interval`) are specified here because they control scripting behavior. `C_Test`'s Lua-side assertion semantics owned here; the `ferrowl run` **exit-code** contract keyed off logged assertion failures is `cli-headless/`.
+## Area boundaries
+
+Lua API surface and semantics owned here. The in-TUI code editor (vim-modal editing, syntax highlighting, `:script` dialog) is `tui/`. The device/session file *envelope* carrying scripts is `config-session/`; the script-bearing fields (`scripts`, `script_interval`, session `interval`) are specified here because they control scripting behavior. `C_Test`'s Lua-side assertion semantics owned here; the `ferrowl run` **exit-code** contract keyed off logged assertion failures is `cli-headless/`.
 
 ---
 

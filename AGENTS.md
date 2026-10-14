@@ -95,7 +95,7 @@ Dev loop: `cargo run --release -- --demo` (built-in demo tabs, no config) or `ca
 ## Conventions — text
 
 - **No hard line wrap on anything posted externally** — issue bodies, PR bodies, PR/review comments. GitHub soft-wraps; an inserted `\n` mid-sentence renders as a real line break. Paragraphs as single lines; only headings, list items, code blocks get their own line.
-- **One fact per line in every text a human reads** — approval prompts, agent summaries, issue and PR bodies: a list item or sub-item, never a `;`- or ` — `-joined sentence. Sole exception: a normative spec entry is one physical line.
+- **One fact per line in every text a human reads** — approval prompts, agent summaries, issue and PR bodies: a list item or sub-item, never a `;`- or ` — `-joined sentence.
 - **Spec text never wrapped** — `docs/specs/` and any `spec-diff.md`: one requirement, one physical line, however long, so `grep -rn <ID or keyword> docs/specs/` returns the whole entry and `sh .claude/scripts/extract-id.sh <ID> [<ID> ...]` (batch IDs into one call) points at one line. **Commit messages are the exception: wrap** — subject ≤ 72 columns, body at 72. `git log` never soft-wraps.
 - **No attribution trailer** — never `Co-Authored-By`, "Generated with", or any tool attribution on a commit, PR body, issue, or comment: pure `git log` noise, forever. `hook-guard-attribution.sh` denies it anyway.
 

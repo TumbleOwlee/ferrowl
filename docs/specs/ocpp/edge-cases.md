@@ -148,7 +148,7 @@
 
 ---
 
-## Known limitations — intentional constraints
+## Known limitations
 
 ### CS reconnect resets on handshake, not on message exchange
 

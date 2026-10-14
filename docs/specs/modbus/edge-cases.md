@@ -135,7 +135,7 @@
 
 ---
 
-## Known limitations — intentional constraints
+## Known limitations
 
 ### No max-registers-per-request bound at the protocol layer
 

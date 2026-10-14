@@ -81,7 +81,7 @@ Rejected/edited items: adjust, re-confirm before writing.
 
 New area approved: write from `templates/area/*.tmpl` as step 0a item 5 (substitute placeholders, only the files needed), append a routing row shaped as in step 0a item 6(a). Then append approved entries to each `requirements.md`, shaped per step 0a item 6(b).
 
-Report what was written (files, IDs, new area/scaffold). Stop — no commit, issue, PR. User reviews and commits.
+Report what was written (files, IDs, new area/scaffold). Stop; the user reviews and commits.
 
 ## 7. Ask about the other direction
 

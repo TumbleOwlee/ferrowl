@@ -348,6 +348,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 ## Simulated Charging Station behavior
 
+### State and automatic sending
+
 **OC-R-057** — A CS module maintains charge-point-wide state (model, vendor, firmware version, serial number, configuration/variable key store, CSMS-supplied heartbeat cadence, charge-point-level reservation) and a list of connector states, multiplexed over the single WebSocket.
 
 **OC-R-058** — Each connector carries its own metering, status, transaction, per-purpose charging limits, RFID tag, reservation.
@@ -359,6 +361,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **OC-R-061** — While connected, the CS sends MeterValues automatically about every 5 s per connector with a live transaction; none when no transaction is live.
 
 **OC-R-062** — Losing the connection halts all automatic transmission and resets the heartbeat cadence counter.
+
+### Inbound Call handling
 
 **OC-R-063** — An inbound Call carrying a top-level connector/EVSE id the station lacks → CallError `PropertyConstraintViolation`. Id `0` and an absent id are always valid (the charge point itself).
 
@@ -373,6 +377,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **OC-R-068** — Clearing charging profiles erases only the per-purpose limit matching the request's purpose criterion, or every per-purpose limit when none is given. Unrecognized purpose clears nothing.
 
 **OC-R-069** — A reservation is recorded at the level the request targets (charge point or connector) and cleared by a cancellation carrying the same reservation id, at whichever level holds it.
+
+### Transactions
 
 **OC-R-070** — A remotely started transaction mints a local transaction id, puts the targeted connector (absent an explicit target, the first) into a charging state, and transmits the transaction-start message (`StartTransaction` for 1.6, `TransactionEvent` with `eventType=Started` for 2.0.1/2.1) through the same send path the RFID/operator flow uses, so the CSMS learns the id via the normal wire message.
 

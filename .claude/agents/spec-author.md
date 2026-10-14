@@ -24,7 +24,7 @@ status=no-diff file=artifacts/<slug>/spec-diff.md count=0      # spec already co
 status=reuse issue=<number> file=artifacts/<slug>/issue.md  |  status=new file=artifacts/<slug>/issue.md
 ```
 
-## Questions — `question.md`
+## Questions
 
 Look up facts yourself; ask only decisions (scope, defaults, naming, in/out). Collect every decision you can state without knowing another's answer into one file; a decision that depends on an answer waits for the next file. Rewritten whole each time. One block per decision:
 
@@ -96,7 +96,7 @@ Reuse: the orchestrator stores the original body as `artifacts/<slug>/request.md
 
 ## Revisions — `spec-diff.md`, `issue-comment.md`
 
-Resumed with a `spec-gap` reason: revise `spec-diff.md` in place (rev N+1, `Revisions:` gains one line), write `revision.md` — line 1 `# <slug> — spec revision <N>`, the new `Revisions:` line, then every `## <ID>` section this revision added, changed or dropped, copied verbatim from `spec-diff.md`, nothing untouched — classify the revision, answer `status=ready class=…`. `revision.md` is the record for the reviewer and the changelog; the user decided in the question batch and sees neither file again.
+Resumed with a `spec-gap` reason: revise `spec-diff.md` in place (rev N+1), write `revision.md` — line 1 `# <slug> — spec revision <N>`, the new `Revisions:` line, then every `## <ID>` section this revision added, changed or dropped, copied verbatim from `spec-diff.md`, nothing untouched — classify the revision, answer `status=ready class=…`. `revision.md` is the record for the reviewer and the changelog; the user decided in the question batch and sees neither file again.
 
 - `editorial` — no normative meaning changes: wording, a cross-reference, a violated ID added to or dropped from a `no-diff`, an entry moved.
 - `normative` — an entry added, changed or dropped that the goal needs. Ask first (`question.md`): the entry's current text under `Entry:`, option a) the proposed text in full, b) the alternative; the answer is the approval.

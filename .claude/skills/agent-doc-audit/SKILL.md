@@ -56,8 +56,6 @@ Three tables, most costly first (`token-rank.sh` order where available):
 
 **Duplicates** — the rule in a few words, every file:heading holding a copy, which copy to keep and why (that reader already loads it).
 
-One line each, no praise, no summary. A proposed split under ~10 lines: say so, recommend a heading instead — `extract-section.sh` already pulls it cheaply.
-
-Report only improvements found. Empty table → "none" — never a reason, never "already good".
+One line each, no praise, no summary; an empty table is "none". A proposed split under ~10 lines: say so, recommend a heading instead — `extract-section.sh` already pulls it cheaply.
 
 If the user approves a split, make the new file's headings match exactly what the citing instructions name (or update those instructions in the same change).

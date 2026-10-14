@@ -374,6 +374,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 ## TLS setup dialog
 
+### Shared dialog behavior
+
 **MB-R-135** — The Modbus TCP setup dialog (`Tcp`, `RtuOverTcp` per MB-R-115, `AsciiOverTcp` per MB-R-127) resolves its transport config to the variant its toggles select, contributing only that variant's fields: Self-Signed On → identity `CertSource::SelfSigned`, no cert/key paths; Skip-Verify On → verification `CertVerification::Skip`, no Root Store selection and no CA entry.
 
 **MB-R-186** — The Modbus TCP setup dialog leaves hidden widgets' stored state (input text, toggle position, list entries) unmodified when resolving per MB-R-135, so toggling back Off restores what was entered.
@@ -382,17 +384,19 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **MB-R-187** — An add-entry confirm on the shared CA list widget (MB-R-136) is rejected (sub-dialog stays open with an inline error, nothing appended) unless the path is non-empty, exists on disk at the base directory NF-R-073 names, is not a directory, and has extension `pem`/`crt`/`key` (case-insensitive).
 
+### Server-role dialog
+
 **MB-R-188** — Server role of the Modbus TCP setup dialog: mTLS with a non-empty client-CA list (MB-R-136) and Skip Verify Off → `ServerTlsPolicy::Mutual` with `CertVerification::CaFiles` holding exactly those files; an empty list there is a validation error (mirroring MB-R-108), never a silent fallback to `Tls`.
 
 **MB-R-189** — The Modbus TCP setup dialog also offers a server-role Skip Verify toggle, shown whenever mTLS is selected: On hides the client-CA list (MB-R-136) and resolves verification to `CertVerification::Skip` regardless of entries, per MB-R-186's hidden-field pattern.
+
+### Client-role dialog
 
 **MB-R-156** — The Modbus TCP setup dialog's client role offers, whenever Skip Verify is Off, a Root Store toggle (default On) plus the shared CA list widget (MB-R-136) holding zero or more server-CA paths, replacing the single `ca_file` input. Root Store On → `CertVerification::RootStore` with the list as `extra_ca_files`, empty or not; Off → `CertVerification::CaFiles` with the list as `ca_files`.
 
 **MB-R-202** — Root Store Off with an empty CA list in the Modbus TCP setup dialog's client role (MB-R-156) is a validation error refusing to close the dialog (mirroring MB-R-188), since a verification naming no trust anchor rejects every server certificate.
 
 **MB-R-203** — Skip Verify On hides both the Root Store toggle and the CA list of the Modbus TCP setup dialog's client role (MB-R-156) per MB-R-135.
-
-**MB-R-138** — Under `ClientTlsPolicy::Mutual` with `identity: CertSource::SelfSigned`, a client presents an ephemeral self-signed certificate/key pair as its mTLS identity, generated and cached per MB-R-169/MB-R-170 (once per module instance, reused across reconnects/restarts/config edits, regenerated only on a transition into self-signed), never written to disk.
 
 **MB-R-139** — The dialog offers a client-role Self Signed toggle, shown whenever mTLS is selected.
 
@@ -525,6 +529,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **MB-R-175** — A client's presented TLS identity (MB-R-110) follows its `identity`: `CertSource::Files` presents the PEM pair at `cert_file`/`key_file`; `CertSource::SelfSigned` presents MB-R-138's cached ephemeral pair.
 
 **MB-R-176** — `CertSource::Ephemeral` is rejected at construction as a client identity (MB-R-110).
+
+**MB-R-138** — Under `ClientTlsPolicy::Mutual` with `identity: CertSource::SelfSigned`, a client presents an ephemeral self-signed certificate/key pair as its mTLS identity, generated and cached per MB-R-169/MB-R-170 (once per module instance, reused across reconnects/restarts/config edits, regenerated only on a transition into self-signed), never written to disk.
 
 ### TLS handshake and build failures
 

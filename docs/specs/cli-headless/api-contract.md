@@ -2,6 +2,8 @@
 
 Exhaustive command-line surface a CI script or operator writes against: every flag and subcommand, the `--module`/`--ocpp` descriptor mini-language, the exit-code table. Stable public contract.
 
+## Area boundaries
+
 `migrate` transformation semantics and the config/session file formats: [`../config-session/`](../config-session/). This file: flag surface and dispatch only.
 
 ---

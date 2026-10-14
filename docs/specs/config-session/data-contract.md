@@ -2,6 +2,8 @@
 
 The **envelope schema**: top-level shape of a session file and a device-config file, envelope-level fields, `version`, how a session instance references a device config, TOML/JSON encoding rules.
 
+## Area boundaries
+
 Protocol-specific field blocks are not listed here: Modbus module-spec endpoint and device-config fields → [`../modbus/api-contract.md`](../modbus/api-contract.md) ``## Module instance spec (session / `--module`)``, ``## Device config (one file = one device type)``; OCPP module-spec endpoint and device-config (version, role, timeout, security, config-keys) → [`../ocpp/api-contract.md`](../ocpp/api-contract.md) `## Endpoint enums`, ``## Device config (one file = one device type)``, ``## Security config (`security`)``.
 
 ---

@@ -27,8 +27,8 @@ Headings of `.claude/AGENTS.workflow.md`, one pull each (`AGENTS.md` `## Convent
 | Approval prompt — the fixed shape of every stop, built from `show-file.sh`'s lines | `### Approval prompt` |
 | Relayed question — an agent's batch of decisions | `### Relayed question` |
 | Lane — fast or full, asked at the first approval stop | `### Lane — fast or full` |
-| Gate 1 — spec diff | `### Gate 1 — spec diff. Stop for approval.` |
-| Gate 2 — plan and tracking issue | `### Gate 2 — plan and tracking issue. Stop for approval.` |
+| Gate 1 — spec diff | `### Gate 1 — spec diff` |
+| Gate 2 — plan and tracking issue | `### Gate 2 — plan and tracking issue` |
 | Tracking issue — draft, file, rewrite on every spec revision | `### Tracking issue` |
 | Implement — every lane: spawn brief, draft PR | `#### Every stage` |
 | Implement — fast lane | `#### Fast lane` |
@@ -36,7 +36,7 @@ Headings of `.claude/AGENTS.workflow.md`, one pull each (`AGENTS.md` `## Convent
 | Implement — full lane, parallel mode | `#### Parallel waves`, `#### Stage stop` |
 | PR feedback — draft PR comments back into the run, before every approval stop once the draft exists | `### PR feedback` |
 | Reconcile the spec | `### Reconcile the spec` |
-| Gate 3 — independent review | `### Gate 3 — review. Stop for approval.` |
-| Gate 4 — pull request | `### Gate 4 — pull request. Stop for approval.` |
+| Gate 3 — independent review | `### Gate 3 — review` |
+| Gate 4 — pull request | `### Gate 4 — pull request` |
 | After the human merges on GitHub — worktree and artifacts | `### After merge` |
 | Resume a dead run | `### Resume an interrupted run` |
