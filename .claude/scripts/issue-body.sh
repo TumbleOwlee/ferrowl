@@ -7,13 +7,22 @@
 # Line 1 is `# <title>` (the orchestrator strips it for --title). Sources:
 #   issue.md        title, ## Goal
 #   parent card     spec rev, lane, pr, split (frontmatter) — the status line
-#   spec-diff.md    ## Spec: one list item per `## <ID>` section, its
-#                   `Change:` and `- decided` lines as sub-items, the
-#                   `## Other spec changes` items appended
-#   plan.md         ## Shared `Decisions:` → ## Plan decisions
-#   plan.summary.md stage count
+#   spec-diff.md    ## Spec (rev N): `### Requirements`, one table row per
+#                   `## <ID>` section (kind + `Change:` in the Kind cell);
+#                   `### Other spec changes`, one table row per
+#                   `- <file> › <section> › <change>` item;
+#                   ## Decisions, one item per dated `Revisions:` line
+#                   (`- rev N (YYYY-MM-DD) — a; b (who)`): `- <date>, <who>`
+#                   with `a`, `b` as sub-items. Only a revision made after
+#                   filing carries a date, so the section is absent when the
+#                   filed spec never changed; the `- decided` lines are the
+#                   drafting history and stay in spec-diff.md
 #   request.md      the reused issue's original body, collapsed (if present)
+# The plan is deliberately absent: the issue states the requirement, the PR
+# the implementation.
 # A run without spec-diff.md (non-behavior change) states "no spec change".
+# The heading `## Spec (rev N)` and the `<details>` block are parsed by
+# issue-request.sh and the Resume table — keep them when changing the shape.
 [ $# -eq 1 ] || { echo "usage: $0 <slug>" >&2; exit 2; }
 slug=$1
 root=${CLAUDE_PROJECT_DIR:-.}
@@ -27,16 +36,13 @@ echo
 # --- status line
 rev=; nvio=0
 [ -f "$a/spec-diff.md" ] && { rev=$(sed -n '1s/.*(rev \([0-9]*\)).*/\1/p' "$a/spec-diff.md"); nvio=$(grep -c '^## [A-Z][A-Z]-[RE]-[0-9]* — violated' "$a/spec-diff.md"); }
-lane=$(field lane); pr=$(field pr); split=$(field split); stages=
-[ -f "$a/plan.summary.md" ] && stages=$(grep -c '^| s[0-9]' "$a/plan.summary.md")
-line=
-if [ -z "$rev" ]; then line="No spec change"
-elif [ "$nvio" -gt 0 ]; then line="No spec change — $nvio entries violated (rev $rev)"
-else line="Spec rev $rev"; fi
-[ -n "$lane" ] && line="$line · lane $lane"
-[ -n "$stages" ] && [ "$stages" -gt 0 ] && line="$line · $stages stages"
-[ -n "$pr" ] && line="$line · PR #$pr"
-[ -n "$split" ] && line="$line · split off: $(printf '%s' "$split" | tr -d '[] ' | sed 's/\([0-9][0-9]*\)/#\1/g; s/,/, /g')"
+lane=$(field lane); pr=$(field pr); split=$(field split)
+if [ -z "$rev" ]; then line="**Spec** none"
+elif [ "$nvio" -gt 0 ]; then line="**Spec** none · **Violated** $nvio entries (rev $rev)"
+else line="**Spec** rev $rev"; fi
+[ -n "$lane" ] && line="$line · **Lane** $lane"
+[ -n "$pr" ] && line="$line · **PR** #$pr"
+[ -n "$split" ] && line="$line · **Split off** $(printf '%s' "$split" | tr -d '[] ' | sed 's/\([0-9][0-9]*\)/#\1/g; s/,/, /g')"
 printf '%s\n\n' "$line"
 
 # --- goal
@@ -44,33 +50,49 @@ sed -n '/^## Goal$/,/^## /{ /^## /d; p; }' "$a/issue.md" | sed '/^$/d' | { echo 
 
 # --- spec
 if [ -f "$a/spec-diff.md" ]; then
-    area=$(sed -n 's/^Area: \([^ ]*\).*/\1/p' "$a/spec-diff.md" | head -1)
-    printf '## Spec (rev %s)%s\n' "$rev" "${area:+ — $area}"
-    [ "$nvio" -gt 0 ] && echo "No spec change: the code violates the entries below."
+    printf '## Spec (rev %s)\n\n' "$rev"
+    [ "$nvio" -gt 0 ] && printf 'No spec change: the code violates the entries below.\n\n'
     awk '
-        BEGIN { first = 1 }
-        /^## Summary$/ { sec = "summary"; next }
-        /^## Other spec changes$/ { sec = "other"; next }
+        function cell(s) { gsub(/\|/, "\\|", s); gsub(/^[ \t]+|[ \t]+$/, "", s); return s == "" ? "—" : s }
+        function flush() {
+            if (id == "") return
+            if (text == "" && why != "") text = why
+            reqs = reqs "| " id " | " cell(kind) " | " cell(text) " |\n"
+            id = ""
+        }
+        function revision(line,    date, who, body, k, i) {
+            if (!match(line, /^- rev [0-9]+ \([0-9-]+\) — /)) return
+            date = line; sub(/^- rev [0-9]+ \(/, "", date); sub(/\).*/, "", date)
+            body = substr(line, RLENGTH + 1); who = "agent"
+            if (match(body, / \([a-z-]+\)$/)) { who = substr(body, RSTART + 2, RLENGTH - 3); body = substr(body, 1, RSTART - 1) }
+            revs = revs "- " date ", " who "\n"
+            k = split(body, item, /; /)
+            for (i = 1; i <= k; i++) revs = revs "  - " item[i] "\n"
+        }
+        /^## Summary$/ { flush(); sec = "summary"; next }
+        /^## Other spec changes$/ { flush(); sec = "other"; next }
         /^## / {
-            sec = "entry"; pending = ""
-            id = $2; kind = ""
+            flush(); sec = "entry"
+            id = $2; kind = "new"; text = ""; why = ""
             if (match($0, / — [a-z]+/)) kind = substr($0, RSTART + 3, RLENGTH - 3)
-            label = "- **" id "**" (kind == "new" ? "" : " " kind) " — "
             next
         }
-        sec == "entry" && /^Change: / { pending = "  - change: " substr($0, 9); next }
-        sec == "entry" && /^- / { if (label != "") { sub(/ — $/, "", label); print label; label = "" } print "  " $0; next }
-        sec == "entry" && /^[^ ]/ { print label $0; label = ""; if (pending != "") { print pending; pending = "" } next }
-        sec == "summary" && /^- decided/ { print; next }
-        sec == "other" && /^- / { print; next }
+        sec == "entry" && /^Change: / { kind = kind " · " substr($0, 9); next }
+        sec == "entry" && /^- / { why = why (why == "" ? "" : "<br>") substr($0, 3); next }
+        sec == "entry" && /^[^ ]/ { text = text (text == "" ? "" : "<br>") $0; next }
+        sec == "summary" && /^- rev / { revision($0); next }
+        sec == "other" && /^- / {
+            line = substr($0, 3); k = split(line, f, / › /)
+            others = others "| " cell(f[1]) " | " cell(k > 2 ? f[2] : "") " | " cell(k > 2 ? f[3] : f[k]) " |\n"
+            next
+        }
+        END {
+            flush()
+            if (reqs != "") printf "### Requirements\n| ID | Kind | Requirement |\n|---|---|---|\n%s\n", reqs
+            if (others != "") printf "### Other spec changes\n| File | Section | Change |\n|---|---|---|\n%s\n", others
+            if (revs != "") printf "## Decisions\n%s\n", revs
+        }
     ' "$a/spec-diff.md"
-    echo
-fi
-
-# --- plan decisions
-if [ -f "$a/plan.md" ]; then
-    dec=$(sh "$root/.claude/scripts/extract-section.sh" '## Shared' "$a/plan.md" 2>/dev/null | awk '/^Decisions:/ { on = 1; next } on && /^- / { print; next } on && !/^- / && !/^$/ { on = 0 }')
-    [ -n "$dec" ] && { echo "## Plan decisions"; printf '%s\n\n' "$dec"; }
 fi
 
 # --- original request
