@@ -48,6 +48,7 @@ Forwarded to the active view; **semantics owned by the protocol area**. Each vie
 | `:write-device` / `:wd` `[path]` | optional path (default: configured device path) | Save the device config file | UI-R-018 |
 | `:log <file>` | file base path | Set the module's log-file sink base | UI-R-018 |
 | `:script` | — | Open the Lua script manager dialog | UI-R-018 |
+| `:module` | — | Open the module settings dialog (read ranges) | UI-R-018, MB-R-288 |
 | `:order [col] [asc\|desc]` | optional column, optional direction (default `asc`) | Sort the register table by column; bare `:order` clears | UI-R-018 |
 
 Modbus monitor module (`role = monitor`, MB-R-140–145, MB-R-191–198):
@@ -65,7 +66,7 @@ Modbus monitor module (`role = monitor`, MB-R-140–145, MB-R-191–198):
 | `:log <file>` | file base path | Set the module's log-file sink base | UI-R-018 |
 | `:order [col] [asc\|desc]` | optional column, optional direction (default `asc`) | Sort the resolved-registers table; bare `:order` clears | UI-R-018 |
 
-`:set` (nothing to write) and `:script` (no Lua surface) are omitted for this role — unrecognized commands on a monitor view, not errors.
+`:set` (nothing to write), `:script` (no Lua surface) and `:module` (no `read_ranges`, MB-R-290) are omitted for this role — unrecognized commands on a monitor view, not errors.
 
 ### OCPP client module
 

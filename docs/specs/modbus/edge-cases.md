@@ -135,6 +135,14 @@
 
 ---
 
+## Module settings dialog
+
+| ID | Condition | Behavior |
+|---|---|---|
+| **MB-E-105** | Gap cells declared for a read range that a later module settings dialog confirm removes (MB-R-296) | stay declared in the store, so a read spanning them still succeeds |
+
+---
+
 ## Known limitations
 
 ### No max-registers-per-request bound at the protocol layer

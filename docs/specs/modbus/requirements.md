@@ -696,6 +696,38 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 ---
 
+## Module settings dialog
+
+**MB-R-288** — `:module` on a Modbus client or server tab opens the module settings dialog, holding one single-line text input per `read_ranges` field: `holding`, `input`, `coils`, `discrete`.
+
+**MB-R-289** — Each input of the module settings dialog (MB-R-288) opens prefilled with the tab's current `read_ranges` value for its field, empty where that field is unset.
+
+**MB-R-290** — A Modbus monitor tab does not handle `:module`, so the application logs the unknown-command warning of UI-R-348.
+
+**MB-R-291** — A module settings dialog input (MB-R-288) whose text holds a malformed or reversed range entry paints the error border (UI-R-068) while that text stands.
+
+**MB-R-292** — `Enter` in the module settings dialog is refused while any input fails MB-R-291's check: the dialog stays open and the tab's `read_ranges` are unchanged.
+
+**MB-R-293** — Confirming a module settings dialog whose inputs all parse sets the tab's in-memory device-config `read_ranges` to the inputs' text, an empty input leaving its field unset.
+
+**MB-R-294** — `Esc` in the module settings dialog closes it whether or not an input fails MB-R-291's check, leaving the tab's `read_ranges` unchanged.
+
+**MB-R-295** — A running client polls with the `read_ranges` confirmed through the module settings dialog (MB-R-293, MB-R-083) from its next poll cycle on, without reconnecting.
+
+**MB-R-296** — Confirming the module settings dialog (MB-R-293) declares the gap cells of the confirmed `read_ranges` (MB-R-084) in the tab's store, a rejected declaration logged per MB-R-129.
+
+**MB-R-297** — Confirming the module settings dialog (MB-R-293) writes no file; `:write-device` saves the confirmed `read_ranges` into the device config.
+
+**MB-R-298** — The Modbus setup dialog, opened by the new-module flow, `:load`, `:edit` or `:clone`, carries no read-range input.
+
+**MB-R-299** — A tab created by confirming a Modbus setup dialog that names a device-config path takes that file's `read_ranges`.
+
+**MB-R-300** — Confirming `:edit`'s Modbus setup dialog leaves the tab's `read_ranges` unchanged.
+
+**MB-R-301** — A refused `Enter` (MB-R-292) shows the dialog's error message box naming the first failing input's field and its malformed entry, as the add/edit register dialog shows its inline error (MB-R-224).
+
+---
+
 ## Format display text
 
 **MB-R-154** — A format's display text is its name followed by a parenthesized qualifier: numeric → byte order (`Big Endian` or `Little Endian`); `Ascii` → alignment (`Left` or `Right`).
