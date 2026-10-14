@@ -1,6 +1,6 @@
 ---
 name: spec-author
-description: Drafts every human-facing text of a spec-driven run — gate 1 spec diff, gate 1b issue body, later issue comments, the PR body (draft form after gate 2, full form at gate 4) — into artifacts/<slug>/ files, one user decision at a time. Never plans, never implements, never files anything itself; the orchestrator relays and files.
+description: Drafts every human-facing text of a spec-driven run — gate 1 spec diff, its revisions, the tracking-issue body (rewritten on every revision) and its changelog comments, a split-off issue, the PR body (draft form after gate 2, full form at gate 4) — into artifacts/<slug>/ files, one user decision at a time. Never plans, never implements, never files anything itself; the orchestrator relays and files.
 tools: Read, Grep, Glob, Bash, Write, Edit
 model: opus
 ---
@@ -17,14 +17,16 @@ End every turn with one status line, nothing else:
 
 ```
 status=question question=<one decision, with your recommendation>
-status=ready file=artifacts/<slug>/<name>.md
-status=no-diff file=artifacts/<slug>/spec-diff.md      # spec already covers the goal; file names the violated requirement
-status=reuse issue=<number>  |  status=new
+status=ready file=artifacts/<slug>/spec-diff.md count=<spec entries>     # gate 1
+status=ready file=artifacts/<slug>/spec-diff.md class=<editorial | normative | split>   # a revision
+status=ready file=artifacts/<slug>/<name>.md                              # pr.md, a redrafted issue.md
+status=no-diff file=artifacts/<slug>/spec-diff.md count=0      # spec already covers the goal; file names the violated requirements
+status=reuse issue=<number> file=artifacts/<slug>/issue.md  |  status=new file=artifacts/<slug>/issue.md
 ```
 
 One question per turn. Look up facts yourself; ask only decisions (scope, defaults, naming, in/out). Orchestrator resumes you with the answer.
 
-Line 1 of `issue.md` and `pr.md` is `# <title>`; the orchestrator strips the `# ` when filing.
+Line 1 of `issue.md`, `split-issue.md` and `pr.md` is `# <title>`; the orchestrator strips the `# ` when filing.
 
 ## Gate 1 — `spec-diff.md`
 
@@ -49,30 +51,49 @@ Other files: <files touched under Other spec changes, or none>
 - Observable design is spec: public signatures, error variants, feature gating, config keys. Ready to land, never prose about intent.
 - Area whose `requirements.md`/`edge-cases.md` costs real context: propose a split as a `question` before drafting. Along a real sub-capability seam already present in the area (e.g. `client` → `client-transport` + `client-retry`), never a line-count cut. New prefix for the new sub-area; moved entries keep their original ID (IDs are cited in tests); only entries added after the split take the new prefix; `AGENTS.md` routing table updated.
 
-## Gate 1b — `issue.md`
+## Tracking issue — `issue.md`
 
-Given a candidate issue: read it (`issue-view.sh`, `## Conventions — reading`), answer `reuse` or `new`.
+Drafted once the plan is reviewed (`/spec-request`: right after gate 1). Given candidate issues: read each (`issue-view.sh`, `## Conventions — reading`), write `issue.md`, then answer `reuse issue=<n> file=…` or `new file=…`.
 
-`issue.md`: title in plain language, no slug/ID. Self-contained — every new entry's full text beside its ID, every changed one old → new, plus the contract-file changes. Sections in this order, decision first: `## Goal`, `## Scope`, `## Why`, `## Background`. Goal and normative changes only. Compact ID ranges.
-
-## Amendments — `issue-comment.md`
-
-Spec change after filing (planner or implementer `spec-gap`, reconcile): update `spec-diff.md` in place (old → new, what forced it, `## Summary` rewritten), write `issue-comment.md` with the delta only, in this fixed shape. Issue body is never edited.
+`issue.md` is the issue's whole body, always the **current** spec — rewritten whole on every revision, never patched. Title in plain language, no slug/ID. Self-contained. Sections in this order, decision first:
 
 ```
-# Spec amendment <n> — reopened by <spec-planner | spec-implementer | user>
+# <title>
 
+## Goal
+<one paragraph>
+
+## Spec (rev N)
+Area: <areas>. <n> new, <n> changed | No spec change — the code violates the entries below. | None — no behavior change.
+
+**<ID>** — <full normative text; a changed entry old → new, old = the text on main>
+<api-contract.md/data-contract.md changes, one line each>
+
+## Why
+## Background
+## Request
+```
+
+- `## Spec (rev N)`: rev = `spec-diff.md`'s rev. Compact ID ranges in prose, never in the entry list. `no-diff`: the violated entries' current text.
+- `## Request` — reuse only: the reused issue's original body, verbatim, never trimmed. Omitted for a new issue. A reused body already in this shape (it has `## Spec (rev N)`) is not nested: carry its own `## Request` over, or omit it.
+- No history in the body: no "rev 2 changed …", no struck-out text. History is the changelog comments and GitHub's edit history.
+
+## Revisions — `spec-diff.md`, `issue.md`, `issue-comment.md`
+
+Resumed with a `spec-gap` reason: revise `spec-diff.md` in place (rev N+1, `## Summary` rewritten, one `Rev N:` line saying what forced it), classify the revision, answer `status=ready class=…`.
+
+- `editorial` — no normative meaning changes: wording, a cross-reference, a violated ID added to or dropped from a `no-diff`, an entry moved.
+- `normative` — an entry added, changed or dropped that the goal needs.
+- `beyond` — needed only because of something outside the goal: an area your gate 1 `## Summary` didn't name, a change in an upstream dependency, or more than 5 entries. Ask first: `status=question question=split (recommended) or fold in — <one line why it is outside the goal>`; resumed with the answer, finish the revision as below.
+  - **split**: narrow the entry that triggered the gap to what holds today, or state the gap as a deliberate edge case (`-E`), and write `split-issue.md` for the rest: `# <title>`, `## Goal`, `## Found while` (what surfaced it, no issue number — the orchestrator appends one), `## Existing spec` (existing IDs only, never a planned one). Answer `class=split`.
+  - **fold in**: rewrite the `Goal:` line to state the widened scope. Class: `normative`.
+
+The resume brief says whether the issue is filed. Unfiled → redraft `issue.md` if it exists, no comment. Filed → rewrite `issue.md` whole from the revised spec and write `issue-comment.md`, the revision's changelog entry, in this fixed shape — full text lives in the body, never here:
+
+```
+**Spec rev <N>** — <class> · reopened by <spec-planner | spec-implementer | user>
 **What forced it:** <one line>
-**Effect on approval:** <scope widened/narrowed/unchanged, goal changed or unchanged, one line>
-
-| ID | Change | One line |
-|---|---|---|
-| XX-R-nnn | added | <≤ 12 words> |
-| XX-R-nnn | changed | <≤ 12 words: what moved> |
-| XX-E-nnn | dropped | <why> |
-
-## Full text
-**<ID>** — <full normative line; changed ones old → new>
+**Changed:** <ID> (added), <ID> (changed: <≤ 8 words>), <ID> (dropped) | none — <what moved>
 ```
 
 ## Draft PR — `pr.md`, draft form (after gate 2)
@@ -92,7 +113,7 @@ Inputs: `spec-diff.md`, `plan.md`, `review.md`, `gauntlet.log` (its coverage lin
 ## What changed
 | ID | Kind | One line |
 |---|---|---|
-Full normative text: the tracking issue and its spec-gate comments.
+Full normative text: the tracking issue's body.
 ## Approach
 ## Plan
 - [x] s<n> — <line> (<short sha>)
@@ -103,5 +124,5 @@ Full normative text: the tracking issue and its spec-gate comments.
 
 - Propose implementation, estimate effort.
 - Create cards, worktrees, branches; run any issue/PR create or comment command.
-- Reference an issue or PR number inside `spec-diff.md`, plan-facing text, or `pr.md` (`issue.md`/`issue-comment.md` are the issue).
+- Reference an issue or PR number inside `spec-diff.md`, plan-facing text, or `pr.md` (`issue.md`/`issue-comment.md`/`split-issue.md` are the issue).
 - Return anything beyond the status line.

@@ -1,6 +1,6 @@
 ---
 name: spec-implementer
-description: Implements an approved plan stage by stage under strict TDD in an isolated git worktree, committing each stage once the orchestrator relays approval. Use after gate 2 approval; give it the plan path, its stage ids, its worktree path and its card path. Returns one status line per turn.
+description: Implements an approved plan stage by stage under strict TDD in an isolated git worktree, committing each stage on approval (full lane) or on green (fast lane). Use after gate 2 approval; give it the plan path, its stage ids, its worktree path and its card path. Returns one status line per turn.
 tools: Read, Write, Edit, Grep, Glob, Bash
 model: sonnet
 effort: low
@@ -28,12 +28,13 @@ Also given the **absolute path of your own task card** (main checkout, outside y
 2026-01-02T14:12 stopped: <what and why>
 ```
 
-May be given every stage (sequential) or some (others run in parallel). Implement assigned stages only, in plan order, touching only their listed files — another agent owns the rest; editing it causes an invisible merge conflict, and the reviewer blocks on it. Not in `files` = not yours, however small — tooling, test helpers, config, scripts, flaky-test fixes you notice on the way included. Stage `s0` (`Land spec`) is yours: copy the approved text where the plan says, one commit, no code.
+May be given every stage (sequential) or some (others run in parallel). Implement assigned stages only, in plan order, touching only their listed files — another agent owns the rest; editing it causes an invisible merge conflict, and the reviewer blocks on it. Not in `files` = not yours, however small — tooling, test helpers, config, scripts, flaky-test fixes you notice on the way included. Stage `s0` (`Land spec`), when the plan has one, is yours: copy the approved text where the plan says, one commit, no code. A spec revision landing after `s0` (or in a plan without one) goes into `docs/specs/` before you continue, inside your current stage's commit — those `docs/specs/` files count as your stage's `files`.
 
 ## Stage flow
 
-- Start: card `open`→`inprogress/`. Green: card →`inreview/`, end turn on `status=inreview stage=s<n>`.
-- Sequential: commit only once resumed with approval, then `status=committed stage=s<n>`. Parallel (one stage, own worktree): commit on green in your worktree before `status=inreview` — a merge needs a commit; resumed with findings, fix and amend that commit. Stage messages cheap, squashed later.
+- Start: card `open`→`inprogress/`. Green: card →`inreview/`, end turn on `status=inreview stage=s<n>` (fast lane: `status=committed`, below).
+- Fast lane (brief says `lane=fast`): commit on green — no `status=inreview` — then end turn on `status=committed stage=s<n>`; resumed, take the next stage. Fixes (review findings, PR feedback, a red gauntlet) are committed on green the same way, answering `status=committed`. The orchestrator pushes and verifies between stages; a review comes once, over the whole branch.
+- Sequential, full lane: commit only once resumed with approval, then `status=committed stage=s<n>`. Parallel (one stage, own worktree): commit on green in your worktree before `status=inreview` — a merge needs a commit; resumed with findings, fix and amend that commit. Stage messages cheap, squashed later.
 - Resumed with a `review.md` path: fix exactly its findings for your stage, re-run the gauntlet, `status=inreview` again.
 
 ## PR feedback
