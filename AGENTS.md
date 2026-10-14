@@ -34,6 +34,8 @@ Triggers on **behavior change, any size**: new public function, changed default,
 
 Gate/task-board mechanics (Gate 1 through Merge, Resume): [`.claude/AGENTS.workflow.md`](./.claude/AGENTS.workflow.md). Pull one section at a time with `extract-section.sh`.
 
+A plan stage's `files` list is a contract: the stage touches exactly the files it names — tooling, test helpers, config, scripts, a flaky-test fix, a drive-by rename included.
+
 ## Where to look for task X
 
 | Task touches | Read | ID prefix |
@@ -78,7 +80,6 @@ Dev loop: `cargo run --release -- --demo` (built-in demo tabs, no config) or `ca
 - **Never read a whole file when only part is needed.** Any `.md` (specs, `SKILL.md`s, other repos' docs): `sh .claude/scripts/extract-section.sh '<heading>' ['<heading>' ...] <file>` (unknown heading: `sh .claude/scripts/list-sections.sh <file>` first). Other large files: `sed -n '<start>,<end>p' <file>`. **Enforced:** `PreToolUse` hook (`.claude/scripts/hook-guard-shell.sh`) denies an unpiped Bash `cat` of a `.md` file or any file over 80 lines, pointing at `extract-section.sh`/`sed -n`/Read. On denial, follow the redirect, never retry the `cat` differently.
 - **Filter shell output before it lands in context.** `find -name`/`-path`, `git show --stat` or a path filter before full content, `grep`/`tail -N`/`head -N` on `cargo test`/`cargo llvm-cov` output.
 - **Don't re-run a read-only command whose output is already in context** (`git diff`, `git log`, `git show` on the same refs/paths). Scroll back.
-- Read an existing issue with `bash .claude/scripts/issue-view.sh <number|key>` and an existing PR's body/comments with `bash .claude/scripts/pr-view.sh <number>`, never raw `gh issue view`/`gh pr view` — both hit the GitHub Projects-Classic GraphQL bug (`projectCards`), with or without `--comments`. Inline review threads go through `bash .claude/scripts/pr-feedback.sh fetch|reply` (`.claude/AGENTS.workflow.md` *PR feedback*) — into a file, one status line in context.
 
 ## Conventions — code
 
@@ -98,6 +99,10 @@ Dev loop: `cargo run --release -- --demo` (built-in demo tabs, no config) or `ca
 - **One fact per line in every text a human reads** — approval prompts, agent summaries, issue and PR bodies: a list item or sub-item, never a `;`- or ` — `-joined sentence. Sole exception: a normative spec entry is one physical line.
 - **Spec text never wrapped** — `docs/specs/` and any `spec-diff.md`: one requirement, one physical line, however long, so `grep -rn <ID or keyword> docs/specs/` returns the whole entry and `sh .claude/scripts/extract-id.sh <ID> [<ID> ...]` (batch IDs into one call) points at one line. **Commit messages are the exception: wrap** — subject ≤ 72 columns, body at 72. `git log` never soft-wraps.
 - **No attribution trailer** — never `Co-Authored-By`, "Generated with", or any tool attribution on a commit, PR body, issue, or comment: pure `git log` noise, forever. `hook-guard-attribution.sh` denies it anyway.
+
+## Conventions — GitHub
+
+- Read an existing issue with `bash .claude/scripts/issue-view.sh <number|key>` and an existing PR's body/comments with `bash .claude/scripts/pr-view.sh <number>`, never raw `gh issue view`/`gh pr view` — both hit the GitHub Projects-Classic GraphQL bug (`projectCards`), with or without `--comments`. Inline review threads go through `bash .claude/scripts/pr-feedback.sh fetch|reply` (`.claude/AGENTS.workflow.md` *PR feedback*) — into a file, one status line in context.
 
 ## Scope boundaries — check with the user before
 

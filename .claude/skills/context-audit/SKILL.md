@@ -1,6 +1,6 @@
 ---
 name: context-audit
-description: Analyze Claude Code session transcripts for repeated full-file reads, large re-derived tool output, and other context-cost waste; recommend small scripts (like .claude/scripts/extract-section.sh) that would cut it, and where a waste pattern is a repeated bypass of an existing convention, propose a concrete fix (a PreToolUse guard hook, a convention edit) rather than a script alone. Use when the user asks to "audit context cost", "reduce context bloat", "what scripts should we add", "analyze tool usage", or invokes /context-audit.
+description: Analyze Claude Code session transcripts for repeated full-file reads, large re-derived tool output and other context-cost waste; recommend small scripts (like extract-section.sh), or a PreToolUse guard / convention edit where the waste bypasses an existing convention. Use for "audit context cost", "reduce context bloat", "what scripts should we add", "analyze tool usage", or /context-audit.
 ---
 
 # Context cost audit

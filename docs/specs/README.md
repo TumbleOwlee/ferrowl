@@ -5,13 +5,13 @@ Authoritative spec of `ferrowl` behavior, by capability area. Areas, ID prefixes
 ## Rules for writing specs
 
 1. **No code pointers.** Never cite file:line, function/type names, crate-internal identifiers — specs state *what must be true*, not where (pointers rot on refactor). Exception: public, user-facing surface (config keys, `:` commands, Lua `C_*` API, CLI flags, OCPP action names, exported signatures, error variants, feature flags) IS spec → area's `api-contract.md`.
-2. **IDs stable, append-only.** `<PREFIX>-R-nnn` for a requirement, `<PREFIX>-E-nnn` for an `edge-cases.md` entry; prefix per area from `AGENTS.md`'s routing table (`NF` has no `-E` series). The two series are numbered independently per area; never renumber, never reuse a retired ID. Sole exception: an ID defining two different entries, which no other repair can make unique — the definition with fewer citations in the sources takes the next free ID in its series, keeping its wording and its position in the file, and every citation of it is updated in the same change; the ID that was duplicated keeps the other definition. An `-E` entry derived from a requirement cites that `-R` ID in its text and still carries its own `-E` ID. Tests cite `-E` IDs exactly as `-R` IDs (rule 8).
+2. **ID format.** `<PREFIX>-R-nnn` for a requirement, `<PREFIX>-E-nnn` for an `edge-cases.md` entry; prefix per area from `AGENTS.md`'s routing table (`NF` has no `-E` series). The two series are numbered independently per area. Stable and append-only per `AGENTS.md` `## Spec-driven`; its sole exception: an ID defining two different entries, which no other repair can make unique — the definition with fewer citations in the sources takes the next free ID in its series, keeping its wording and its position in the file, and every citation of it is updated in the same change; the ID that was duplicated keeps the other definition. An `-E` entry derived from a requirement cites that `-R` ID in its text and still carries its own `-E` ID. Tests cite `-E` IDs exactly as `-R` IDs (rule 8).
 3. **Owner = the behavior, not the surface.** A Modbus RTU config field is specified in `modbus/`, not `config-session/` (one change → one file). `config-session/` owns only the *envelope*: file format, `version`, session→module list, save/load, `migrate`. `tui/` owns the command mechanism and generic commands; protocol-specific commands live in their protocol's area. Shared behavior → owning area, stated once.
 4. **Requirements are testable.** Normative indicative statements, observable outcomes. Good: "The client retries with exponential backoff bounded to 1s–30s." Bad: "The client is robust." Format requirements name exact bytes where possible.
 5. **Known gaps are specified, not hidden.** Intentional-but-ugly behavior (no Lua execution ceiling, no OCPP auto-reconnect) → area's `edge-cases.md` as a stated constraint, so it isn't "fixed".
 6. **One entry, one physical line** per `AGENTS.md` `## Conventions — text`, table rows included. Headings are unnumbered: `extract-section.sh` matches heading text verbatim, and a number churns every reference when a section is inserted.
 7. **Contract-file citations.** `api-contract.md`/`data-contract.md` carry no ID series of their own; every table row carries a `Req` column naming the owning requirement ID(s), prose entries cite inline. IDs are always enumerated, never given as a range. A row with no owning requirement is marked `—` and raised as a missing requirement, never given an invented ID. Cross-references between spec files use an `-R`/`-E` ID when the target has one, and the target's exact heading text (the string `extract-section.sh` accepts) otherwise — section numbers (`§n.m`) are not used.
-8. **Cite every ID a test pins, and only those.** A test's doc comment lists every requirement or edge-case ID its assertions directly verify, at least one, comma-separated after `///` and before the ` — ` summary (`/// MB-R-012, MB-R-157 — …`). An ID the test merely exercises on the way without asserting its outcome is not cited. A test citing many IDs is a review prompt that it does too much, not a violation. `grep -rn <ID>` over the sources therefore returns every test that pins that rule.
+8. **Cite every ID a test pins, and only those.** Which tests must cite an ID: `AGENTS.md` `## TDD — fixed order, every stage`. The doc comment lists every requirement or edge-case ID the assertions directly verify, comma-separated after `///` and before the ` — ` summary (`/// MB-R-012, MB-R-157 — …`). An ID the test merely exercises on the way without asserting its outcome is not cited. A test citing many IDs is a review prompt that it does too much, not a violation. `grep -rn <ID>` over the sources therefore returns every test that pins that rule.
 9. **One entry, one rule.** A requirement states exactly one observable rule: one subject, one condition, one outcome. A statement that needs "and also", "additionally", a second sentence introducing a different subject, or an enumeration of independent behaviors is several requirements and gets one ID each, cross-citing where one depends on another. Test: can a single test pin the whole entry, and can the entry be falsified by one counterexample? If not, split before landing.
 
 ## Per-area files
@@ -27,16 +27,9 @@ Add/drop per need.
 
 ## Requirements intentionally not unit-tested
 
-Most requirements are pinned by a test citing the ID. This list records the deliberate exceptions. Four kinds qualify:
+Most requirements are pinned by a test citing the ID. This list records the deliberate exceptions, in four kinds. Anything not listed below, and no `-E` entry outside kind 4, must carry a citing test. A listed requirement that gains observable behavior: remove from the list, add the test.
 
-1. **Design-posture/platform/toolchain/versioning statements** — facts about build/design, not runtime behavior a `shall` test observes. Each names its enforcement point (CI job, manifest field, lint config).
-2. **Cross-cutting restatements asserted under the owning area** — the test lives with the per-area requirement, cited by *that* ID.
-3. **Structural/shape requirements collectively exercised by one round-trip or property test** — a group describing a data structure's shape (fields, optionality, default omission), covered by one save→load→compare; behavioral requirements around them tested on their own.
-4. **Stated known limitations (`-E` entries)** — exempt as a class, see Kind 4.
-
-Anything not listed below, and no `-E` entry outside kind 4, must carry a citing test. A listed requirement that gains observable behavior: remove from the list, add the test.
-
-**Kind 1 — design posture/platform/toolchain/versioning**
+**Kind 1 — design posture/platform/toolchain/versioning** — facts about build/design, not runtime behavior a `shall` test observes; each names its enforcement point (CI job, manifest field, lint config).
 
 | Requirement | Enforced by |
 |---|---|
@@ -51,7 +44,7 @@ Anything not listed below, and no `-E` entry outside kind 4, must carry a citing
 | `UI-R-289` — four per-scheme diff background colors on the scheme | `struct ColorScheme` and the three `#[cfg(feature = …)] const COLOR_SCHEME` initializers; a missing field or scheme fails to compile |
 | `UI-R-292` — the four diff colors are literals, computed from nothing | same initializers: literal `Color::Rgb` values, no call and no `const fn` among them |
 
-**Kind 2 — cross-cutting restatements**
+**Kind 2 — cross-cutting restatements** — asserted under the owning area: the test lives with the per-area requirement, cited by *that* ID.
 
 | Requirement | Asserted under |
 |---|---|
@@ -64,7 +57,7 @@ Anything not listed below, and no `-E` entry outside kind 4, must carry a citing
 | `NF-R-031`, `NF-R-050`, `NF-R-051` — Lua sandbox, wall-clock cap, no memory ceiling | `SC-R-006`/`SC-R-007`/`SC-R-040`, `SC-R-047`, `SC-R-048` |
 | `NF-R-067`, `NF-R-068` — non-blocking command dispatch and stop-aborts-attempt | `UI-R-314`/`UI-R-315`/`UI-R-350`, `MB-R-220`/`MB-R-221`/`MB-R-255`, `OC-R-175`/`OC-R-176`/`OC-R-177` |
 
-**Kind 3 — structural/shape (collectively exercised)**
+**Kind 3 — structural/shape (collectively exercised)** — a group describing a data structure's shape (fields, optionality, default omission), covered by one round-trip or property test; behavioral requirements around them tested on their own.
 
 | Requirements | Exercised by |
 |---|---|

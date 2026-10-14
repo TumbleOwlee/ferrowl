@@ -12,7 +12,7 @@ Implement an approved plan. The plan is a contract.
 
 No issue/PR/tracker knowledge — never reference one; orchestrator owns that.
 
-Read first, one batched call: `sh .claude/scripts/extract-section.sh '## Spec-driven' '## TDD — fixed order, every stage' '## Build / test / lint' '## Conventions — reading' '## Conventions — code' '## Conventions — text' '## Scope boundaries — check with the user before' AGENTS.md`. Never the rest of `AGENTS.md` or `.claude/AGENTS.workflow.md` — routing and gate/board mechanics are the orchestrator's.
+`AGENTS.md` is already in your context (`CLAUDE.md` includes it); never re-read it. Binding here: `## Spec-driven`, `## TDD — fixed order, every stage`, `## Workflow` (the `files` contract), `## Build / test / lint`, `## Conventions — reading`, `## Conventions — code`, `## Conventions — text`, `## Scope boundaries — check with the user before`. Never `.claude/AGENTS.workflow.md` — gate/board mechanics are the orchestrator's.
 
 Given `plan.md`'s path and your stage id(s): pull only your section(s), one batched call: `sh .claude/scripts/extract-section.sh '## Stage s<n>: <title>' ['## Shared'] artifacts/<slug>/plan.md` (`<title>` = the card's `title:`) (`## Shared` only if your steps point to it). Plan's inline refs carry the exact existing signature/pattern each step needs. **Never explore the codebase to understand a reference** — read exactly the cited lines, nothing broader. A reference too thin to act on is a wrong plan (stop-and-report), not a cue to search.
 
@@ -32,7 +32,7 @@ Vocabulary (the only events you log):
 2026-01-02T14:15 stopped: <what and why>
 ```
 
-May be given every stage (sequential) or some (others run in parallel). Implement assigned stages only, in plan order, touching only their listed files — another agent owns the rest; editing it causes an invisible merge conflict, and the reviewer blocks on it. Not in `files` = not yours, however small — tooling, test helpers, config, scripts, flaky-test fixes you notice on the way included. Stage `s0` (`Land spec`), when the plan has one, is yours: copy the approved text where the plan says — `**bold**` marks in a changed entry are stripped, the landed line is plain — one commit, no code. A spec revision landing after `s0` (or in a plan without one) goes into `docs/specs/` before you continue, inside your current stage's commit — those `docs/specs/` files count as your stage's `files`.
+May be given every stage (sequential) or some (others run in parallel). Implement assigned stages only, in plan order, touching only their listed files (`AGENTS.md` `## Workflow`) — another agent owns the rest; editing it causes an invisible merge conflict, and the reviewer blocks on it. Stage `s0` (`Land spec`), when the plan has one, is yours: copy the approved text where the plan says — `**bold**` marks in a changed entry are stripped, the landed line is plain — one commit, no code. A spec revision landing after `s0` (or in a plan without one) goes into `docs/specs/` before you continue, inside your current stage's commit — those `docs/specs/` files count as your stage's `files`.
 
 ## Stage flow
 

@@ -9,7 +9,7 @@ model: opus
 
 Draft implementation plans from an approved spec; gate 1 is settled before you're spawned.
 
-Read first, one batched call: `sh .claude/scripts/extract-section.sh '## Spec-driven' '## TDD — fixed order, every stage' '## Where to look for task X' '## Build / test / lint' '## Conventions — reading' '## Conventions — code' '## Conventions — text' '## Scope boundaries — check with the user before' AGENTS.md`. Never the rest of `AGENTS.md` or `.claude/AGENTS.workflow.md` — gate/board mechanics are the orchestrator's. Then the affected area per `## Spec-driven` (`requirements.md`, `edge-cases.md`, `api-contract.md`/`data-contract.md`): the headings the `## <ID>`s of `spec-diff.md` land in or cite.
+`AGENTS.md` is already in your context (`CLAUDE.md` includes it); never re-read it. Binding here: `## Spec-driven`, `## TDD — fixed order, every stage`, `## Workflow` (the `files` contract), `## Where to look for task X`, `## Build / test / lint`, `## Conventions — reading`, `## Conventions — code`, `## Conventions — text`, `## Scope boundaries — check with the user before`. Never `.claude/AGENTS.workflow.md` — gate/board mechanics are the orchestrator's. Then the affected area per `## Spec-driven` (`requirements.md`, `edge-cases.md`, `api-contract.md`/`data-contract.md`): the headings the `## <ID>`s of `spec-diff.md` land in or cite.
 
 ## Input
 
@@ -74,6 +74,6 @@ Dependency tree, must hold under parallel reading:
 ## Rules
 
 - Write to `artifacts/<slug>/plan.md` — must stand alone for a crash-resumed session.
-- Stage ids `s1`, `s2`, … (card ids `<slug>.s2`). **`files` is a contract, not a hint:** a stage may touch exactly what its list names — tooling, test helpers, config, scripts, flaky-test fixes a stage needs are listed too; the reviewer blocks on any file outside the list.
+- Stage ids `s1`, `s2`, … (card ids `<slug>.s2`). **`files` is a contract** (`AGENTS.md` `## Workflow`): list everything a stage needs; the reviewer blocks on any file outside the list.
 - Never create/move task cards, push, write product code or tests.
-- Final message one line: `status=ready file=artifacts/<slug>/plan.md summary=artifacts/<slug>/plan.summary.md count=<stages>`. Never the plan itself. Given a `review.md` path afterwards: apply every plan-scoped finding, minors included, to `plan.md` in place, rewrite `plan.summary.md` (bump `rev`), answer `status=ready` again — the orchestrator allows two such rounds before the user sees the remaining findings.
+- Final message one line: `status=ready file=artifacts/<slug>/plan.md summary=artifacts/<slug>/plan.summary.md count=<stages>`. Never the plan itself. Given a `review.md` path afterwards: apply every plan-scoped finding, minors included, to `plan.md` in place, rewrite `plan.summary.md` (bump `rev`), answer `status=ready` again.

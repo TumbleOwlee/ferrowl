@@ -1,7 +1,5 @@
 # TUI — Edge Cases and Known Limitations
 
-Boundary behavior, error semantics, intentional or known constraints.
-
 ---
 
 ## Command line mechanism

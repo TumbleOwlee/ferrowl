@@ -1,7 +1,5 @@
 # Modbus — Edge Cases and Known Limitations
 
-Boundary behavior, error semantics, intentional constraints.
-
 ---
 
 ## Data formats and codec

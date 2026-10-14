@@ -31,7 +31,7 @@ Gate 2 onward.
 
 ### Lane — fast or full
 
-The lane sets how many approval stops the run makes. Asked once, inside the run's first approval stop — gate 1 (`ready`/`no-diff`) for a behavior change, gate 2 for a non-behavior change — as part of that same prompt, recommended lane first. Recorded as `lane` on the parent card.
+The lane sets how many approval stops the run makes. Asked once, inside the run's first approval stop — gate 1 (`ready`/`no-diff`) for a behavior change, gate 2 for a non-behavior change — as part of that same prompt, recommended lane first.
 
 Recommended default, by size:
 - **fast** — `no-diff`, or ≤ 3 spec entries (gate 1 `count=`); non-behavior change with ≤ 2 stages besides `s0` (gate 2 `count=`).
@@ -42,8 +42,8 @@ Recommended default, by size:
 | Spec diff | approved at gate 2's stop, with the plan | own stop at gate 1 |
 | Gate 2 stop | spec diff + plan summary + issue draft | plan summary + issue draft, mode |
 | Mode | sequential only | sequential or parallel |
-| Stages | committed on green, pushed, no per-stage review or stop | per-stage review; stop only when a *Stage stop* rule fires, else auto-continue |
-| End | one stop: branch review verdict + PR body, approve = ready | gate 3 stop, then gate 4 stop; approve = ready |
+| Stages | *Fast lane* | *Sequential* or *Parallel waves*, stops per *Stage stop* |
+| End | one stop, *Gate 4* | *Gate 3* stop, then *Gate 4* stop |
 
 The plan outgrowing the fast default (more than 2 stages besides `s0`) → gate 2's stop proposes switching to full; never switched silently. The user may switch lanes at any later stop.
 
@@ -68,14 +68,14 @@ Directory a card sits in **is** its state:
     review.md          review findings + history, keyed by stage id, append-only
     review.verdict.md  open findings per stage, rewritten every pass, capped
     gauntlet.log       full build/test/lint output of the last gauntlet.sh run
-    question.md        an agent's batch of decisions for the user, rewritten per batch — quoted in chat, never opened
-    revision.md        the touched sections of the latest spec revision — the reviewer's record, not shown to the user
-    issue.md           `# <title>` (line 1) + `## Goal` — issue-body.sh assembles the body from it
+    question.md        an agent's batch of decisions for the user (*Relayed question*)
+    revision.md        touched sections of the latest spec revision (*Reconcile the spec*)
+    issue.md           title + goal (*Tracking issue*)
     request.md         a reused issue's original body, stored once at reuse
     issue-comment.md   changelog comment of the latest spec revision after filing
-    split-issue.md     `# <title>` + body of an issue split off by *Reconcile the spec*
-    pr.md              `# <title>` (line 1) + gate 4 body — pr-body.sh prepends the status line and appends `Closes`
-    pr-feedback.md     unresolved PR review threads (pr-feedback.sh fetch), reply blocks filled by the implementer
+    split-issue.md     an issue split off (*Reconcile the spec*)
+    pr.md              gate 4 PR title + body (*Gate 4*)
+    pr-feedback.md     unresolved PR review threads (*PR feedback*)
 ```
 
 Directories tracked; cards gitignored. Cards live in **main checkout only** — a worktree agent gets its own card's absolute path, writes only that file. No per-worktree board copy.
@@ -139,14 +139,13 @@ status=<token> [file=<path>] [summary=<path>] [stage=s<n>] [issue=<n>] [class=<c
 
 - `question` = a batch of decisions in `artifacts/<slug>/question.md` (*Relayed question*); orchestrator relays the answers to the **same** agent (`SendMessage`), never respawns.
 - An agent returning more than the status line is told to move the rest into its file and answer again.
-- A status line naming a file the user must approve (`spec-diff.md`, `pr.md`, the `summary=` path — `plan.summary.md`, `review.verdict.md` when it has a `Needs user` item): orchestrator runs `sh .claude/scripts/show-file.sh <path> [<path> ...]` before asking — every file of one approval stop in a single call; it opens each outside the context and prints, per file, one line naming how it was shown plus that file's quotable prompt lines (`prompt-lines.sh`) — the only file content the orchestrator ever holds.
-- The approval prompt is built from those lines alone (*Approval prompt*). User pulls one heading of the full file with `extract-section.sh` for the *why*.
+- A status line naming a file the user must approve (`spec-diff.md`, `pr.md`, the `summary=` path — `plan.summary.md`, `review.verdict.md` when it has a `Needs user` item): orchestrator runs `sh .claude/scripts/show-file.sh <path> [<path> ...]` before asking — every file of one approval stop in a single call; it opens each outside the context and prints, per file, one line naming how it was shown plus that file's quotable prompt lines (`prompt-lines.sh`) — the only file content the orchestrator ever holds (*Approval prompt*).
 
 Reviewer scope tokens: `plan` (gate 2), `stage s<n>`, `wave w<n>`, `branch` (gate 3).
 
 ### Approval prompt
 
-Every approval stop is one message in this fixed shape, composed from `show-file.sh`'s quotable lines, the agents' status-line tokens and the fixed lists below — the orchestrator writes no line of its own about content. A block absent from this stop is omitted; order is fixed.
+Every approval stop is one message in this fixed shape, composed from `show-file.sh`'s quotable lines, the agents' status-line tokens and the fixed lists below — the orchestrator writes no line of its own about content. A block absent from this stop is omitted; order is fixed. The user pulls one heading of the full file with `extract-section.sh` for the *why*.
 
 ```
 Gate <n> · <slug> · <files shown, with rev> [· fast lane]
@@ -187,7 +186,7 @@ A `Needs user` item is answered in the same reply; the orchestrator relays it to
 
 ### Relayed question
 
-An agent's `status=question` names `artifacts/<slug>/question.md` (shape: `spec-author.md` `## Questions`): every decision it can state without knowing another's answer, numbered, each with `Why you:`, options with the recommendation marked, costs when options differ. Orchestrator never opens it in the viewer — the whole file is the prompt (`prompt-lines.sh` prints it; `show-file.sh` is for files the user approves, not reads in chat) — and asks once:
+An agent's `status=question` names `artifacts/<slug>/question.md` (shape: `spec-author.md` `## Questions`). Orchestrator never opens it in the viewer — the whole file is the prompt (`prompt-lines.sh` prints it; `show-file.sh` is for files the user approves, not reads in chat) — and asks once:
 
 ```
 Question · <slug> · <gate or stage> · <agent> · <n> decisions
@@ -214,7 +213,7 @@ Spawn `spec-planner` with: `artifacts/<slug>/spec-diff.md` path (none for a non-
 
 - `status=question` → relay, resume same agent.
 - `status=spec-gap` → *Reconcile the spec*.
-- `status=ready` → fresh `spec-reviewer`, scope `plan`. Any finding, minors included → resume the planner with the `review.md` path, it revises the plan, fresh review — no user interaction; rounds and their end per *Verify before an approval stop*. A clean verdict is never shown: there is nothing in it to approve.
+- `status=ready` → fresh `spec-reviewer`, scope `plan`. Any finding, minors included → resume the planner with the `review.md` path, it revises the plan, fresh review — no user interaction; rounds and their end per *Verify before an approval stop*.
 - The plan's `Stop` column (which stages stop for approval beyond the *Stage stop* rules) is settled at this stop: the user may tick or untick stages in the answer.
 - `clean`, or `findings` with `count=0` → `spec-author` drafts `issue.md` (*Tracking issue*; no stop of its own; a non-behavior run spawns one now with the goal verbatim, `plan.summary.md`, `artifacts/<slug>/`), then **one** `show-file.sh` call: `plan.summary.md`, `review.verdict.md` only when findings survived two rounds, and — fast lane — `spec-diff.md`. `issue.md` is not opened: its title and goal restate approved text, and the prompt's `Issue:` line (new or reuse #n, title) is the one decision in it. One *Approval prompt*: approve, plus mode (full lane), plus lane for a non-behavior change.
 
@@ -229,7 +228,7 @@ Default sequential; never infer concurrency from plan shape. Fast lane is always
 2. Create the worktree: `git worktree add .claude/worktrees/<slug> -b <type>/<slug> main`.
 3. Record `gate2`+`mode` (and `lane`, for a non-behavior change) on parent card, move parent → `inprogress/`.
 4. Create `open/<slug>.s<n>.md` per plan stage (`s0` only when the plan has one), `title`/`files`/`blocked-by` copied from the tree and `stop: yes|no` from `plan.summary.md`'s `Stop` column as the user settled it — `sh .claude/scripts/extract-section.sh '## Shared' artifacts/<slug>/plan.md` is the one plan read the orchestrator makes, for exactly those three fields. Parallel: also `open/<slug>.w<n>.md` per wave. Sequential: one wave-gate card for the run. Stage ids match plan ids.
-5. Spawn the implementer, its brief naming the lane. A plan with `s0` lands the approved spec text — normative only — as the branch's first commit; a `no-diff` or non-behavior plan has no `s0`.
+5. Spawn the implementer, its brief naming the lane.
 
 ### Tracking issue
 
@@ -237,7 +236,7 @@ Drafted inside gate 2 once the plan review is clean (the spec is stable by then)
 
 Orchestrator searches existing issues (`gh issue list --state all --search …`) for the same goal and passes candidate numbers — plus one the user named — to `spec-author`, which writes `artifacts/<slug>/issue.md` (title + goal; shape: its file) and answers `status=reuse issue=<n> file=…` or `status=new file=…` in one turn. Reuse, never duplicate. On reuse the orchestrator stores the issue's original body once with `sh .claude/scripts/issue-request.sh <n> > artifacts/<slug>/request.md` — the body as filed, or, when that body is one this workflow assembled (it carries `## Spec (rev`), the text inside its `<details>` block.
 
-The body is assembled, never written by hand: `sh .claude/scripts/issue-body.sh <slug> > artifacts/<slug>/issue-body.md` (status line from the parent card, goal, the spec as a list with its decisions, plan decisions, the collapsed original request). Filing:
+The body is assembled, never written by hand. Filing:
 
 ```sh
 sh .claude/scripts/issue-body.sh <slug> > artifacts/<slug>/issue-body.md
@@ -263,7 +262,7 @@ The body is also reassembled and edited when the status line changes (`pr` set, 
 
 - One fresh `spec-implementer`, spawned with worktree path, plan path, its stage cards and `lane=fast|full`; it reads its own rules (`.claude/agents/spec-implementer.md`, `AGENTS.md`) and works stages in plan order, one plan section at a time.
 - Not done until the plan's Verification method has run and its outcome is reported. Waiving it requires asking.
-- **The draft PR body is the board, rendered**: `sh .claude/scripts/pr-body.sh <slug> draft > artifacts/<slug>/pr-draft.md` (status line, one-line why, one checklist line per stage card with its state or sha, where to review) — regenerated and pushed with `gh pr edit <pr> --body-file <(tail -n +2 artifacts/<slug>/pr-draft.md)` on **every card move** once the PR exists. Nobody writes PR-body text by hand.
+- **The draft PR body is the board, rendered** by `pr-body.sh <slug> draft` — regenerated and pushed with `gh pr edit <pr> --body-file <(tail -n +2 artifacts/<slug>/pr-draft.md)` on **every card move** once the PR exists. Nobody writes PR-body text by hand.
 - **The first push opens the draft PR** from that file; orchestrator records `pr` on the parent card, logs `pr=draft`, reassembles the issue body (*Tracking issue*). Every later push updates it; the user reviews there (*PR feedback*).
 
 ```sh
@@ -275,7 +274,7 @@ gh pr create --draft --title "$(head -1 artifacts/<slug>/pr-draft.md | sed 's/^#
 
 Per stage:
 
-1. Start: card `open`→`inprogress`. Green: the implementer commits, card → `inreview/`, answers `status=committed stage=s<n>` — no per-stage review, no approval stop.
+1. Green: the implementer commits, card → `inreview/`, answers `status=committed stage=s<n>` — no per-stage review, no approval stop.
 2. Orchestrator runs `gauntlet.sh`, pushes, logs `gauntlet=pass sha=<sha>` on the parent card, card → `done`, resumes the implementer for the next stage. Red gauntlet → card → `inprogress/`, resume the implementer with the gauntlet line.
 3. Last stage `done` → *PR feedback*, then *Gate 3*: its branch review is the only review of a fast-lane run.
 
@@ -285,16 +284,15 @@ Fixes in the fast lane (gate 3 findings, PR feedback, red gauntlet) are committe
 
 Full lane. Per stage:
 
-1. Start: stage card `open`→`inprogress`.
-2. Green: card → `inreview`, `status=inreview stage=s<n>`. Orchestrator runs `gauntlet.sh` and the per-stage review below.
-3. Both clean → *Stage stop* rules decide: a rule fires → user approval stop; none fires → auto-continue (no stop). Either way the same implementer (resumed) commits, answers `status=committed`.
-4. Orchestrator pushes the worktree (push is never the implementer's), re-runs `gauntlet.sh` on the pushed sha, logs `gauntlet=pass sha=<sha>` on the parent card, card → `done`.
+1. Green: card → `inreview`, `status=inreview stage=s<n>`. Orchestrator runs `gauntlet.sh` and the per-stage review below.
+2. Both clean → *Stage stop* rules decide: a rule fires → user approval stop; none fires → auto-continue (no stop). Either way the same implementer (resumed) commits, answers `status=committed`.
+3. Orchestrator pushes the worktree (push is never the implementer's), re-runs `gauntlet.sh` on the pushed sha, logs `gauntlet=pass sha=<sha>` on the parent card, card → `done`.
 
 #### Per-stage review
 
 Full lane, sequential only; parallel's equivalent is the wave gate (parallel step 5). Every green stage, before its approval stop:
 - Fresh `spec-reviewer`. Base ref = previous stage's commit (branch point for the first stage); scope = that stage id; gate 3's four axes on one stage's diff.
-- `clean`, or `findings` with `count=0` → approval stop (the verdict is opened in the viewer only when it has a `Needs user` item; the prompt's `Review:`/`Minors` lines carry a clean one), forward the gauntlet line; minors per *Verify before an approval stop*.
+- `clean`, or `findings` with `count=0` → approval stop, forward the gauntlet line; minors per *Verify before an approval stop*.
 - `count>0` → card → `inprogress/`, resume implementer with `review.md` path and stage id, re-run `gauntlet.sh`, fresh reviewer; rounds per *Verify before an approval stop*. An unreviewed stage is never committed.
 - **The last code stage**: review in scope `branch` instead — it is gate 3's review, and the stage's approval stop is gate 3's stop. Gate 3 re-runs only if code changed after it.
 
@@ -352,7 +350,7 @@ One status line: `pr=<n> state=… draft=… threads=<count> file=…`.
 bash .claude/scripts/pr-feedback.sh reply <pr> .claude/tasks/artifacts/<slug>/pr-feedback.md s<n> <sha>
 ```
 
-posts every filled reply block: `reply: fixed` as `Fixed in s<n> (<sha>)` plus its bullets, resolving the thread (`<stage> <sha>` arguments: the stage and the pushed head); `reply: declined` as `Not changed — <reason>` plus its bullets, leaving the thread open for the user; an empty `reply:` is untouched. `status=spec-gap` from the implementer (a comment asks for behavior the approved spec doesn't cover) → *Reconcile the spec*, the thread stays open until the amended text lands. `status=blocked` (a comment is a question, or ambiguous) → relay `reason=` to the user as a question, never answer on the PR for them.
+posts every filled reply block (`<stage> <sha>`: the stage and the pushed head), resolving `fixed` threads and leaving `declined` ones open for the user. `status=spec-gap` from the implementer (a comment asks for behavior the approved spec doesn't cover) → *Reconcile the spec*, the thread stays open until the amended text lands. `status=blocked` (a comment is a question, or ambiguous) → relay `reason=` to the user as a question, never answer on the PR for them.
 
 A thread the user resolves themselves, or one whose `reply:` they answer on the PR, drops out of the next fetch. Gate 4 does not run while `threads>0`.
 
@@ -360,14 +358,14 @@ A thread the user resolves themselves, or one whose `reply:` they answer on the 
 
 Planner or implementer returns `status=spec-gap reason=…` — the spec text doesn't cover what the plan needs, or behavior must differ from it. Orchestrator resumes `spec-author` with the reason verbatim. The author classifies (rules in its file); a normative or beyond revision is decided through a question batch whose block quotes the affected entry in full, and the user's answer *is* the approval — the revised text is never shown again:
 
-| `class` | What | Stop |
-|---|---|---|
-| `editorial` | no normative meaning changes: wording, a cross-reference, a violated ID added to or dropped from a `no-diff`, an entry moved | none — orchestrator logs `spec-rev=<N> class=editorial` and continues |
-| `normative` | an entry added, changed or dropped that the run's goal needs | the author's `question`: the entry's current text in full, the proposed text, the alternative; the answer settles it, no further stop |
-| `beyond` | needed only because of something outside the goal: an area the gate 1 Summary didn't name, an upstream change, or more than 5 entries | the author's `question`: **split** (recommended) or fold in; the answer comes back as `class=split` or `class=normative`, no further stop |
+| `class` | Stop |
+|---|---|
+| `editorial` | none — orchestrator logs `spec-rev=<N> class=editorial` and continues |
+| `normative` | the author's `question`; the answer settles it, no further stop |
+| `beyond` | the author's `question`: **split** (recommended) or fold in; the answer comes back as `class=split` or `class=normative`, no further stop |
 
 - **Split** (`class=split`) — the author narrows the spec and drafts `split-issue.md` (rules in its file). Orchestrator files `split-issue.md` (`gh issue create`, as in *Tracking issue*) with `Split from #<issue>` appended as its last line — at once if the tracking issue is filed, else right after gate 2 approval step 1 — appends it to the parent card's `split:` and reassembles the issue body. The run continues on the narrowed spec; the new issue is its own later run. The split issue's body is `split-issue.md` with the status line `Split from #<issue> (rev <N>) · no spec yet` prepended.
-- **Fold in** — the user's explicit override: handled as `normative`, and the author rewrites the goal line to state the widened scope.
+- **Fold in** — the user's explicit override: handled as `normative` (rules in the author's file).
 
 The author answers `status=ready class=<class> file=artifacts/<slug>/revision.md` (the touched sections, for the record and the reviewer). Then, in order:
 1. Issue already filed → *Tracking issue*'s rewrite. Not filed yet → nothing to post.
@@ -380,7 +378,7 @@ Gate 3's reviewer diffs the branch's spec against `spec-diff.md` — the final s
 
 Before proposing a PR, whole-branch pass — cross-stage bugs, spec drift across stages, scope creep:
 - Fresh `spec-reviewer`, scope `branch`. Give it base ref, artifact dir, worktree path, all stage ids; it reads its own rules (`AGENTS.md`, `spec-reviewer.md`'s `## Four axes, reported separately`). Already run, with its stop, as a one-code-stage run's stage review (*Per-stage review*) → skip to gate 4 unless code changed since.
-- Orchestrator runs `gauntlet.sh` on the branch, forwards both status lines; `review.verdict.md` is opened only when it has a `Needs user` item.
+- Orchestrator runs `gauntlet.sh` on the branch, forwards both status lines.
 - `count>0` → as *Per-stage review*, the same implementer (fast lane, sequential) or one fresh implementer per implicated card (parallel), then a fresh branch review. Findings needing a user decision are relayed as questions, never fixed unasked.
 - Log `review=clean` or `review=<n>-resolved` on the parent card once the branch review is clean (the PR status line reads it). Minors (*Verify before an approval stop*, fixed before commit) are resolved before `spec-author` writes `pr.md`; gauntlet re-run, `gauntlet=pass sha=<sha>` logged on the parent card.
 - **Fast lane:** no stop here — clean goes straight to gate 4, whose stop shows the verdict.
@@ -395,7 +393,7 @@ Before proposing a PR, whole-branch pass — cross-stage bugs, spec drift across
 sh .claude/scripts/pr-body.sh <slug> full > artifacts/<slug>/pr-full.md
 ```
 
-- **One stop**: `show-file.sh` on `pr.md` (fast lane: plus `review.verdict.md` when it has a `Needs user` item); the *Approval prompt* offers **approve** or **manual run first** — the user may want one; don't pre-empt it. Approved → push, replace the draft's title and body, mark ready, log `pr=ready`:
+- **One stop**: `show-file.sh` on `pr.md` (fast lane: plus `review.verdict.md`, per *Agent hand-off*); the *Approval prompt* offers **approve** or **manual run first** — the user may want one; don't pre-empt it. Approved → push, replace the draft's title and body, mark ready, log `pr=ready`:
 
 ```sh
 gh pr edit <pr> --title "$(head -1 artifacts/<slug>/pr-full.md | sed 's/^# //')" --body-file <(tail -n +2 artifacts/<slug>/pr-full.md)
@@ -437,6 +435,6 @@ No worktree on the card → died during gate 1 dialog or gate 2 planning, nothin
 | stage `done` | `git branch --contains` vs feature branch | never merged; downstream plans a lie |
 | PR `## Stages` | the PR body vs `pr-body.sh <slug> draft` | body behind the board: a move never rendered, `gh pr edit` with the fresh render |
 
-Report differences first. Agree → resume. Disagree → stop and report: card behind git is a forgotten move, correctable; card claiming what git can't show is never trusted into being true.
+Report differences first. Agree → resume. Disagree → stop and report.
 
 Clean reconcile → resume only no-approval work (respawn implementers for approved stages, merge finished branches, run wave gates); halt at the first gate needing the user. Recorded `gate1`/`gate2` approvals stay valid.

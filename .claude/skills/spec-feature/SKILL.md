@@ -26,7 +26,6 @@ Headings of `.claude/AGENTS.workflow.md`, one pull each (`AGENTS.md` `## Convent
 | Agent hand-off (status lines, file paths) | `### Agent hand-off` |
 | Approval prompt — the fixed shape of every stop, built from `show-file.sh`'s lines | `### Approval prompt` |
 | Relayed question — an agent's batch of decisions | `### Relayed question` |
-| Parent card | `### Gate 1 — spec diff. Stop for approval.` (the **Board:** bullet) |
 | Lane — fast or full, asked at the first approval stop | `### Lane — fast or full` |
 | Gate 1 — spec diff | `### Gate 1 — spec diff. Stop for approval.` |
 | Gate 2 — plan and tracking issue | `### Gate 2 — plan and tracking issue. Stop for approval.` |

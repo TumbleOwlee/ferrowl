@@ -1,7 +1,5 @@
 # OCPP — Edge Cases and Known Limitations
 
-Boundary behavior, error semantics, intentional constraints.
-
 ---
 
 ## OCPP-J framing

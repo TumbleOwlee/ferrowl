@@ -9,7 +9,7 @@ description: PO-facing entrypoint — derive spec text from a requirement via di
 
 `.claude/AGENTS.workflow.md` is authority for gate 1 and the tracking issue — the headings in the table below, followed exactly. Conflict → `.claude/AGENTS.workflow.md` wins.
 
-Single-session, no resume: skip gate 1's **Board** bullet, its lane question (always the full-lane approval), and every "record … on the parent card" step — no `open/<slug>.md`, no task card. `spec-author` still needs a scratch `artifacts/<slug>/` (deleted once the ticket exists). The ticket is the only surviving artifact; approved spec text lives in its self-contained body (`## Spec (rev N)`, one list item per entry), not `docs/specs/`. The parent-card fields `issue-body.sh` reads are absent here; its status line reads `Spec rev N` alone.
+Single-session, no resume: skip gate 1's **Board** bullet, its lane question (always the full-lane approval), and every "record … on the parent card" step — no `open/<slug>.md`, no task card. `spec-author` still needs a scratch `artifacts/<slug>/` (deleted once the ticket exists). The ticket is the only surviving artifact (*Tracking issue*); approved spec text never lands in `docs/specs/` here. The parent-card fields `issue-body.sh` reads are absent here; its status line reads `Spec rev N` alone.
 
 ## Where each step lives
 

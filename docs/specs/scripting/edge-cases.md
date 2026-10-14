@@ -1,7 +1,5 @@
 # Scripting — Edge Cases and Known Limitations
 
-Boundary behavior, error semantics, intentional or known constraints.
-
 ---
 
 ## Logging & error handling
