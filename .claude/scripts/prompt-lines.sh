@@ -7,7 +7,7 @@
 #
 # Per file, by name:
 #   spec-diff.md       Goal: · Entries: (counts + IDs, or the violated list for a no-diff)
-#   plan.summary.md    Plan: (the Decide line) · Verification:
+#   plan.summary.md    Plan: (the Decide line) · Stops: (stages whose Stop column says yes) · Verification:
 #   review.verdict.md  Review: (the Verdict line) · Spec: · Minors (…): · Needs user: — a block whose only item is `- none` is skipped
 #   issue.md           Issue: <title>
 #   split-issue.md     Split: <title>
@@ -40,6 +40,7 @@ for f in "$@"; do
         [ -n "$c" ] && confirm="$confirm$c$nl" ;;
     plan.summary.md)
         sed -n 's/^Decide: /Plan: /p' "$f"
+        awk -F'|' '/^\| s[0-9]/ { sid = $2; st = $6; gsub(/^ +| +$/, "", sid); gsub(/^ +| +$/, "", st); if (st ~ /^yes/) { if (!p) { print "Stops:"; p = 1 } print "- " sid " — " st } }' "$f"
         awk '/^Verification beyond unit tests:/ { on = 1; next } on && /^- / { if (!p) { print "Verification:"; p = 1 } if ($0 != "- none") print; next } on { on = 0 }' "$f"
         c=$(awk '/^Decisions taken \(confirm\):/ { on = 1; next } on && /^- / { print; next } on { on = 0 }' "$f")
         [ -n "$c" ] && confirm="$confirm$c$nl" ;;

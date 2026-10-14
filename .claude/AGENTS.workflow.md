@@ -36,7 +36,7 @@ Recommended default, by size:
 | Spec diff | approved at gate 2's stop, with the plan | own stop at gate 1 |
 | Gate 2 stop | spec diff + plan summary + issue draft | plan summary + issue draft, mode |
 | Mode | sequential only | sequential or parallel |
-| Stages | committed on green, pushed, no per-stage review or stop | per-stage review + approval stop |
+| Stages | committed on green, pushed, no per-stage review or stop | per-stage review; stop only when a *Stage stop* rule fires, else auto-continue |
 | End | one stop: branch review verdict + PR body, approve = ready | gate 3 stop, then gate 4 stop |
 
 The plan outgrowing the fast default (more than 2 stages besides `s0`) → gate 2's stop proposes switching to full; never switched silently. The user may switch lanes at any later stop.
@@ -104,7 +104,7 @@ Parent frontmatter: `issue`, `pr` (number, set when the draft opens), `branch`, 
 
 | Card | `open` | `inprogress` | `inreview` | `done` |
 |---|---|---|---|---|
-| stage | created from plan | agent took it | green; under review | full lane: reviewed + on the feature branch + orchestrator-verified; fast lane: committed + pushed + orchestrator-verified (reviewed at gate 3) |
+| stage | created from plan | agent took it | green; under review | full lane: reviewed, approved or auto-continued, on the feature branch, orchestrator-verified; fast lane: committed + pushed + orchestrator-verified (reviewed at gate 3) |
 | wave gate | not started | stages running | all done; reviewing wave diff | clean — next wave unblocks |
 | parent | gate 1 or 2 pending | implementing | gate 3/4 | PR squash-merged |
 
@@ -148,6 +148,8 @@ Gate <n> · <slug> · <files shown, with rev> [· fast lane]
 Goal: <spec-diff.md's Goal line>
 Entries: <spec-diff.md's counts and IDs>
 Plan: <plan.summary.md's Decide line>
+Stops:
+- <stages the plan marks stop, with why>
 Issue: <new | reuse #<n>> — <issue.md's title>                                        ← new/reuse from the author's status line
 Split: <split-issue.md's title>
 Verification:
@@ -171,8 +173,8 @@ Fixed `Approving will:` / `Answer:` per stop:
 |---|---|---|
 | gate 1, full | settle the lane · hand the spec to the planner (gate 2) | `approve [full\|fast] · change <what> · stop` |
 | gate 1, fast | record the lane · hand the spec to the planner; the spec is approved with the plan | `approve · switch to full · change <what> · stop` |
-| gate 2 | file the issue (or rewrite #<n>) · create worktree `<path>` on branch `<branch>` · create <n> stage cards · spawn the implementer at <first stage> (fast: commits and pushes on green, no per-stage stop) · settle the mode (full) · next stop: <per-stage s<n> \| gate 4> | `approve [sequential\|parallel N] · switch lane · change <what> · stop` |
-| stage / wave | commit s<n> · push, open or update the draft PR · spawn the next stage | `approve · change <what> · stop` |
+| gate 2 | file the issue (or rewrite #<n>) · create worktree `<path>` on branch `<branch>` · create <n> stage cards · spawn the implementer at <first stage> (fast: commits and pushes on green, no per-stage stop) · settle the mode (full) · next stop: <per-stage s<n> \| gate 4> | `approve [sequential\|parallel N] [stop: s1,s3] · switch lane · change <what> · stop` |
+| stage / wave (heading carries the *Stage stop* reason, e.g. `· stop: demo-TUI verification`) | commit s<n> · push, open or update the draft PR · spawn the next stage | `approve · change <what> · stop` |
 | gate 3 | hand the branch to `spec-author` for the PR body (gate 4) | `approve · change <what> · stop` |
 | gate 4 | push · replace the draft's title and body · mark ready · wait for CI · squash-merge with the shown message · remove the worktree · delete the cards | `approve · manual run first · change <what> · stop` |
 | work done | delete `artifacts/<slug>/` | `approve · keep` |
@@ -209,6 +211,7 @@ Spawn `spec-planner` with: `artifacts/<slug>/spec-diff.md` path (none for a non-
 - `status=question` → relay, resume same agent.
 - `status=spec-gap` (approved text doesn't cover something the plan needs) → agent stays paused; run *Reconcile the spec*, resume the *same* planner.
 - `status=ready` → fresh `spec-reviewer`, scope `plan`. `count>0` → resume planner with `review.md` path; re-review.
+- The plan's `Stop` column (which stages stop for approval beyond the *Stage stop* rules) is settled at this stop: the user may tick or untick stages in the answer.
 - `clean`, or `findings` with `count=0` → `spec-author` drafts `issue.md` (*Tracking issue*; no stop of its own; a non-behavior run spawns one now with the goal verbatim, `plan.summary.md`, `artifacts/<slug>/`), then **one** `show-file.sh` call: `plan.summary.md`, `review.verdict.md` if it lists minors, `issue.md`, and — fast lane — `spec-diff.md`. One *Approval prompt*: approve, plus mode (full lane), plus lane for a non-behavior change.
 
 The plan's dependency tree reads as waves: a stage is runnable once its dependencies merge.
@@ -223,7 +226,7 @@ Default sequential; never infer concurrency from plan shape. Fast lane is always
 1. File or rewrite the issue (*Tracking issue*); record `issue` on the parent card. Fast lane: record `gate1` too.
 2. Create the worktree: `git worktree add .claude/worktrees/<slug> -b <type>/<slug> main`.
 3. Record `gate2`+`mode` (and `lane`, for a non-behavior change) on parent card, move parent → `inprogress/`.
-4. Create `open/<slug>.s<n>.md` per plan stage (`s0` only when the plan has one), `title`/`files`/`blocked-by` copied from the tree — `sh .claude/scripts/extract-section.sh '## Shared' artifacts/<slug>/plan.md` is the one plan read the orchestrator makes, for exactly those three fields. Parallel: also `open/<slug>.w<n>.md` per wave. Sequential: one wave-gate card for the run. Stage ids match plan ids.
+4. Create `open/<slug>.s<n>.md` per plan stage (`s0` only when the plan has one), `title`/`files`/`blocked-by` copied from the tree and `stop: yes|no` from `plan.summary.md`'s `Stop` column as the user settled it — `sh .claude/scripts/extract-section.sh '## Shared' artifacts/<slug>/plan.md` is the one plan read the orchestrator makes, for exactly those three fields. Parallel: also `open/<slug>.w<n>.md` per wave. Sequential: one wave-gate card for the run. Stage ids match plan ids.
 5. Spawn the implementer, its brief naming the lane. A plan with `s0` lands the approved spec text — normative only — as the branch's first commit; a `no-diff` or non-behavior plan has no `s0`.
 
 ### Tracking issue
@@ -281,7 +284,7 @@ Full lane. One fresh `spec-implementer`, spawned with worktree path, plan path, 
 
 1. Start: stage card `open`→`inprogress`.
 2. Green: card → `inreview`, `status=inreview stage=s<n>`. Orchestrator runs `gauntlet.sh` and the per-stage review below.
-3. Both clean → user approval stop. Approved → same implementer (resumed) commits, answers `status=committed`.
+3. Both clean → *Stage stop* rules decide: a rule fires → user approval stop; none fires → auto-continue (no stop). Either way the same implementer (resumed) commits, answers `status=committed`.
 4. Orchestrator pushes the worktree (push is never the implementer's), re-runs `gauntlet.sh` on the pushed sha, logs `gauntlet=pass sha=<sha>` on the parent card, card → `done`.
 
 #### Per-stage review
@@ -290,7 +293,30 @@ Full lane, sequential only; parallel's equivalent is the wave gate (parallel ste
 - Fresh `spec-reviewer`. Base ref = previous stage's commit (branch point for the first stage); scope = that stage id; gate 3's four axes on one stage's diff.
 - `clean`, or `findings` with `count=0` → show `review.verdict.md`, forward the gauntlet line, approval stop; its `Minors` go onto the next stage's card as `minor=` log lines.
 - `count>0` → card → `inprogress/`, resume implementer with `review.md` path and stage id, re-run `gauntlet.sh`, fresh reviewer. An unreviewed stage is never committed.
-- **One code stage** (besides `s0`): review in scope `branch` instead — it is gate 3's review, and the stage's approval stop is gate 3's stop. Gate 3 re-runs only if code changed after it.
+- **The last code stage**: review in scope `branch` instead — it is gate 3's review, and the stage's approval stop is gate 3's stop. Gate 3 re-runs only if code changed after it.
+
+#### Stage stop
+
+A green, clean-reviewed stage stops for approval only when one of these holds; otherwise it auto-continues. Checked in this order, the first hit is the stop's reason:
+
+1. the verdict has a `Needs user` item
+2. the stage's plan Verification goes beyond unit tests (demo TUI, real CSMS, device)
+3. a spec revision landed during the stage, any class
+4. *PR feedback* fetched `threads>0`
+5. it is the last code stage — its stop is gate 3's
+6. the plan marks it `stop` (`plan.summary.md` `Stop` column, settled at gate 2)
+7. its diff exceeds 400 changed lines or 8 files (`git diff --stat <base>...HEAD`)
+8. checkpoint: three stages auto-continued since the last stop
+
+`s0` never stops. Parallel mode: the rules apply to the wave gate (rule 7 on the wave's merged diff; rule 8 counts waves).
+
+**Auto-continue** is one line in chat, no answer awaited, and the draft PR update:
+
+```
+Landed s2 · <slug> · review clean · gauntlet pass <cov> · pushed <sha> · next: s3 (auto-continue — say stop to hold)
+```
+
+Log `auto=<rule-free>` or `stop=<rule n>` on the stage card. A user message while a stage is running is read before the next auto-continue; `stop` holds at the next green.
 
 #### Parallel waves
 
@@ -300,7 +326,7 @@ Full lane only. One worktree+branch per agent, branched off the feature branch's
 2. One implementer per stage: its worktree path, its stage only, its own card's absolute path. It commits its stage on green in its own worktree (a merge needs a commit) — unreviewed, never leaves the worktree until step 4 clears it.
 3. Wait for the whole wave; each card lands in `inreview/`.
 4. Per card: `gauntlet.sh` in its worktree, fresh `spec-reviewer` in `stage s<n>` scope (base = wave's branch point). `clean` → merge into feature branch — **this merge is the new base** every later wave branches from — `gauntlet.sh` on the merged result, push the feature branch (the first push opens the draft PR, *Every stage*), card → `done/`, remove worktree. `findings` → card → `inprogress/`, same implementer resumes with `review.md` path, fixes, amends its stage commit, back to this step.
-5. All `done` → wave gate → `inreview/`: fresh `spec-reviewer`, scope `wave w<n>`. `clean` → wave gate `done/`, **stop: ask the user for approval before the next wave** — after *PR feedback* has run; its merge is the next wave's base, a fresh checkpoint. `findings`, red gauntlet, or merge conflict → stop, forward the status line, implicated stage cards → `inprogress/`; fresh implementer per card gets `review.md` path.
+5. All `done` → wave gate → `inreview/`: fresh `spec-reviewer`, scope `wave w<n>`. `clean` → wave gate `done/`, then *Stage stop* rules on the wave — a rule fires → **stop: ask the user for approval before the next wave**; none → auto-continue — after *PR feedback* has run; its merge is the next wave's base, a fresh checkpoint. `findings`, red gauntlet, or merge conflict → stop, forward the status line, implicated stage cards → `inprogress/`; fresh implementer per card gets `review.md` path.
 
 Merge conflict between two stages in a wave = dependency tree was wrong — report, fix the tree, never hand-resolve and continue. Mid-wave stop stops that wave only: finished branches still merge, the rest re-plans.
 

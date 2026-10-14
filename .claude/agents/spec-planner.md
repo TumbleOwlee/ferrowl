@@ -35,17 +35,18 @@ Every decision, asked or not, is recorded in `plan.md` `## Shared` under `Decisi
 
 **Title** — the stage's display name, also its card's `title:`: imperative, verb first (`Update README`); ≤ 3 words, ≤ 20 characters; letters, digits, hyphens, spaces only; unique within the plan; no stage id. s0, when present, is always `Land spec`.
 
-`plan.summary.md` — the user's file, written last, rewritten whole on every revision, **≤ 25 lines / 2 KB** (`show-file.sh` refuses more). Decisions only, never how. One fact per line, lists over sentences. `Files` is a count with the crate modules in brackets, never full paths. `Pins` lists ID ranges with a count; every entry of `spec-diff.md` appears in exactly one stage's `Pins`. Blank line between blocks:
+`plan.summary.md` — the user's file, written last, rewritten whole on every revision, **≤ 25 lines / 2 KB** (`show-file.sh` refuses more). Decisions only, never how. One fact per line, lists over sentences. `Files` is a count with the crate modules in brackets, never full paths. `Pins` lists ID ranges with a count; every entry of `spec-diff.md` appears in exactly one stage's `Pins`. `Stop` marks a stage that must stop for the user's approval even when clean: one that lands something later stages consume (a new trait method or type, a wire/config-schema change, a new error variant, a public-surface change, any stage with ≥ 2 dependants) — `yes — <why>`; every other stage `—`. The user settles the column at gate 2; the orchestrator copies it onto the stage cards. Blank line between blocks:
 
 ```
 # <slug> — plan summary (rev N)
 
 Decide: <n> stages, <chain s0 → s1 → s2 | waves possible: w1 [s1,s2], w2 [s3]>. <why no waves, one line, when a chain>
 
-| Stage | What | Pins | Files |
-|---|---|---|---|
-| s0 | Land spec | all <n> entries | <n> (docs/specs/<area>) |   ← only when there is spec text to land
-| s1 | <≤ 12 words> | UI-R-366..369 (4) | <n> (<crate> <module>, <module>) |
+| Stage | What | Pins | Files | Stop |
+|---|---|---|---|---|
+| s0 | Land spec | all <n> entries | <n> (docs/specs/<area>) | — |   ← only when there is spec text to land
+| s1 | <≤ 12 words> | UI-R-366..369 (4) | <n> (<crate> <module>, <module>) | yes — <≤ 6 words why> |
+| s2 | <≤ 12 words> | … | … | — |
 
 Verification beyond unit tests:
 - s3 — <demo TUI | real CSMS | …>: <what is driven and what must be seen>. Cannot be waived without asking.
