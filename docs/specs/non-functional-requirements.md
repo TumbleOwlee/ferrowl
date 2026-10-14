@@ -78,6 +78,8 @@ See [`README.md`](./README.md).
 
 ## Versioning & testing
 
+### CI, lockstep and test layout
+
 **NF-R-040** — All workspace crates are versioned in lockstep; no crate is published independently.
 
 **NF-R-041** — Unit tests are colocated with the code under test (`#[cfg(test)] mod tests`, `ut_*` naming where practical); integration tests in each crate's `tests/`.
@@ -85,6 +87,8 @@ See [`README.md`](./README.md).
 **NF-R-055** — CI runs `cargo check` + `cargo test` on every push; a tag-triggered nightly workflow additionally builds and publishes release binaries.
 
 **NF-R-056** — `lefthook` enforces `cargo fmt --check` and `cargo clippy -D warnings` pre-commit.
+
+### Port guard
 
 **NF-R-043** — A test that needs a TCP or UDP port obtains it from `reserve_tcp_port() -> TcpPortGuard` or `reserve_udp_port() -> UdpPortGuard`, which bind `127.0.0.1:0` and **hold the binding** open until the code under test takes it over.
 
@@ -99,6 +103,8 @@ See [`README.md`](./README.md).
 **NF-R-058** — No test computes a port by binding `:0`, reading `local_addr()`, and dropping the socket inline; the bare `free_port() -> u16` shape is removed from every crate.
 
 **NF-R-059** — Exempt from the port-guard rule (NF-R-043, NF-R-058) is the deliberate port-**occupier** pattern (bind ephemerally, keep the binding alive, point a server at the same port to exercise bind-failure handling), where the collision is the assertion.
+
+### Temp dir and the fixture crate
 
 **NF-R-044** — No test reads or writes a path directly under `std::env::temp_dir()`. A test needing filesystem scratch space obtains it from `reserve_temp_dir(prefix: &str) -> TempDirGuard`, which creates a directory under `std::env::temp_dir()` whose name is unique per run (`prefix`, the current process id, and a monotonically increasing per-process counter) and exposes `path() -> &std::path::Path` and `join(name: impl AsRef<Path>) -> std::path::PathBuf`.
 

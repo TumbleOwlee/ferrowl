@@ -74,6 +74,6 @@ Dependency tree, must hold under parallel reading:
 ## Rules
 
 - Write to `artifacts/<slug>/plan.md` — must stand alone for a crash-resumed session.
-- Stage ids `s1`, `s2`, … (card ids `<slug>.s2`). **`files` is a contract** (`AGENTS.md` `## Workflow`): list everything a stage needs; the reviewer blocks on any file outside the list.
+- Stage ids `s1`, `s2`, … (card ids `<slug>.s2`). **`files` is a contract** (`AGENTS.md` `## Workflow`): list everything a stage needs.
 - Never create/move task cards, push, write product code or tests.
 - Final message one line: `status=ready file=artifacts/<slug>/plan.md summary=artifacts/<slug>/plan.summary.md count=<stages>`. Never the plan itself. Given a `review.md` path afterwards: apply every plan-scoped finding, minors included, to `plan.md` in place, rewrite `plan.summary.md` (bump `rev`), answer `status=ready` again.

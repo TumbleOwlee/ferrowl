@@ -224,6 +224,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 ## Script-manager dialog
 
+### Execute and templates
+
 **UI-R-051** — In the script-manager dialog, while the script table is focused, `e` executes the selected script exactly once, using the script's current editor content (including unapplied edits) regardless of its enabled flag. Execution semantics: SC-R-035.
 
 **UI-R-335** — `e` in the script-manager dialog with no script selected (UI-R-051) is a no-op.
@@ -240,6 +242,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **UI-R-054** — Confirming a template appends it to the dialog's working script list as a new enabled script whose code copies the template body, selects it, closes the overlay, leaves the dialog open. The script takes the template's name; if taken, the first free `<name>-<n>` (n from 2); insertion is never refused for a name collision.
 
+### Rename prompt
+
 **UI-R-055** — In the script-manager dialog, while the script table is focused, `Enter` on a selected script opens a rename prompt pre-filled with that script's name.
 
 **UI-R-338** — `Enter` in the rename prompt (UI-R-055) renames the script to the prompt's current text.
@@ -252,6 +256,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **UI-R-090** — In the script-manager dialog, `Enter` on the script table with no selection (UI-R-055) is a no-op.
 
+### Keybind-help overlay
+
 **UI-R-056** — In the script-manager dialog, while the script table is focused, `?` opens a keybind-help overlay listing the table's bindings (rename, run once, toggle enabled, delete, compact) with a one-line description each.
 
 **UI-R-186** — `Esc`, `q`, or `?` closes the script-table keybind-help overlay (UI-R-056).
@@ -259,6 +265,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **UI-R-187** — While the script-table keybind-help overlay (UI-R-056) is open it takes precedence over all other dialog keys.
 
 **UI-R-344** — While the script table is focused, its title advertises the keybind-help overlay (UI-R-056) and no other binding.
+
+### Table edits
 
 **UI-R-058** — In the script-manager dialog, while the script table is focused, the table supports editing its working list: a non-empty name in the new-script input plus confirm adds a new enabled, empty script (empty or already-used name refused, per UI-R-089).
 

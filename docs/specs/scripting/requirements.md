@@ -42,6 +42,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 ## Execution model
 
+### Sim thread and cycle
+
 **SC-R-010** — Because the Lua VM is not shareable across threads, each sim owner runs its context on a dedicated OS thread that builds the context inside that thread and loops until stopped. The UI event loop and async network runtime never execute Lua directly.
 
 **SC-R-011** — A sim thread is spawned only when at least one script is enabled for its owner; with none, no sim thread exists.
@@ -63,6 +65,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **SC-R-045** — A per-module (Modbus or OCPP) cycle interval (SC-R-016) is additionally floored to 0.05 s; the session-level interval has no floor.
 
 **SC-R-017** — Time observed through `C_Time` is measured from the moment the sim thread's context is built. Rebuilding the context (SC-R-024) resets the origin to zero.
+
+### On-demand run
 
 **SC-R-035** — An owner supports executing a single script **once, on demand** (script-manager dialog, UI-R-051); the run's other properties are SC-R-052–SC-R-060.
 

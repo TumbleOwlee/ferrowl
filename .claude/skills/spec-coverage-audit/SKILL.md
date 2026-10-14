@@ -46,7 +46,7 @@ Never asks about stack, CI, hooks, trackers; never sets up build/test/lint; neve
    | Cross-cutting (platforms, performance, security, versioning, testing) | [`non-functional-requirements.md`](<spec-dir>/non-functional-requirements.md) | `NF-R-*` |
    ```
 
-   (b) ID convention — stable, append-only, never renumbered or reused once retired, cited in commits/PRs/tests, one requirement per physical line; (c) minimal spec-handling note — before adding/changing a requirement in `<spec-dir>/`, propose the diff and get explicit approval from the project owner, then write. Nothing about plans, worktrees, review. A new minimal `AGENTS.md` = those three items plus a one-line title.
+   (b) ID convention — stable, append-only, never renumbered or reused once retired, cited in commits/PRs/tests, one requirement per physical line; (c) minimal spec-handling note — before adding/changing a requirement in `<spec-dir>/`, propose the diff and get explicit approval from the project owner, then write. A new minimal `AGENTS.md` = those three items plus a one-line title.
 
 ## 1. Scope
 
@@ -67,8 +67,6 @@ Semantic read, not a citation grep: a grep catches only tests missing an ID, nev
 Anything fitting no area in scope (or none at all): note separately, never fold into the nearest area.
 
 ## 4. Draft the diff
-
-Draft only; write nothing yet.
 
 - **Gaps in an existing area**: new `<PREFIX>-R-nnn` entries, one rule each (README rule 9), next free number per the ID convention of step 0a item 6(b). Testable, observable wording: `**<PREFIX>-R-001** — The <subject> <observable outcome> when <condition>.`
 - **Code fitting no area**: propose a new area inline — directory name, one-line "covers", unique prefix (two letters + `-R-`, not colliding with existing or `NF-R-*`) — then its first requirements.

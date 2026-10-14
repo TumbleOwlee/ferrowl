@@ -4,7 +4,7 @@
 
 ## Command line mechanism
 
-### Parsing and dispatch
+### Command mode and dispatch
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -24,7 +24,7 @@
 | **UI-E-140** | Command line with both an error and a notice set (UI-R-194, UI-R-195) | the error is shown and the notice is retained, appearing once the consumer clears the error |
 | **UI-E-093** | Command-line help box taller than the rows available above the line (UI-R-196) | the box is clipped to the available rows and stays anchored to the bottom, matching the app's no-minimum-size stance (UI-E-047) |
 
-### Lifecycle commands in flight
+### Lifecycle command dispatch
 
 | ID | Condition | Behavior |
 |---|---|---|

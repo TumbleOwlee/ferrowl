@@ -23,7 +23,6 @@ Ferrowl — Rust TUI simulator for Modbus (client/server, TCP/RTU) and OCPP (Cha
 3. Minimum implementation that passes.
 4. Refactor green.
 
-- Implementation without a preceding failing test: not done. Test written after the fact to fit code: not done.
 - Expected values from the authoritative source (standard/protocol/upstream API), never a debug print of your own implementation.
 - Every new/changed requirement ships ≥ 1 ID-citing test. Every existing test pinning observable behavior cites its requirement; pure internal/helper-detail tests may stay untagged. Behavior no requirement states = requirement missing — add it (spec change), never attach a loose ID.
 - Coverage floor 80% of lines, CI-gated. A floor, not a target: never inflate with tests that execute code without asserting.
@@ -32,7 +31,7 @@ Ferrowl — Rust TUI simulator for Modbus (client/server, TCP/RTU) and OCPP (Cha
 
 Triggers on **behavior change, any size**: new public function, changed default, new error variant, any observable semantics. Size sets stage count, never gate existence. Non-behavior change (refactor, rename, perf with identical semantics, test-only, docs, tooling): gate 1 skipped, rest runs. Trivial edit (one file, no semantics, no test/CI/build effect — typo, comment, doc wording): no gates, branch + PR.
 
-Gate/task-board mechanics (Gate 1 through Merge, Resume): [`.claude/AGENTS.workflow.md`](./.claude/AGENTS.workflow.md). Pull one section at a time with `extract-section.sh`.
+Gate/task-board mechanics (Gate 1 through Merge, Resume): [`.claude/AGENTS.workflow.md`](./.claude/AGENTS.workflow.md).
 
 A plan stage's `files` list is a contract: the stage touches exactly the files it names — tooling, test helpers, config, scripts, a flaky-test fix, a drive-by rename included.
 
@@ -71,7 +70,7 @@ cargo check -p ferrowl-ocpp               # typecheck one crate
 cargo llvm-cov --workspace --html         # browsable per-line coverage
 ```
 
-Full set before done. `lefthook` enforces `fmt --check` and `clippy -D warnings` pre-commit; CI runs the full set plus `cargo deny check` on every push **and every pull request**.
+Full set before done. `lefthook` enforces `fmt --check` and `clippy -D warnings` pre-commit; CI runs the full set plus `cargo deny check` on every push **and every pull request** (NF-R-055, NF-R-056).
 
 Dev loop: `cargo run --release -- --demo` (built-in demo tabs, no config) or `cargo build --profile fastrel` (opt-level 1, faster iterative builds).
 
@@ -83,11 +82,11 @@ Dev loop: `cargo run --release -- --demo` (built-in demo tabs, no config) or `ca
 
 ## Conventions — code
 
-- Unit tests: `#[cfg(test)] mod tests` at the bottom of the file under test, names `ut_*`. Integration tests: crate's `tests/`, names `it_*` (notably `ferrowl-ui` and much of `ferrowl`).
-- **Tests get ports from `ferrowl-test-support`, never a bare probe.** `reserve_tcp_port()`/`reserve_udp_port()` bind `127.0.0.1:0` and hold the binding; the guard's socket is handed to the server via `into_listener()`/`into_socket()` where the server accepts a bound socket, and `release()` is used only where the server can bind by number alone — a bare `free_port()`-style probe-and-drop is forbidden. The port-occupier pattern (bind ephemerally, keep the binding alive, point the server at the same port so the collision is the assertion) stays exempt. Scratch files come from `reserve_temp_dir()`, never straight from `std::env::temp_dir()`.
-- All 14 crates versioned in lockstep; never bump one alone.
+- Unit tests: `#[cfg(test)] mod tests` at the bottom of the file under test, names `ut_*`. Integration tests: crate's `tests/`, names `it_*` (notably `ferrowl-ui` and much of `ferrowl`) (NF-R-041).
+- **Tests get ports and scratch directories from `ferrowl-test-support`** (NF-R-043, NF-R-044), never a bare probe or `std::env::temp_dir()`.
+- All 14 crates versioned in lockstep (NF-R-040); never bump one alone.
 - Config files TOML or JSON only (extension-driven), never YAML.
-- Rust edition 2024, stable toolchain (`rust-toolchain.toml`).
+- Rust edition 2024, stable toolchain (`rust-toolchain.toml`, NF-R-003).
 - **Never split a source file just because it is large.** A split must separate distinct responsibilities, improve navigability, or cut coupling. One cohesive concern or flat generated data (spec table) stays whole.
 - **A comment says what the code cannot.** No restating the adjacent statement/field/function name; no step narration (`// Create app state`); no banners or import-group headers; no paragraph where a sentence does. **Never cite this workflow** — plan, stage id (`s7`), gate (`Gate3#2`), task item, `(Shared)`, "sanctioned change", "review fix", "manual-exercise fix": rots when the plan is deleted, meaningless to a later reader. Keep the technical content, drop the citation. Requirement IDs are the only sanctioned cross-reference. An `#[allow(...)]` justification names the condition that lifts it, never the stage that will. Applies to `//` and `///`.
 - **Typed handling over generic JSON.** Read request fields and build responses from the typed `rust_ocpp` structs/enums (`req.evse_id`, `Response201::Reset(...)`), never by indexing or hand-crafting `serde_json::Value` where a typed path exists — compiler catches a wrong field/missing field/bad enum, not the wire. Holds **even when it forces duplication**: distinct-but-similar types across 1.6/2.0.1/2.1 get duplicated typed code per version, never a shared untyped `Value`. **Only** sanctioned untyped JSON: the manual payload a user types into the action dialog, and version-independent plumbing that must inspect an arbitrary encoded action (e.g. a scope/EVSE guard spanning all actions) where no typed accessor exists.

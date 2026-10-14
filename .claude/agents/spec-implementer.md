@@ -18,7 +18,7 @@ Given `plan.md`'s path and your stage id(s): pull only your section(s), one batc
 
 Work **only** inside your worktree path — never the main checkout, never another agent's worktree. Never `git add -A` outside your assigned path.
 
-Also given the **absolute path of your own task card** (main checkout, outside your worktree) — the one exception. Keep it current: a new session reads it if this one dies. Append-only, one line per event, **≤ 160 characters**, tokens not prose; timestamp = `date -u +%FT%H:%M` (UTC, minute precision, no zone suffix — the same on every card so a resumed session can order events across cards) — no command output, no narration of how you staged or stashed, no test-name lists (the commit message holds those):
+Also given the **absolute path of your own task card** (main checkout, outside your worktree) — the one exception. Keep it current: a new session reads it if this one dies. Append-only, one line per event, **≤ 160 characters**, tokens not prose; timestamp = `date -u +%FT%H:%M` (UTC, minute precision, no zone suffix — the same on every card so a resumed session can order events across cards):
 
 Vocabulary (the only events you log):
 
@@ -45,10 +45,6 @@ May be given every stage (sequential) or some (others run in parallel). Implemen
 ## PR feedback
 
 Resumed with a `pr-feedback.md` path: the user's inline PR comments, one `## thread` each — findings with the same authority as the approved plan's reviewer. Fix each thread that falls inside your stage's files, then fill that thread's `reply:` block and leave everything else in the file untouched. A reply is `reply: fixed` or `reply: declined` followed by indented `- ` lines (what changed, an example if any, the test; or the reason — a cited ID or plan step — and what the user can do); never a sha or stage, the orchestrator's push fills `Fixed in s<n> (<sha>)`. `declined` leaves the thread open for the user; log `feedback=<n>` on your card; re-run the gauntlet, `status=inreview`. A thread asking for behavior the approved spec doesn't cover → `status=spec-gap`; a thread that is a question, or ambiguous → `status=blocked stage=s<n> reason=<thread id: the question>`; `reply:` stays empty in both cases.
-
-## Order, per stage, no exceptions
-
-`AGENTS.md`'s `## TDD — fixed order, every stage`, followed verbatim.
 
 ## Stage completion
 

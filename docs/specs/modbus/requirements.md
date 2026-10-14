@@ -32,6 +32,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 ## Data formats and codec
 
+### Format set and orders
+
 **MB-R-010** — Exactly thirteen formats: `Ascii`, `U8`, `U16`, `U32`, `U64`, `U128`, `I8`, `I16`, `I32`, `I64`, `I128`, `F32`, `F64`.
 
 **MB-R-011** — Widths in 16-bit registers: `U8`/`I8`/`U16`/`I16` = 1; `U32`/`I32`/`F32` = 2; `U64`/`I64`/`F64` = 4; `U128`/`I128` = 8; `Ascii` = configured width. Byte length = 2 × register width.
@@ -46,6 +48,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **MB-R-100** — For a width-1 format (`U8`, `I8`, `U16`, `I16`) register order is a no-op.
 
+### Bit-fields
+
 **MB-R-014** — Every integer format carries a bit-field mask; the shift is *derived* as the mask's trailing-zero count, never configured.
 
 **MB-R-015** — Integer decode yields `(raw & mask) >> shift`; encode places `(value << shift) & mask`, bits outside the mask zero.
@@ -56,9 +60,13 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **MB-R-018** — Float formats encode/decode as their raw IEEE 754 bit pattern under the same byte-order rule as integers.
 
+### ASCII
+
 **MB-R-019** — `Ascii` packs two characters per register, carries no byte order and no bit-field, and carries an alignment `Left` or `Right`.
 
 **MB-R-020** — Encoding `Ascii` zero-pads input to exactly `2 × width` bytes, on the right for `Left`, on the left for `Right`. Longer input is truncated, keeping the *first* bytes for `Left` and the *last* for `Right`.
+
+### Resolution and literal parsing
 
 **MB-R-021** — Every numeric format carries a display resolution (scale factor, default `1.0`), and its displayed value is `raw × resolution`.
 
@@ -69,6 +77,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **MB-R-206** — A signed integer format additionally accepts `-0x…` (MB-R-022), the negation of the hex bit pattern.
 
 **MB-R-207** — A `0x` literal on a float format (MB-R-022) is the IEEE 754 bit pattern, not a decimal value.
+
+### Decode errors and raw display
 
 **MB-R-023** — Decoding fewer words than the format's width fails with a too-few-bytes error. More words: only the first `width` consumed.
 
@@ -105,6 +115,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 ---
 
 ## Client
+
+### Poll loop and retry
 
 **MB-R-035** — A client polls a list of operations, each a (slave id, read function code, address range) triple, writing every successful read into the shared store under the key per MB-R-027.
 
@@ -144,9 +156,13 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **MB-R-049** — The terminate command, or the command channel closing, disconnects, ends the task with success, and emits a client-disconnected status.
 
+### Broadcast
+
 **MB-R-101** — On RTU, RtuOverTcp, Ascii, or AsciiOverTcp, a poll operation addressed to slave id 0 (broadcast) fails locally without reaching the wire, treated as a Modbus exception per MB-R-043, no disconnect.
 
 **MB-R-102** — On RTU, RtuOverTcp, Ascii, or AsciiOverTcp, a write command to slave id 0 is transmitted without awaiting a response, logged as executed, no disconnect.
+
+### Client log lines
 
 **MB-R-259** — A Modbus client appends a line to its module's log each time its transport connects, at Info (MB-R-258).
 

@@ -27,7 +27,7 @@ Add/drop per need.
 
 ## Requirements intentionally not unit-tested
 
-Most requirements are pinned by a test citing the ID. This list records the deliberate exceptions, in four kinds. Anything not listed below, and no `-E` entry outside kind 4, must carry a citing test. A listed requirement that gains observable behavior: remove from the list, add the test.
+This list records the deliberate exceptions, in four kinds, to the citing-test rule of `AGENTS.md` `## TDD — fixed order, every stage`. Anything not listed below, and no `-E` entry outside kind 4, must carry a citing test. A listed requirement that gains observable behavior: remove from the list, add the test.
 
 **Kind 1 — design posture/platform/toolchain/versioning** — facts about build/design, not runtime behavior a `shall` test observes; each names its enforcement point (CI job, manifest field, lint config).
 

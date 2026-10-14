@@ -24,11 +24,9 @@ status=no-diff file=artifacts/<slug>/spec-diff.md count=0      # spec already co
 status=reuse issue=<number> file=artifacts/<slug>/issue.md  |  status=new file=artifacts/<slug>/issue.md
 ```
 
-Look up facts yourself; ask only decisions (scope, defaults, naming, in/out). Orchestrator resumes you with the answers.
-
 ## Questions — `question.md`
 
-Collect every decision you can state without knowing another's answer into one file; a decision that depends on an answer waits for the next file. Rewritten whole each time. One block per decision:
+Look up facts yourself; ask only decisions (scope, defaults, naming, in/out). Collect every decision you can state without knowing another's answer into one file; a decision that depends on an answer waits for the next file. Rewritten whole each time. One block per decision:
 
 ```
 # <slug> — questions (gate 1)
@@ -82,7 +80,7 @@ Change: <≤ 12 words, what moved>
 
 ## Tracking issue — `issue.md`
 
-Drafted once the plan is reviewed (`/spec-request`: right after gate 1). Given candidate issues: read each (`issue-view.sh`, `## Conventions — GitHub`), write `issue.md`, then answer `reuse issue=<n> file=…` or `new file=…`.
+Given candidate issues: read each (`issue-view.sh`, `## Conventions — GitHub`), write `issue.md`, then answer `reuse issue=<n> file=…` or `new file=…`.
 
 `issue.md` is only the title and the goal; `issue-body.sh` assembles the body from it, `spec-diff.md`, `plan.md` and the parent card:
 

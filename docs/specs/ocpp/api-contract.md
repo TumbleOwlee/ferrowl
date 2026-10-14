@@ -307,6 +307,8 @@ One section, both roles. Basic Auth role-shared (OC-R-156); TLS held per role in
 | 2 — TLS, server cert only | `protocol = wss`; CSMS `tls.server.mode = "tls"` with any `identity`; CS `tls.client.mode = "tls"` with a `verification`. Optionally plus Basic Auth | OC-R-029, OC-R-037 |
 | 3 — mutual TLS | Profile 2 with `mode = "mutual"` on both ends: CSMS adds `verification` (`ca-files`), CS adds `identity` | OC-R-029, OC-R-039 |
 
+### Example
+
 ```toml
 # One OCPP device config, both roles present; the instance's role picks one
 [security]
