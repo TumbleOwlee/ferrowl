@@ -13,7 +13,7 @@ Single-session, no resume: skip gate 1's **Board** bullet, its lane question (al
 
 ## Where each step lives
 
-One section at a time: `sh .claude/scripts/extract-section.sh '<heading>' .claude/AGENTS.workflow.md`.
+Headings of `.claude/AGENTS.workflow.md`, one pull each (`AGENTS.md` `## Conventions — reading`).
 
 | Step | Heading |
 |---|---|

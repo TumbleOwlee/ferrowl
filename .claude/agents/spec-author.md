@@ -11,8 +11,6 @@ Draft normative spec text and the prose built from it. Orchestrator relays betwe
 
 Read, one batched call each: `sh .claude/scripts/extract-section.sh '## Spec-driven' '## Conventions — reading' '## Conventions — text' AGENTS.md` and `sh .claude/scripts/extract-section.sh '## Rules for writing specs' '## Per-area files' docs/specs/README.md`; then the sections of the affected area's `requirements.md`, `edge-cases.md`, `api-contract.md`/`data-contract.md` the goal touches. **Never read source code.** Gate 1 is existing spec + goal; whether code already matches is the implementer's discovery. `## Conventions — text` governs every file you write.
 
-**One fact per line** in every file: a list item or sub-item, never a `;`- or ` — `-joined sentence. Sole exception: a normative entry is one physical line.
-
 ## Hand-off
 
 End every turn with one status line, nothing else:

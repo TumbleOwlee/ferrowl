@@ -164,6 +164,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 ## Reconnect
 
+### Client reconnect
+
 **MB-R-050** — With `reconnect` enabled (default), neither a failed connection attempt nor a transport error during a run ends the client task; the client waits a backoff and retries.
 
 **MB-R-051** — Backoff starts at 1 s, doubles after each failed attempt, capped at 30 s.
@@ -182,6 +184,20 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **MB-R-190** — A Modbus client module's status bar colors (MB-R-137): `CONNECTED` success, `RECONNECTING` warning, `DISCONNECTED` error.
 
+**MB-R-220** — A terminate, or the command channel closing, arriving while a client connection attempt is in flight (TCP connect, TLS handshake, UDP local bind, or serial-port open) aborts that attempt immediately and ends the client task with success, without waiting for the attempt to succeed or fail (MB-R-053 covers the same arrival during a backoff wait).
+
+**MB-R-260** — A Modbus client's line reporting a failed connection attempt (TCP connect, TLS handshake, UDP local bind/associate, serial-port open) carries Error (MB-R-258), whether or not `reconnect` retries it.
+
+**MB-R-261** — A Modbus client's line reporting that an established transport was lost other than by terminate carries Warning (MB-R-258).
+
+**MB-R-262** — A Modbus client's line announcing a reconnect backoff wait or a reconnect attempt carries Info (MB-R-258).
+
+**MB-R-263** — A Modbus client's line reporting that the task ends on a transport failure because `reconnect` is disabled carries Error (MB-R-258).
+
+**MB-R-279** — A Modbus client's line reporting a command dropped because the client is disconnected and backing off carries Warning (MB-R-258).
+
+### Server reconnect
+
 **MB-R-130** — With `reconnect` enabled (default), a server's listener bind failure (TCP, `RtuOverTcp`, `Udp`, `AsciiOverTcp`) or serial-port open failure (RTU, `Ascii`) does not end the server task; it waits a backoff and retries per MB-R-051.
 
 **MB-R-131** — With `reconnect` enabled, a mid-serve failure (listener or serial port failing after opening) retries the same way once the current serve loop ends.
@@ -196,23 +212,12 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **MB-R-153** — A Modbus server module's displayed status follows MB-R-137's three-state rule with "listener bound" (TCP-family) or "serial port open" (RTU/Ascii) for "transport connected": `CONNECTED` while bound/open; `RECONNECTING` while the task runs but is not bound/open (MB-R-071, MB-R-075, MB-R-120, MB-R-130–MB-R-134); `DISCONNECTED` while the task is not running.
 
-**MB-R-220** — A terminate, or the command channel closing, arriving while a client connection attempt is in flight (TCP connect, TLS handshake, UDP local bind, or serial-port open) aborts that attempt immediately and ends the client task with success, without waiting for the attempt to succeed or fail (MB-R-053 covers the same arrival during a backoff wait).
-
 **MB-R-221** — A terminate, or the command channel closing, arriving while a server's listener bind or serial-port open is in flight aborts it immediately and ends the server task with success, without waiting for the bind or the open to complete (MB-R-131 and MB-E-076 keep the separate rule that an already-running serve loop is not torn down early).
 
-**MB-R-260** — A Modbus client's line reporting a failed connection attempt (TCP connect, TLS handshake, UDP local bind/associate, serial-port open) carries Error (MB-R-258), whether or not `reconnect` retries it.
-
-**MB-R-261** — A Modbus client's line reporting that an established transport was lost other than by terminate carries Warning (MB-R-258).
-
-**MB-R-262** — A Modbus client's line announcing a reconnect backoff wait or a reconnect attempt carries Info (MB-R-258).
-
-**MB-R-263** — A Modbus client's line reporting that the task ends on a transport failure because `reconnect` is disabled carries Error (MB-R-258).
-
-**MB-R-279** — A Modbus client's line reporting a command dropped because the client is disconnected and backing off carries Warning (MB-R-258).
-
 ---
-
 ## Server
+
+### Requests and the store
 
 **MB-R-057** — A server answers every request directly from the shared store: no request queue, no simulated device logic.
 
@@ -235,6 +240,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **MB-R-103** — An RTU, RtuOverTcp, Ascii, or AsciiOverTcp server applies a request addressed to slave id 0 (broadcast) to the store as any other but emits no response frame, not even an exception.
 
 **MB-R-128** — On `Rtu` or `Ascii` (not `RtuOverTcp`/`AsciiOverTcp`), a request for a slave id with no declared region in any table is applied as any other (store lookup fails per MB-R-065) but emits no response, not even an exception, matching MB-R-103. A slave id with ≥1 declared region but an address outside all of them still gets `IllegalDataAddress`.
+
+### Listener, peers and log lines
 
 **MB-R-066** — A server logs a "request received" line for every request, including rejected function codes.
 
@@ -261,7 +268,6 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **MB-R-287** — A serial server's (RTU, `Ascii`) link ending other than by stop or terminate — on an I/O error, or on end-of-file between frames — is a mid-serve serial failure, logged per MB-R-271 with a line naming the serial path and the I/O error or end-of-file, then reopened per MB-R-131 or ending the task per MB-R-134.
 
 ---
-
 ## Transport — TCP
 
 **MB-R-068** — A TCP client connects to `ip:port`, the attempt bounded by `timeout_ms`.

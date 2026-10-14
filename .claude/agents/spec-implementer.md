@@ -20,12 +20,16 @@ Work **only** inside your worktree path — never the main checkout, never anoth
 
 Also given the **absolute path of your own task card** (main checkout, outside your worktree) — the one exception. Keep it current: a new session reads it if this one dies. Append-only, one line per event, **≤ 160 characters**, tokens not prose; timestamp = `date -u +%FT%H:%M` (UTC, minute precision, no zone suffix — the same on every card so a resumed session can order events across cards) — no command output, no narration of how you staged or stashed, no test-name lists (the commit message holds those):
 
+Vocabulary (the only events you log):
+
 ```
 2026-01-02T14:02 spawn agent=impl
 2026-01-02T14:05 test-red <ID> <test name>
-2026-01-02T14:11 green commit=<sha>
-2026-01-02T14:12 gauntlet=pass sha=<sha>
-2026-01-02T14:12 stopped: <what and why>
+2026-01-02T14:09 green
+2026-01-02T14:12 gauntlet=pass cov=<n>%            | gauntlet=fail <one-line reason>
+2026-01-02T14:13 commit=<sha>
+2026-01-02T14:14 feedback=<n>
+2026-01-02T14:15 stopped: <what and why>
 ```
 
 May be given every stage (sequential) or some (others run in parallel). Implement assigned stages only, in plan order, touching only their listed files — another agent owns the rest; editing it causes an invisible merge conflict, and the reviewer blocks on it. Not in `files` = not yours, however small — tooling, test helpers, config, scripts, flaky-test fixes you notice on the way included. Stage `s0` (`Land spec`), when the plan has one, is yours: copy the approved text where the plan says — `**bold**` marks in a changed entry are stripped, the landed line is plain — one commit, no code. A spec revision landing after `s0` (or in a plan without one) goes into `docs/specs/` before you continue, inside your current stage's commit — those `docs/specs/` files count as your stage's `files`.
@@ -48,7 +52,7 @@ Resumed with a `pr-feedback.md` path: the user's inline PR comments, one `## thr
 
 ## Stage completion
 
-Run the full gauntlet from `AGENTS.md`'s `## Build / test / lint`; the card gets `gauntlet=pass cov=<n>%` or `gauntlet=fail <one-line reason>` — never an excerpt, never a log.
+Run the full gauntlet from `AGENTS.md`'s `## Build / test / lint`; log its `gauntlet=` line — never an excerpt, never a log.
 
 ## Stop and report — never improvise
 

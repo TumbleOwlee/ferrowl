@@ -17,7 +17,7 @@ Brief: path of `artifacts/<slug>/spec-diff.md` (read section by section: `sh .cl
 
 ## Interview before drafting
 
-Surface every plan-shaped decision (stage boundaries, extend-vs-reimplement, test strategy, file layout) via the orchestrator, with a recommendation. Look up facts yourself; ask only decisions. Collect every decision you can state without knowing another's answer into `artifacts/<slug>/question.md` (shape: `spec-author.md` `## Questions`, title `# <slug> — questions (gate 2)`), end turn on `status=question file=… count=<n>`; a decision that depends on an answer waits for the next file. `Why you:` is mandatory — a question you cannot give a real criterion for is yours to decide, recorded `(chosen)`. No plan until every decision is resolved.
+Surface every plan-shaped decision (stage boundaries, extend-vs-reimplement, test strategy, file layout) via the orchestrator, with a recommendation, in `artifacts/<slug>/question.md` — shape, batching and the `Why you:` rule per `spec-author.md` `## Questions`, title `# <slug> — questions (gate 2)` — and end turn on `status=question file=… count=<n>`. No plan until every decision is resolved.
 
 Every decision, asked or not, is recorded in `plan.md` `## Shared` under `Decisions:`, one line each: `- <choice> (<user | chosen>) — rejected: <alternative>; <≤ 1 line why>`. `issue-body.sh` copies them into the issue.
 
@@ -27,7 +27,7 @@ Every decision, asked or not, is recorded in `plan.md` `## Shared` under `Decisi
 
 ## Output
 
-`plan.md` is flat markdown, headed so `.claude/scripts/extract-section.sh` pulls exactly one section — no later reader (implementer, reviewer, resumed session) opens the whole file:
+`plan.md` is flat markdown, headed so `.claude/scripts/extract-section.sh` pulls exactly one section — no later reader (implementer, reviewer, resumed session) opens the whole file. Heading text is exact and stable once written: implementers extract by it via the card's `title:`, reviewers via the `## Shared` tree; renaming after approval breaks the lookup.
 
 - `## Shared` — first section. **Dependency tree** (below), `Decisions:` (above), verification approach if uniform across stages, any code reference cited by 2+ stages. Tree lists every stage's `title`, `files` and `blocked-by` — orchestrator copies those three fields onto cards from this section alone.
 - `## Stage s0: Land spec` — the first stage whenever `spec-diff.md` has entries to land: copy each `## <ID>` into its `docs/specs/<area>/` file (exact target file + insertion point per ID, contract-file rows likewise), one commit, no code. Every other stage is `blocked-by: [s0]`. A `no-diff` or non-behavior plan has no `s0` — no empty stage.
@@ -35,7 +35,7 @@ Every decision, asked or not, is recorded in `plan.md` `## Shared` under `Decisi
 
 **Title** — the stage's display name, also its card's `title:`: imperative, verb first (`Update README`); ≤ 3 words, ≤ 20 characters; letters, digits, hyphens, spaces only; unique within the plan; no stage id. s0, when present, is always `Land spec`.
 
-`plan.summary.md` — the user's file, written last, rewritten whole on every revision, **≤ 25 lines / 2 KB** (`show-file.sh` refuses more). Decisions only, never how. One fact per line, lists over sentences. `Files` is a count with the crate modules in brackets, never full paths. `Pins` lists ID ranges with a count; every entry of `spec-diff.md` appears in exactly one stage's `Pins`. `Stop` marks a stage that must stop for the user's approval even when clean: one that lands something later stages consume (a new trait method or type, a wire/config-schema change, a new error variant, a public-surface change, any stage with ≥ 2 dependants) — `yes — <why>`; every other stage `—`. The user settles the column at gate 2; the orchestrator copies it onto the stage cards. Blank line between blocks:
+`plan.summary.md` — the user's file, written last, rewritten whole on every revision, **≤ 25 lines / 2 KB** (`show-file.sh` refuses more). Decisions only, never how. `Files` is a count with the crate modules in brackets, never full paths. `Pins` lists ID ranges with a count; every entry of `spec-diff.md` appears in exactly one stage's `Pins`. `Stop` marks a stage that must stop for the user's approval even when clean: one that lands something later stages consume (a new trait method or type, a wire/config-schema change, a new error variant, a public-surface change, any stage with ≥ 2 dependants) — `yes — <why>`; every other stage `—`. The user settles the column at gate 2; the orchestrator copies it onto the stage cards. Blank line between blocks:
 
 ```
 # <slug> — plan summary (rev N)
@@ -74,6 +74,6 @@ Dependency tree, must hold under parallel reading:
 ## Rules
 
 - Write to `artifacts/<slug>/plan.md` — must stand alone for a crash-resumed session.
-- Stage ids `s1`, `s2`, … (card ids `<slug>.s2`). **`files` is a contract, not a hint:** a stage may touch exactly what its list names — tooling, test helpers, config, scripts, flaky-test fixes a stage needs are listed too; the reviewer blocks on any file outside the list. Heading text exact and stable once written (`## Stage s2: <title>`) — implementers extract by it via the card's `title:`, reviewers via the `## Shared` tree; renaming after approval breaks the lookup.
+- Stage ids `s1`, `s2`, … (card ids `<slug>.s2`). **`files` is a contract, not a hint:** a stage may touch exactly what its list names — tooling, test helpers, config, scripts, flaky-test fixes a stage needs are listed too; the reviewer blocks on any file outside the list.
 - Never create/move task cards, push, write product code or tests.
 - Final message one line: `status=ready file=artifacts/<slug>/plan.md summary=artifacts/<slug>/plan.summary.md count=<stages>`. Never the plan itself. Given a `review.md` path afterwards: apply every plan-scoped finding, minors included, to `plan.md` in place, rewrite `plan.summary.md` (bump `rev`), answer `status=ready` again — the orchestrator allows two such rounds before the user sees the remaining findings.
