@@ -107,7 +107,9 @@ impl<S: DrawSurface> App<S> {
             (None, KeyModifiers::CONTROL, KeyCode::Char('w')) if !self.view_overlay_active() => {
                 self.keymode = Some(KeyMode::CtrlWin)
             }
-            (Some(KeyMode::CtrlWin), _, KeyCode::Char('j' | 'k') | KeyCode::Down | KeyCode::Up) => {
+            (Some(KeyMode::CtrlWin), _, KeyCode::Char('j' | 'k') | KeyCode::Down | KeyCode::Up)
+                if !self.view_overlay_active() =>
+            {
                 self.keymode = None;
                 self.toggle_pane();
             }
@@ -176,13 +178,21 @@ impl<S: DrawSurface> App<S> {
     }
 
     /// Forward a key to the active tab, which dispatches to whichever of its panes (content view or
-    /// log) currently holds focus. Returns `true` if consumed.
+    /// log) currently holds focus. An open view overlay takes the key whichever pane holds focus
+    /// (UI-R-005, UI-R-071); the tab's pane focus is untouched, so it is restored on close
+    /// (UI-R-072). Returns `true` if consumed.
     fn forward_nav(&mut self, modifiers: KeyModifiers, code: KeyCode) -> bool {
         let idx = self.tabs.selected_index();
         let Some(tab) = self.tabs.titles.get_mut(idx) else {
             return false;
         };
         match self.focus {
+            Focus::Content if tab.view.is_overlay_active() => {
+                matches!(
+                    tab.view.handle_events(modifiers, code),
+                    EventResult::Consumed
+                )
+            }
             Focus::Content => matches!(tab.handle_events(modifiers, code), EventResult::Consumed),
             Focus::Command | Focus::Dialog => false,
         }
@@ -641,5 +651,160 @@ mod tests {
         app.handle_nav_key(SHIFT, KeyCode::Left);
         assert_eq!(app.tabs.selected_index(), 0);
         assert!(h0.keys().is_empty());
+    }
+
+    async fn type_command(app: &mut App<crate::app::testkit::MockScreen>, cmd: &str) {
+        app.handle_key(KeyModifiers::NONE, KeyCode::Char(':')).await;
+        for c in cmd.chars() {
+            app.handle_key(KeyModifiers::NONE, KeyCode::Char(c)).await;
+        }
+        app.handle_key(KeyModifiers::NONE, KeyCode::Enter).await;
+    }
+
+    #[tokio::test]
+    /// UI-R-005, UI-R-071, UI-R-072 — a dialog opened by a `:` command while the log pane is
+    /// focused takes the keys, closes on `Esc`, and leaves the log focused.
+    async fn ut_command_opened_dialog_takes_keys_while_log_focused() {
+        let (v, h) = MockView::pair("a");
+        let mut app = build_app(vec![v.with_dialog_on_command("edit").boxed()]);
+        app.handle_key(SHIFT, KeyCode::Down).await;
+        assert!(app.tabs.titles[0].is_log_focused());
+        type_command(&mut app, "edit").await;
+        assert!(app.tabs.titles[0].view.is_overlay_active());
+        app.handle_key(KeyModifiers::NONE, KeyCode::Esc).await;
+        assert_eq!(h.keys().last(), Some(&(KeyModifiers::NONE, KeyCode::Esc)));
+        assert!(!app.tabs.titles[0].view.is_overlay_active());
+        assert!(app.tabs.titles[0].is_log_focused());
+    }
+
+    #[tokio::test]
+    /// UI-R-005, UI-R-071, UI-R-072 — a dialog opened by `refresh()` while the log pane is focused
+    /// takes the keys, closes on `Esc`, and leaves the log focused.
+    async fn ut_refresh_opened_dialog_takes_keys_while_log_focused() {
+        let (v, h) = MockView::pair("a");
+        let mut app = build_app(vec![v.with_dialog_on_refresh().boxed()]);
+        app.handle_key(SHIFT, KeyCode::Down).await;
+        app.refresh_snapshot().await;
+        assert!(app.tabs.titles[0].view.is_overlay_active());
+        app.handle_key(KeyModifiers::NONE, KeyCode::Esc).await;
+        assert_eq!(h.keys().last(), Some(&(KeyModifiers::NONE, KeyCode::Esc)));
+        assert!(!app.tabs.titles[0].view.is_overlay_active());
+        assert!(app.tabs.titles[0].is_log_focused());
+    }
+
+    #[tokio::test]
+    /// UI-R-009, UI-R-071, UI-E-167 — a `Ctrl+w` chord armed before a dialog opens does not switch
+    /// panes under it; the second key reaches the dialog.
+    async fn ut_ctrl_w_then_dialog_from_refresh_keeps_pane_focus() {
+        let (v, h) = MockView::pair("a");
+        let mut app = build_app(vec![v.with_dialog_on_refresh().boxed()]);
+        app.handle_key(SHIFT, KeyCode::Down).await;
+        app.handle_key(KeyModifiers::CONTROL, KeyCode::Char('w'))
+            .await;
+        app.refresh_snapshot().await;
+        app.handle_key(KeyModifiers::NONE, KeyCode::Char('j')).await;
+        assert!(app.tabs.titles[0].is_log_focused());
+        assert_eq!(
+            h.keys().last(),
+            Some(&(KeyModifiers::NONE, KeyCode::Char('j')))
+        );
+        assert!(app.keymode.is_none());
+    }
+
+    async fn edit_dialog_closes_from_log_focus(view: Box<dyn crate::module::view::ModuleView>) {
+        let mut app = build_app(vec![view]);
+        app.handle_key(SHIFT, KeyCode::Down).await;
+        assert!(app.tabs.titles[0].is_log_focused());
+        type_command(&mut app, "edit").await;
+        assert!(app.tabs.titles[0].view.is_overlay_active());
+        app.handle_key(SHIFT, KeyCode::Down).await;
+        assert!(app.tabs.titles[0].is_log_focused());
+        assert!(app.tabs.titles[0].view.is_overlay_active());
+        app.handle_key(KeyModifiers::NONE, KeyCode::Esc).await;
+        app.handle_key(KeyModifiers::NONE, KeyCode::Enter).await;
+        assert!(!app.tabs.titles[0].view.is_overlay_active());
+        assert!(app.tabs.titles[0].is_log_focused());
+    }
+
+    fn rtu_spec(name: &str, role: crate::config::Role) -> crate::config::ModuleSpec {
+        crate::config::ModuleSpec {
+            name: name.into(),
+            device: String::new(),
+            role,
+            endpoint: crate::config::Endpoint::Rtu {
+                path: format!("/nonexistent/ui-r-072-{name}"),
+                baud_rate: 9600,
+                parity: None,
+                data_bits: None,
+                stop_bits: None,
+            },
+        }
+    }
+
+    fn ocpp_spec(
+        role: crate::module::ocpp::config::session::OcppRole,
+    ) -> crate::module::ocpp::config::session::OcppSpec {
+        use crate::module::ocpp::config::session::{OcppProtocol, OcppSpec, OcppVersion};
+        OcppSpec {
+            name: "cs".into(),
+            version: OcppVersion::V1_6,
+            role,
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".into(),
+            port: 0,
+            path: String::new(),
+            timeout_ms: None,
+            reconnect: None,
+            security: Default::default(),
+        }
+    }
+
+    #[tokio::test]
+    /// UI-R-071, UI-R-072, UI-E-167 — the Modbus view's `:edit` dialog takes keys and closes from log focus.
+    async fn ut_modbus_edit_dialog_closes_from_log_focus() {
+        let spec = rtu_spec("mb", crate::config::Role::Server);
+        let device = crate::config::DeviceConfig::default();
+        let module = crate::module::modbus::ModbusModule::new(&spec, &device);
+        edit_dialog_closes_from_log_focus(Box::new(
+            crate::module::modbus::view::ModbusModuleView::new(module, spec, device),
+        ))
+        .await;
+    }
+
+    #[tokio::test]
+    /// UI-R-071, UI-R-072, UI-E-167 — the Modbus monitor view's `:edit` dialog takes keys and closes from log focus.
+    async fn ut_modbus_monitor_edit_dialog_closes_from_log_focus() {
+        use crate::module::modbus::monitor::{ModbusMonitorModule, ModbusMonitorModuleView};
+        let spec = rtu_spec("mon", crate::config::Role::Monitor);
+        let device = crate::config::MonitorDeviceConfig::default();
+        let module = ModbusMonitorModule::new(&spec, &device);
+        edit_dialog_closes_from_log_focus(Box::new(ModbusMonitorModuleView::new(
+            module, spec, device,
+        )))
+        .await;
+    }
+
+    #[tokio::test]
+    /// UI-R-071, UI-R-072, UI-E-167 — the OCPP client 1.6 view's `:edit` dialog takes keys and closes from log focus.
+    async fn ut_ocpp_client_edit_dialog_closes_from_log_focus() {
+        use crate::module::ocpp::config::{device::OcppDeviceConfig, session::OcppRole};
+        let view = crate::module::ocpp::client::build_client_view(
+            ocpp_spec(OcppRole::Client),
+            String::new(),
+            OcppDeviceConfig::default(),
+        );
+        edit_dialog_closes_from_log_focus(view).await;
+    }
+
+    #[tokio::test]
+    /// UI-R-071, UI-R-072, UI-E-167 — the OCPP server 1.6 view's `:edit` dialog takes keys and closes from log focus.
+    async fn ut_ocpp_server_edit_dialog_closes_from_log_focus() {
+        use crate::module::ocpp::config::{device::OcppDeviceConfig, session::OcppRole};
+        let view = crate::module::ocpp::server::build_server_view_unbound(
+            ocpp_spec(OcppRole::Server),
+            String::new(),
+            OcppDeviceConfig::default(),
+        );
+        edit_dialog_closes_from_log_focus(view).await;
     }
 }
