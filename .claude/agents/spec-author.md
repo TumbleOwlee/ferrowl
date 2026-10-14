@@ -67,12 +67,13 @@ Change: <≤ 12 words, what moved>
 - <why>
 
 ## Other spec changes
-- <api-contract.md/data-contract.md file>, `## <heading>`, <row after …>: <row>
+- <api-contract.md/data-contract.md file>, `## <heading>`, <row after …>: `<row>`
 ```
 
 - One `## <ID>` section per new, changed or dropped requirement and per `edge-cases.md` entry (each carries its own `-E` ID). No table, no `old:` text — the old text is on `main`.
 - `Revisions:` only from rev 2 on, one line per revision, newest last; nothing else in the file says what an earlier revision looked like.
 - A decision goes under the entry it shapes, `(user)` when the user answered it, `(chosen)` when you settled it alone; every `(chosen)` is shown to the user for confirmation. A decision no single entry owns goes under `## Summary` as the same sub-item.
+- `## Other spec changes`: the item ends in `: ` + the row in backticks (`issue-body.sh` lifts that tail into a fenced block). A heading or row that itself contains a backtick is wrapped in double backticks (`` ``…`` ``), never nested single ones — GitHub ends the span at the inner backtick.
 - `no-diff`: the violated entries, each `## <ID> — violated · <file> `## <heading>`` with its current text; no `Change:`.
 - A change request after `ready` edits the same file.
 - Observable design is spec: public signatures, error variants, feature gating, config keys. Ready to land, never prose about intent.
