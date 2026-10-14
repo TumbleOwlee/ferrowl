@@ -4,7 +4,9 @@ Application shell and tab model, focus model, keyboard navigation, `:` command l
 
 See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contract.md) (exhaustive `:` command list, every keybinding table, code-editor mode/command set), [`edge-cases.md`](./edge-cases.md).
 
-**Area boundaries.** This area owns the *mechanism*: how `:` commands parse and dispatch, generic (app-level) commands, keybindings, vim + arrow navigation, dialogs as a mechanism, the code editor, syntax highlighting. It does **not** own protocol-specific command *semantics*: a command forwarded to a module view (Modbus `:set`, `:reload`, OCPP `:rfid`, `:start`/`:stop`) is *listed* here with general syntax; its effect on protocol state is `modbus/` or `ocpp/`. Which config fields a dialog exposes and their valid ranges belong to the protocol / `config-session/` areas; the dialog *mechanism* is owned here. The process command line (`ferrowl run`, CLI flags) is `cli-headless/`; only the in-TUI `:` line is owned here.
+## Area boundaries
+
+This area owns the *mechanism*: how `:` commands parse and dispatch, generic (app-level) commands, keybindings, vim + arrow navigation, dialogs as a mechanism, the code editor, syntax highlighting. It does **not** own protocol-specific command *semantics*: a command forwarded to a module view (Modbus `:set`, `:reload`, OCPP `:rfid`, `:start`/`:stop`) is *listed* here with general syntax; its effect on protocol state is `modbus/` or `ocpp/`. Which config fields a dialog exposes and their valid ranges belong to the protocol / `config-session/` areas; the dialog *mechanism* is owned here. The process command line (`ferrowl run`, CLI flags) is `cli-headless/`; only the in-TUI `:` line is owned here.
 
 ---
 
@@ -224,6 +226,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 ## Script-manager dialog
 
+### Execute and templates
+
 **UI-R-051** — In the script-manager dialog, while the script table is focused, `e` executes the selected script exactly once, using the script's current editor content (including unapplied edits) regardless of its enabled flag. Execution semantics: SC-R-035.
 
 **UI-R-335** — `e` in the script-manager dialog with no script selected (UI-R-051) is a no-op.
@@ -240,6 +244,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **UI-R-054** — Confirming a template appends it to the dialog's working script list as a new enabled script whose code copies the template body, selects it, closes the overlay, leaves the dialog open. The script takes the template's name; if taken, the first free `<name>-<n>` (n from 2); insertion is never refused for a name collision.
 
+### Rename prompt
+
 **UI-R-055** — In the script-manager dialog, while the script table is focused, `Enter` on a selected script opens a rename prompt pre-filled with that script's name.
 
 **UI-R-338** — `Enter` in the rename prompt (UI-R-055) renames the script to the prompt's current text.
@@ -252,6 +258,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **UI-R-090** — In the script-manager dialog, `Enter` on the script table with no selection (UI-R-055) is a no-op.
 
+### Keybind-help overlay
+
 **UI-R-056** — In the script-manager dialog, while the script table is focused, `?` opens a keybind-help overlay listing the table's bindings (rename, run once, toggle enabled, delete, compact) with a one-line description each.
 
 **UI-R-186** — `Esc`, `q`, or `?` closes the script-table keybind-help overlay (UI-R-056).
@@ -259,6 +267,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **UI-R-187** — While the script-table keybind-help overlay (UI-R-056) is open it takes precedence over all other dialog keys.
 
 **UI-R-344** — While the script table is focused, its title advertises the keybind-help overlay (UI-R-056) and no other binding.
+
+### Table edits
 
 **UI-R-058** — In the script-manager dialog, while the script table is focused, the table supports editing its working list: a non-empty name in the new-script input plus confirm adds a new enabled, empty script (empty or already-used name refused, per UI-R-089).
 
@@ -352,7 +362,7 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 ## Markdown input field
 
-### Markdown view modes, wrapping and navigation
+### Markdown view modes
 
 **UI-R-181** — The markdown input field is a multi-line widget composing the vim-modal code-editor state (UI-R-027 through UI-R-036): buffer, `Normal`/`Insert`/`Visual` modes, motions and operators, registers, single-level undo and the disabled flag, which the markdown widget surfaces as read-only.
 
@@ -364,6 +374,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **UI-R-129** — The styled-source view of UI-R-182 and UI-R-183 is produced by the Markdown language of UI-R-037: source characters are drawn unchanged, styled by highlight span.
 
+### Markdown wrapping
+
 **UI-R-130** — Line wrapping is always on and cannot be disabled: content never overflows the widget width horizontally and the widget never scrolls horizontally.
 
 **UI-R-131** — A line too long for the available width breaks at a word boundary; a single word longer than the available width breaks at a character boundary instead.
@@ -371,6 +383,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **UI-R-132** — Continuation rows of a wrapped list item or block quote are indented to the content start of that line (the column after its marker), so wrapped text aligns under the first row's text.
 
 **UI-R-133** — A fence delimiter or fence-body line wraps at a character boundary with no hanging indent.
+
+### Markdown navigation and cursor
 
 **UI-R-134** — `j`, `k`, their count prefixes, `dd`, `yy` and gutter line numbers address source lines, not display rows: `j` from a wrapped line moves to the next source line.
 
@@ -742,6 +756,14 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **UI-R-118** — The tab widget's scroll (UI-R-117) places the active tab's block as near the middle of the area as fits: the cells before the block along the layout direction take at most half the leftover extent and the cells after it take the remainder, and extent one side cannot use never rolls over to the other.
 
+**UI-R-173** — The tab widget (UI-R-114) takes a layout direction of `Horizontal` or `Vertical`, default `Horizontal`, which lays the tabs out left to right or top to bottom and thereby fixes which axis every along-the-direction rule (UI-R-114, UI-R-117, UI-R-118, UI-R-120, UI-R-122, UI-R-126) applies to.
+
+**UI-R-174** — Under `Horizontal` layout (UI-R-173) a tab's title in the tab widget (UI-R-114) is written one character per column, left to right in title order, so an n-character title occupies n consecutive character columns.
+
+**UI-R-175** — The tab widget recomputes its scroll offset from the active tab's block on every render (UI-R-118) and stores it in its state as the record of the last computed window start, so the stored offset is an output of a render and never an input carried into the next one.
+
+### Tab widget padding and alignment
+
 **UI-R-120** — The tab widget (UI-R-114) takes a padding of a horizontal count H and a vertical count V, both default 0, and renders the count running along its layout direction (UI-R-173) — V under `Vertical`, H under `Horizontal` — as that many blank cells before and that many after every tab's character cells (UI-R-115, UI-R-174).
 
 **UI-R-121** — The padding count running across the tab widget's layout direction (UI-R-120) — H under `Vertical`, V under `Horizontal` — renders that many blank lines on either side of the character line, so the widget's rendered extent across the direction is `1 + 2c` cells for that count `c` and is never fixed at one; with H = 1, V = 1 and title `Tab` the `Vertical` widget renders the rows `"   "`, `" T "`, `" a "`, `" b "`, `"   "` and the `Horizontal` widget the rows `"     "`, `" Tab "`, `"     "`, each from top to bottom.
@@ -759,12 +781,6 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **UI-R-127** — Under `Center` alignment (UI-R-126) an odd number of gained cells splits with the smaller half before the tab: a tab gaining `g` cells takes `g / 2` before its leading padding cell and the rest after its trailing padding cell.
 
 **UI-R-128** — Alignment (UI-R-126) changes nothing when no stretching applies (UI-R-125): with the tabs' natural extent at or above the area's extent along the layout direction, `Start`, `Center` and `End` render identically.
-
-**UI-R-173** — The tab widget (UI-R-114) takes a layout direction of `Horizontal` or `Vertical`, default `Horizontal`, which lays the tabs out left to right or top to bottom and thereby fixes which axis every along-the-direction rule (UI-R-114, UI-R-117, UI-R-118, UI-R-120, UI-R-122, UI-R-126) applies to.
-
-**UI-R-174** — Under `Horizontal` layout (UI-R-173) a tab's title in the tab widget (UI-R-114) is written one character per column, left to right in title order, so an n-character title occupies n consecutive character columns.
-
-**UI-R-175** — The tab widget recomputes its scroll offset from the active tab's block on every render (UI-R-118) and stores it in its state as the record of the last computed window start, so the stored offset is an output of a render and never an input carried into the next one.
 
 ### Tab widget state
 

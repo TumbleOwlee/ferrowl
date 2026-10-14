@@ -294,6 +294,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 ## Role — CSMS (server)
 
+### Listener and commands
+
 **OC-R-049** — A CSMS binds a TCP listener on a configured host and port and accepts CS connections in a loop, serving each concurrently. Port `0` binds an OS-assigned port; the bound address is retrievable.
 
 **OC-R-050** — When TLS is configured, every accepted socket is TLS-terminated before the WebSocket handshake.
@@ -322,6 +324,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **OC-R-179** — A CSMS listener binds its host and port exclusively: a bind on a host and port another socket already holds bound fails with address-in-use, never sharing the port with that socket.
 
+### CSMS log lines
+
 **OC-R-181** — Every line the OCPP crate passes to a CSMS module's log callback is appended to that module's tab log at its level (OC-R-180), none dropped.
 
 **OC-R-187** — A CSMS appends a line naming the bound host and port to its module's log each time its listener binds, at Info (OC-R-180).
@@ -344,6 +348,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 ## Simulated Charging Station behavior
 
+### State and automatic sending
+
 **OC-R-057** — A CS module maintains charge-point-wide state (model, vendor, firmware version, serial number, configuration/variable key store, CSMS-supplied heartbeat cadence, charge-point-level reservation) and a list of connector states, multiplexed over the single WebSocket.
 
 **OC-R-058** — Each connector carries its own metering, status, transaction, per-purpose charging limits, RFID tag, reservation.
@@ -355,6 +361,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **OC-R-061** — While connected, the CS sends MeterValues automatically about every 5 s per connector with a live transaction; none when no transaction is live.
 
 **OC-R-062** — Losing the connection halts all automatic transmission and resets the heartbeat cadence counter.
+
+### Inbound Call handling
 
 **OC-R-063** — An inbound Call carrying a top-level connector/EVSE id the station lacks → CallError `PropertyConstraintViolation`. Id `0` and an absent id are always valid (the charge point itself).
 
@@ -369,6 +377,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **OC-R-068** — Clearing charging profiles erases only the per-purpose limit matching the request's purpose criterion, or every per-purpose limit when none is given. Unrecognized purpose clears nothing.
 
 **OC-R-069** — A reservation is recorded at the level the request targets (charge point or connector) and cleared by a cancellation carrying the same reservation id, at whichever level holds it.
+
+### Transactions
 
 **OC-R-070** — A remotely started transaction mints a local transaction id, puts the targeted connector (absent an explicit target, the first) into a charging state, and transmits the transaction-start message (`StartTransaction` for 1.6, `TransactionEvent` with `eventType=Started` for 2.0.1/2.1) through the same send path the RFID/operator flow uses, so the CSMS learns the id via the normal wire message.
 
@@ -402,6 +412,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 ## Module lifecycle and configuration
 
+### Identity and config seeding
+
 **OC-R-079** — An OCPP module instance is a charging station (client) or a management system (server), never both, speaking exactly one version.
 
 **OC-R-080** — The OCPP version is a property of the **device config**, not the session entry: a device's scripts call version-specific actions and are version-locked.
@@ -417,6 +429,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **OC-R-141** — Each of the four 1.6 optional identity fields (OC-R-104) is seeded on load as OC-R-140, overriding built-in defaults only when the field is present.
 
 **OC-R-142** — Each of the four 1.6 optional identity fields (OC-R-104) that is empty is omitted from `BootNotification` entirely; valued, it is included under its wire name (`iccid`, `imsi`, `meterSerialNumber`, `meterType`).
+
+### Start, stop and restart
 
 **OC-R-082** — Connection or listener configuration is rebuilt from the current module spec on every start, so an edited endpoint or security section takes effect on the next start.
 
@@ -434,6 +448,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **OC-R-086** — Switching a client's version keeps its Lua scripts and warns they may call actions the new version lacks.
 
+### Message log
+
 **OC-R-087** — Each module keeps a bounded in-memory message log of the most recent 200 messages, evicting oldest first; complete history only in the configured log file.
 
 **OC-R-088** — With file logging enabled, each message is written to the log file at most once, tracked by sequence number, so eviction from memory neither duplicates nor skips a message (OC-E-093 for the burst bound).
@@ -441,6 +457,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **OC-R-101** — Encoding an action or response to JSON for the message log never discards an encode failure silently: the failure is logged to the module's error channel before the payload degrades to JSON `null`.
 
 **OC-R-102** — When a module view stops or (re)starts its backend for a settings change, version switch, or `stop`/`restart`, a stop or start failure is reported in the module message log at Error level, not discarded.
+
+### Log severities
 
 **OC-R-180** — Every line the OCPP crate passes to a module's log callback carries exactly one severity — Info, Warning or Error — chosen at the site that emits the line, never derived from the line's text.
 

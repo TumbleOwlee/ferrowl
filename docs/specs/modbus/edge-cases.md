@@ -1,7 +1,5 @@
 # Modbus — Edge Cases and Known Limitations
 
-Boundary behavior, error semantics, intentional constraints.
-
 ---
 
 ## Data formats and codec
@@ -137,7 +135,7 @@ Boundary behavior, error semantics, intentional constraints.
 
 ---
 
-## Known limitations — intentional constraints
+## Known limitations
 
 ### No max-registers-per-request bound at the protocol layer
 

@@ -1,7 +1,5 @@
 # Scripting — Edge Cases and Known Limitations
 
-Boundary behavior, error semantics, intentional or known constraints.
-
 ---
 
 ## Logging & error handling
@@ -64,7 +62,7 @@ Boundary behavior, error semantics, intentional or known constraints.
 
 ---
 
-## Known limitations and findings
+## Known limitations
 
 ### Execution ceiling — an infinite loop is interrupted mid-cycle
 

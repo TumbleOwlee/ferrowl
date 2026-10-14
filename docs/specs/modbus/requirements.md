@@ -32,6 +32,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 ## Data formats and codec
 
+### Format set and orders
+
 **MB-R-010** — Exactly thirteen formats: `Ascii`, `U8`, `U16`, `U32`, `U64`, `U128`, `I8`, `I16`, `I32`, `I64`, `I128`, `F32`, `F64`.
 
 **MB-R-011** — Widths in 16-bit registers: `U8`/`I8`/`U16`/`I16` = 1; `U32`/`I32`/`F32` = 2; `U64`/`I64`/`F64` = 4; `U128`/`I128` = 8; `Ascii` = configured width. Byte length = 2 × register width.
@@ -46,6 +48,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **MB-R-100** — For a width-1 format (`U8`, `I8`, `U16`, `I16`) register order is a no-op.
 
+### Bit-fields
+
 **MB-R-014** — Every integer format carries a bit-field mask; the shift is *derived* as the mask's trailing-zero count, never configured.
 
 **MB-R-015** — Integer decode yields `(raw & mask) >> shift`; encode places `(value << shift) & mask`, bits outside the mask zero.
@@ -56,9 +60,13 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **MB-R-018** — Float formats encode/decode as their raw IEEE 754 bit pattern under the same byte-order rule as integers.
 
+### ASCII
+
 **MB-R-019** — `Ascii` packs two characters per register, carries no byte order and no bit-field, and carries an alignment `Left` or `Right`.
 
 **MB-R-020** — Encoding `Ascii` zero-pads input to exactly `2 × width` bytes, on the right for `Left`, on the left for `Right`. Longer input is truncated, keeping the *first* bytes for `Left` and the *last* for `Right`.
+
+### Resolution and literal parsing
 
 **MB-R-021** — Every numeric format carries a display resolution (scale factor, default `1.0`), and its displayed value is `raw × resolution`.
 
@@ -69,6 +77,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **MB-R-206** — A signed integer format additionally accepts `-0x…` (MB-R-022), the negation of the hex bit pattern.
 
 **MB-R-207** — A `0x` literal on a float format (MB-R-022) is the IEEE 754 bit pattern, not a decimal value.
+
+### Decode errors and raw display
 
 **MB-R-023** — Decoding fewer words than the format's width fails with a too-few-bytes error. More words: only the first `width` consumed.
 
@@ -105,6 +115,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 ---
 
 ## Client
+
+### Poll loop and retry
 
 **MB-R-035** — A client polls a list of operations, each a (slave id, read function code, address range) triple, writing every successful read into the shared store under the key per MB-R-027.
 
@@ -144,9 +156,13 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **MB-R-049** — The terminate command, or the command channel closing, disconnects, ends the task with success, and emits a client-disconnected status.
 
+### Broadcast
+
 **MB-R-101** — On RTU, RtuOverTcp, Ascii, or AsciiOverTcp, a poll operation addressed to slave id 0 (broadcast) fails locally without reaching the wire, treated as a Modbus exception per MB-R-043, no disconnect.
 
 **MB-R-102** — On RTU, RtuOverTcp, Ascii, or AsciiOverTcp, a write command to slave id 0 is transmitted without awaiting a response, logged as executed, no disconnect.
+
+### Client log lines
 
 **MB-R-259** — A Modbus client appends a line to its module's log each time its transport connects, at Info (MB-R-258).
 
@@ -358,6 +374,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 ## TLS setup dialog
 
+### Shared dialog behavior
+
 **MB-R-135** — The Modbus TCP setup dialog (`Tcp`, `RtuOverTcp` per MB-R-115, `AsciiOverTcp` per MB-R-127) resolves its transport config to the variant its toggles select, contributing only that variant's fields: Self-Signed On → identity `CertSource::SelfSigned`, no cert/key paths; Skip-Verify On → verification `CertVerification::Skip`, no Root Store selection and no CA entry.
 
 **MB-R-186** — The Modbus TCP setup dialog leaves hidden widgets' stored state (input text, toggle position, list entries) unmodified when resolving per MB-R-135, so toggling back Off restores what was entered.
@@ -366,17 +384,19 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **MB-R-187** — An add-entry confirm on the shared CA list widget (MB-R-136) is rejected (sub-dialog stays open with an inline error, nothing appended) unless the path is non-empty, exists on disk at the base directory NF-R-073 names, is not a directory, and has extension `pem`/`crt`/`key` (case-insensitive).
 
+### Server-role dialog
+
 **MB-R-188** — Server role of the Modbus TCP setup dialog: mTLS with a non-empty client-CA list (MB-R-136) and Skip Verify Off → `ServerTlsPolicy::Mutual` with `CertVerification::CaFiles` holding exactly those files; an empty list there is a validation error (mirroring MB-R-108), never a silent fallback to `Tls`.
 
 **MB-R-189** — The Modbus TCP setup dialog also offers a server-role Skip Verify toggle, shown whenever mTLS is selected: On hides the client-CA list (MB-R-136) and resolves verification to `CertVerification::Skip` regardless of entries, per MB-R-186's hidden-field pattern.
+
+### Client-role dialog
 
 **MB-R-156** — The Modbus TCP setup dialog's client role offers, whenever Skip Verify is Off, a Root Store toggle (default On) plus the shared CA list widget (MB-R-136) holding zero or more server-CA paths, replacing the single `ca_file` input. Root Store On → `CertVerification::RootStore` with the list as `extra_ca_files`, empty or not; Off → `CertVerification::CaFiles` with the list as `ca_files`.
 
 **MB-R-202** — Root Store Off with an empty CA list in the Modbus TCP setup dialog's client role (MB-R-156) is a validation error refusing to close the dialog (mirroring MB-R-188), since a verification naming no trust anchor rejects every server certificate.
 
 **MB-R-203** — Skip Verify On hides both the Root Store toggle and the CA list of the Modbus TCP setup dialog's client role (MB-R-156) per MB-R-135.
-
-**MB-R-138** — Under `ClientTlsPolicy::Mutual` with `identity: CertSource::SelfSigned`, a client presents an ephemeral self-signed certificate/key pair as its mTLS identity, generated and cached per MB-R-169/MB-R-170 (once per module instance, reused across reconnects/restarts/config edits, regenerated only on a transition into self-signed), never written to disk.
 
 **MB-R-139** — The dialog offers a client-role Self Signed toggle, shown whenever mTLS is selected.
 
@@ -509,6 +529,8 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 **MB-R-175** — A client's presented TLS identity (MB-R-110) follows its `identity`: `CertSource::Files` presents the PEM pair at `cert_file`/`key_file`; `CertSource::SelfSigned` presents MB-R-138's cached ephemeral pair.
 
 **MB-R-176** — `CertSource::Ephemeral` is rejected at construction as a client identity (MB-R-110).
+
+**MB-R-138** — Under `ClientTlsPolicy::Mutual` with `identity: CertSource::SelfSigned`, a client presents an ephemeral self-signed certificate/key pair as its mTLS identity, generated and cached per MB-R-169/MB-R-170 (once per module instance, reused across reconnects/restarts/config edits, regenerated only on a transition into self-signed), never written to disk.
 
 ### TLS handshake and build failures
 

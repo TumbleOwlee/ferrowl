@@ -1,6 +1,6 @@
 ---
 name: spec-coverage-audit
-description: Find code with no requirement covering it, and get an approved spec diff (new requirements, and new capability areas if needed) that catches docs/specs up to what the code already does. If no governed spec directory exists yet, scaffolds one first (capability areas, requirement-ID convention, routing pointer in AGENTS.md/CLAUDE.md) — nothing else of the full workflow. Does not check for stale/untested requirements (spec with no citing test) — only reports that gap and asks whether to handle it. Use when the user asks to "find missing specs", "audit spec coverage", "what's undocumented", "backfill specs for this code", or wants "just the spec directory" added to an existing project.
+description: Find code no requirement covers and get an approved spec diff (new requirements, new capability areas) that catches docs/specs up to the code. Scaffolds a governed spec directory first when none exists. Reports, never handles, the reverse gap (spec with no citing test). Use for "find missing specs", "audit spec coverage", "what's undocumented", "backfill specs for this code", or "just the spec directory" on an existing project.
 ---
 
 # Spec coverage audit
@@ -46,7 +46,7 @@ Never asks about stack, CI, hooks, trackers; never sets up build/test/lint; neve
    | Cross-cutting (platforms, performance, security, versioning, testing) | [`non-functional-requirements.md`](<spec-dir>/non-functional-requirements.md) | `NF-R-*` |
    ```
 
-   (b) ID convention — stable, append-only, never renumbered or reused once retired, cited in commits/PRs/tests, one requirement per physical line; (c) minimal spec-handling note — before adding/changing a requirement in `<spec-dir>/`, propose the diff and get explicit approval from the project owner, then write. Nothing about plans, worktrees, review. A new minimal `AGENTS.md` = those three items plus a one-line title.
+   (b) ID convention — stable, append-only, never renumbered or reused once retired, cited in commits/PRs/tests, one requirement per physical line; (c) minimal spec-handling note — before adding/changing a requirement in `<spec-dir>/`, propose the diff and get explicit approval from the project owner, then write. A new minimal `AGENTS.md` = those three items plus a one-line title.
 
 ## 1. Scope
 
@@ -68,9 +68,7 @@ Anything fitting no area in scope (or none at all): note separately, never fold 
 
 ## 4. Draft the diff
 
-Draft only; write nothing yet.
-
-- **Gaps in an existing area**: new `<PREFIX>-R-nnn` entries, one rule each (README rule 9), next free number (append-only — check the highest existing, never reuse/renumber). Testable, observable wording: `**<PREFIX>-R-001** — The <subject> <observable outcome> when <condition>.`
+- **Gaps in an existing area**: new `<PREFIX>-R-nnn` entries, one rule each (README rule 9), next free number per the ID convention of step 0a item 6(b). Testable, observable wording: `**<PREFIX>-R-001** — The <subject> <observable outcome> when <condition>.`
 - **Code fitting no area**: propose a new area inline — directory name, one-line "covers", unique prefix (two letters + `-R-`, not colliding with existing or `NF-R-*`) — then its first requirements.
 
 ## 5. Get approval
@@ -81,9 +79,9 @@ Rejected/edited items: adjust, re-confirm before writing.
 
 ## 6. Write
 
-New area approved: write from `templates/area/*.tmpl` as step 0a item 5 (substitute placeholders, only the files needed), append a routing row shaped as in step 0a item 6(a). Then append approved entries to each `requirements.md` — one per physical line, never wrapped.
+New area approved: write from `templates/area/*.tmpl` as step 0a item 5 (substitute placeholders, only the files needed), append a routing row shaped as in step 0a item 6(a). Then append approved entries to each `requirements.md`, shaped per step 0a item 6(b).
 
-Report what was written (files, IDs, new area/scaffold). Stop — no commit, issue, PR. User reviews and commits.
+Report what was written (files, IDs, new area/scaffold). Stop; the user reviews and commits.
 
 ## 7. Ask about the other direction
 

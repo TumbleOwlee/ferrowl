@@ -1,12 +1,10 @@
 # TUI — Edge Cases and Known Limitations
 
-Boundary behavior, error semantics, intentional or known constraints.
-
 ---
 
 ## Command line mechanism
 
-### Parsing and dispatch
+### Command mode and dispatch
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -26,7 +24,7 @@ Boundary behavior, error semantics, intentional or known constraints.
 | **UI-E-140** | Command line with both an error and a notice set (UI-R-194, UI-R-195) | the error is shown and the notice is retained, appearing once the consumer clears the error |
 | **UI-E-093** | Command-line help box taller than the rows available above the line (UI-R-196) | the box is clipped to the available rows and stays anchored to the bottom, matching the app's no-minimum-size stance (UI-E-047) |
 
-### Lifecycle commands in flight
+### Lifecycle command dispatch
 
 | ID | Condition | Behavior |
 |---|---|---|
@@ -275,7 +273,7 @@ Boundary behavior, error semantics, intentional or known constraints.
 | **UI-E-157** | Tab widget state whose active index was written out of range directly, the caller owning that field (UI-R-119), read back | the reported active index is `0` (UI-R-325) and the reported active tab value is the first tab (UI-R-324), never the written value and never absent for a non-empty tab list |
 | **UI-E-158** | Tab widget state whose active index is out of range (UI-E-157) advanced to the next or previous tab (UI-R-327, UI-R-328) | the operation starts from the normalized index `0`, so advancing selects index `1` — index `0` again with a single tab (UI-E-154) — and retreating wraps to the last tab; never panics |
 
-## Known limitations and stated constraints
+## Known limitations
 
 ### Single compile-time color scheme
 

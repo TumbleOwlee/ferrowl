@@ -2,6 +2,8 @@
 
 The ferrowl **process command line** and the **headless runner** (`ferrowl run`): argument surface (top-level flags, subcommands), `--module`/`--ocpp` key=val mini-language, headless run lifecycle and exit-code contract, headless stdout/stderr contract.
 
+## Area boundaries
+
 Per [`../README.md`](../README.md)'s ownership rules, this area does **not** own: the in-TUI `:` command line ([`../tui/`](../tui/)); config/session **file format** and `migrate` **transformation** ([`../config-session/`](../config-session/)) — only the `migrate` *CLI surface* (flags, invocation, exit behavior); what Lua scripts and `C_Test:Assert` **do** ([`../scripting/`](../scripting/)) — only how a logged script error maps to an exit code; protocol behavior ([`../modbus/`](../modbus/), [`../ocpp/`](../ocpp/)).
 
 ---

@@ -195,7 +195,7 @@ Dialed/advertised URL: `{protocol}://{ip}:{port}{path}` (OC-R-043). Charge-point
 | `role` | enum | `client` | `## Endpoint enums` | OC-R-079 |
 | `timeout_ms` | optional u64 | `30000` when unset | awaited-reply timeout, both roles | OC-R-020 |
 | `scripts` | list of script defs | empty | Lua sim scripts — `scripting/`. Client role only | SC-R-022 |
-| `script_interval` | f64 seconds | `1.0` | Lua sim cycle; floored at `0.05`; NaN/∞/≤0 → `1.0` | SC-R-016, SC-R-045 |
+| `script_interval` | f64 seconds | `1.0` | Lua sim cycle period; bounds and fallback in `scripting/` (SC-R-016, SC-R-045) | SC-R-016, SC-R-045 |
 | `rfids` | list of string | empty | **server only**: charge-point-wide RFID accept-list | OC-R-074, OC-R-075 |
 | `connector_rfids` | list of `ConnectorRfids` | empty | **server only**: per-connector accept-lists | OC-R-074, OC-R-075 |
 | `connectors` | list of `ConnectorRef` | empty | **client only**: connector-table seed. Empty = CS-level only. Unbounded | OC-R-057, OC-R-081 |
@@ -306,6 +306,8 @@ One section, both roles. Basic Auth role-shared (OC-R-156); TLS held per role in
 | 1 — Basic Auth over `ws://` | `username` + `password`, `protocol = ws` | OC-R-029, OC-R-030, OC-R-031 |
 | 2 — TLS, server cert only | `protocol = wss`; CSMS `tls.server.mode = "tls"` with any `identity`; CS `tls.client.mode = "tls"` with a `verification`. Optionally plus Basic Auth | OC-R-029, OC-R-037 |
 | 3 — mutual TLS | Profile 2 with `mode = "mutual"` on both ends: CSMS adds `verification` (`ca-files`), CS adds `identity` | OC-R-029, OC-R-039 |
+
+### Example
 
 ```toml
 # One OCPP device config, both roles present; the instance's role picks one

@@ -2,6 +2,8 @@
 
 Operator-facing surface: exhaustive `:` command list, every keybinding table by context/mode, code-editor mode/command set. Names, aliases, argument shapes, key mappings are contract and shall not change without a spec change.
 
+## Area boundaries
+
 **Generic vs protocol-specific.** **Generic (app-level)** commands are parsed and executed by the application (``## Generic `:` commands (app-level)``); behavior owned here. **Module (protocol-specific)** commands are forwarded verbatim to the active view (``## Module (protocol-specific) `:` commands``); this document lists name and syntax, the effect on protocol state is the owning area (`modbus/`, `ocpp/`) — "→ modbus" / "→ ocpp" points there.
 
 Dispatch: first token matched against the generic set; not in the set → forwarded to the active view. A generic name always wins over a same-named module command.

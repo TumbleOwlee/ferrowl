@@ -1,6 +1,6 @@
 ---
 name: agent-doc-audit
-description: Check every agent-facing markdown file this project's agents read (AGENTS.md, .claude/AGENTS.workflow.md, .claude/agents/*.md, .claude/skills/*/SKILL.md, docs/specs/**) for prose bloat, for the same instruction stated more than once (within a file or across files), and for whether their headings let extract-section.sh pull one section instead of the whole file; propose a splitting plan where an agent is forced to read content only relevant to a different agent. Use when the user asks to "audit agent docs", "check doc splitting", "propose a split plan", or invokes /agent-doc-audit.
+description: Audit every agent-facing markdown file (AGENTS.md, .claude/AGENTS.workflow.md, .claude/agents/*.md, .claude/skills/*/SKILL.md, docs/specs/**) for prose bloat, instructions stated more than once, and headings extract-section.sh cannot slice; propose splits where an agent must read another agent's content. Use for "audit agent docs", "check doc splitting", "propose a split plan", or /agent-doc-audit.
 ---
 
 # Agent-facing doc split audit
@@ -56,8 +56,6 @@ Three tables, most costly first (`token-rank.sh` order where available):
 
 **Duplicates** — the rule in a few words, every file:heading holding a copy, which copy to keep and why (that reader already loads it).
 
-One line each, no praise, no summary. A proposed split under ~10 lines: say so, recommend a heading instead — `extract-section.sh` already pulls it cheaply.
-
-Report only improvements found. Empty table → "none" — never a reason, never "already good".
+One line each, no praise, no summary; an empty table is "none". A proposed split under ~10 lines: say so, recommend a heading instead — `extract-section.sh` already pulls it cheaply.
 
 If the user approves a split, make the new file's headings match exactly what the citing instructions name (or update those instructions in the same change).

@@ -68,7 +68,7 @@ Loading a Modbus device config folds any legacy per-register `update` snippet in
 
 ---
 
-## Known limitations (stated, not bugs)
+## Known limitations
 
 - **CS-E-018** — **The `version` field is inert.** Session and device-config files carry a `version` stamped on save and **never read by any load-time or migration branch**. Loading a file from any past or future build behaves identically regardless of the stamp (CS-R-018, CS-R-022).
 - **CS-E-019** — **Strict field validation is scoped to the TLS subtree and the OCPP `security` table (CS-R-055).** Everywhere else no config type rejects unknown fields, so a misspelled key outside them silently takes its default.

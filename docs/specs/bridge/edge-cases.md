@@ -1,7 +1,5 @@
 # Bridge Mode — Edge Cases and Known Limitations
 
-Boundary behavior, error semantics, intentional constraints.
-
 ---
 
 ## Configuration

@@ -1,7 +1,5 @@
 # OCPP — Edge Cases and Known Limitations
 
-Boundary behavior, error semantics, intentional constraints.
-
 ---
 
 ## OCPP-J framing
@@ -150,7 +148,7 @@ Boundary behavior, error semantics, intentional constraints.
 
 ---
 
-## Known limitations — intentional constraints
+## Known limitations
 
 ### CS reconnect resets on handshake, not on message exchange
 

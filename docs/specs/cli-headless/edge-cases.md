@@ -70,7 +70,7 @@ Boundary and error behavior of the process command line and headless runner, plu
 
 ---
 
-## Known limitations (stated, not bugs)
+## Known limitations
 
 - **CL-E-025** — **The RTU `Config` / clap short-flag collision.** The Modbus RTU settings struct in `ferrowl-modbus` doubles as a clap `Args` group with auto-derived short flags. Two collide: `-s` (`slave` and `stop_bits`), `-d` (`data_bits` and `delay_ms`). Flattening this group into a `clap::Parser` command panics at parse time via clap's debug assertions. **Latent**: the shipped CLI does **not** flatten it; RTU parameters come through the `--module …,transport=rtu,path=…,baud=…` mini-language ([`api-contract.md`](./api-contract.md) ``## `--module` descriptor mini-language (Modbus)``), which has no short-flag collision. Documented in source, intentionally unfixed. (Equivalent latent collision in the TCP settings `Args` group for `timeout`/`delay`/`interval` short flags.)
 - **CL-E-026** — **`migrate`'s `-i`/`-o` are the only short options.** Top-level flags and every `run` flag are long-only; no `-m`/`-s`/`-d` short forms (sidesteps the collision above).

@@ -198,7 +198,7 @@ Same fields as `transport = "tcp"` (`## Modbus TCP connection config`).
 | `read_ranges` | `ReadRanges` | empty | explicit batched read windows (``### `read_ranges` ``) | MB-R-082, MB-R-083 |
 | `definitions` | map name → `RegisterDef` | — (required) | register table (``### `RegisterDef` ``) | MB-R-077 |
 | `scripts` | list | empty | Lua sim scripts — `scripting/` | SC-R-022 |
-| `script_interval` | f64 seconds | `1.0` | Lua sim cycle; floored at `0.05`; NaN/∞/≤0 → `1.0` | SC-R-016, SC-R-045 |
+| `script_interval` | f64 seconds | `1.0` | Lua sim cycle period; bounds and fallback in `scripting/` (SC-R-016, SC-R-045) | SC-R-016, SC-R-045 |
 
 Device-config timing defaults (`delay_ms` = 1000, `interval_ms` = 1000) are what an application-built module uses; they deliberately differ from the transport-level `0`.
 

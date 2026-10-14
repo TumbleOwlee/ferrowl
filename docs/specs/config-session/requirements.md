@@ -2,6 +2,8 @@
 
 The **configuration envelope**: TOML/JSON format, session file (module instances + session scripts), device-config file and how the two compose, save/load round-trip, `migrate` subcommand.
 
+## Area boundaries
+
 Per [`../README.md`](../README.md)'s ownership rule, this area owns only the *envelope*. Protocol-specific fields (Modbus register/timing/endpoint, OCPP version/role/security/config-key) are [`../modbus/`](../modbus/) and [`../ocpp/`](../ocpp/). The `:write` mechanism is [`../tui/`](../tui/); the `migrate`/`run` CLI surface is [`../cli-headless/`](../cli-headless/). This file specifies what those surfaces read and write.
 
 ---

@@ -13,19 +13,30 @@ hooks:
 
 **Concise, compact, facts only.**
 
-Review code you did not write. Read-only: report, never fix. Hook-enforced: the only sanctioned writes are appending to `artifacts/<slug>/review.md` and rewriting `artifacts/<slug>/review.verdict.md`; never `git checkout`/`stash`/`reset` or anything altering the worktree — a probe you needed becomes a finding for the implementer.
+Review code you did not write. Read-only: report, never fix. Hook-enforced: you write only the two files under `## Output`; never `git checkout`/`stash`/`reset` or anything altering the worktree — a probe you needed becomes a finding for the implementer.
 
-Read `sh .claude/scripts/extract-section.sh '## Spec-driven' '## TDD — fixed order, every stage' '## Build / test / lint' '## Conventions — reading' '## Conventions — code' '## Conventions — text' AGENTS.md` (standards and TDD axes are checked against these) and `sh .claude/scripts/extract-section.sh '## Rules for writing specs' '## Requirements intentionally not unit-tested' docs/specs/README.md` — review against these, not the caller's summary. Never reference an issue or PR. Diff: `git diff <base>...HEAD` (three dots). Commits: `git log <base>..HEAD --oneline`.
+`AGENTS.md` is already in your context (`CLAUDE.md` includes it); never re-read it. Standards and TDD axes are checked against `## Spec-driven`, `## TDD — fixed order, every stage`, `## Workflow` (the `files` contract), `## Build / test / lint`, `## Conventions — reading`, `## Conventions — code`, `## Conventions — text`. Read `sh .claude/scripts/extract-section.sh '## Rules for writing specs' '## Requirements intentionally not unit-tested' docs/specs/README.md` — review against these, not the caller's summary. Never reference an issue or PR. Diff: `git diff <base>...HEAD` (three dots). Commits: `git log <base>..HEAD --oneline`.
 
-Scope token from caller: `plan` (no diff — check `plan.md` against `spec-diff.md`: quoted requirement text matches, appended IDs unused in `docs/specs/`, nothing contradicts an existing requirement, every ID has a stage and a test, `s0` lands every ID (no `s0` when `spec-diff.md` has no entries to land, or there is no `spec-diff.md`), every stage's `files` list covers what its steps touch and matches `## Shared`, every stage title obeys `spec-planner.md` `## Output` and matches its heading and tree entry; spec-fidelity axis only), `stage s<n>` (base = previous stage's commit), `wave w<n>` (stages merged so far — cross-stage bugs live here), `branch` (gate 3). Never widen. Caller names the stage ids in scope.
+Scope token from caller: `plan` (no diff; `## Plan scope`), `stage s<n>` (base = previous stage's commit), `wave w<n>` (stages merged so far — cross-stage bugs live here), `branch` (gate 3). Never widen. Caller names the stage ids in scope.
 
 **`plan.md`:** stage/wave scope → `sh .claude/scripts/extract-section.sh '## Shared' artifacts/<slug>/plan.md` (its dependency tree gives each in-scope stage's `<title>`), then one batched call for those sections: `sh .claude/scripts/extract-section.sh '## Stage s<n>: <title>' [...] artifacts/<slug>/plan.md`. `branch`/`plan` scope → whole file. Plan is the authority on what a stage was to do; never re-derive intent from the diff.
 
 **`spec-diff.md`:** headed `## <ID>`. Stage/wave scope → in-scope stage sections' ID→test tables name the IDs; one batched call: `sh .claude/scripts/extract-section.sh '## <ID>' [...] artifacts/<slug>/spec-diff.md`. An ID the diff cites that no in-scope table lists is itself a finding (scope creep or table gap). `branch`/`plan` scope → whole file.
 
+## Plan scope
+
+Check `plan.md` against `spec-diff.md`, spec-fidelity axis only:
+- quoted requirement text matches
+- appended IDs unused in `docs/specs/`
+- nothing contradicts an existing requirement
+- every ID has a stage and a test
+- `s0` lands every ID (no `s0` when `spec-diff.md` has no entries to land, or there is no `spec-diff.md`)
+- every stage's `files` list covers what its steps touch and matches `## Shared`
+- every stage title obeys `spec-planner.md` `## Output` and matches its heading and tree entry
+
 ## Four axes, reported separately
 
-**Spec fidelity** — every approved requirement implemented as written (quote requirement + satisfying code path); nothing beyond approval (scope creep is a finding even if good code); every new ID pinned by a test that genuinely exercises it (citing an ID but asserting something else is worse than none); spec text in branch matches approved (drift reopens gate 1). **Any file in the diff outside the in-scope stages' `files` lists is a blocker** — tooling, test helpers, config, scripts, a flaky-test fix, a drive-by rename included; the plan is the contract and the fix is a plan amendment, never a silent widening.
+**Spec fidelity** — every approved requirement implemented as written (quote requirement + satisfying code path); nothing beyond approval (scope creep is a finding even if good code); every new ID pinned by a test that genuinely exercises it (citing an ID but asserting something else is worse than none); spec text in branch matches approved (drift reopens gate 1). **Any file in the diff outside the in-scope stages' `files` lists is a blocker** (`AGENTS.md` `## Workflow`); the fix is a plan amendment, never a silent widening.
 
 **Standards** — every bullet of `AGENTS.md` `## Conventions — code`; test naming and ID citation placement; unflagged semver-relevant public surface changes. Comment severity: a violation of the comment bullet = minor, except a workflow citation (that bullet's list) = major, it rots on contact.
 
