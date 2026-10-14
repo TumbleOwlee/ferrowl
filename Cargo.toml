@@ -55,7 +55,7 @@ derive_builder = "0.20.2"
 futures-util = "0.3.34"
 getset = "0.1.7"
 itertools = "0.15.0"
-mlua = { version = "0.12.1", features = ["anyhow", "lua54", "vendored"] }
+mlua = { version = "0.12.2", features = ["anyhow", "lua54", "vendored"] }
 parking_lot = "0.12"
 proc-macro2 = "1.0.107"
 quote = "1.0.47"
@@ -67,7 +67,7 @@ rcgen = "0.14.10"
 # Pinned by rev, not branch: `cargo update` must not silently move us to whatever the fork's
 # `main` points at. Bump the rev deliberately when pulling in upstream changes.
 rust-modbus = { git = "https://github.com/TumbleOwlee/rust-modbus", rev = "0e6ce4e362d109001ca68156c440ad16bc8389fe", default-features = false }
-rust-ocpp = { git = "https://github.com/TumbleOwlee/rust-ocpp", rev = "36813f46ab7d0a50100f1e0fe099aaf0c4e10791", default-features = false }
+rust-ocpp = { git = "https://github.com/TumbleOwlee/rust-ocpp", rev = "1bf85727b28289da991d3f022189a4cee7886e47", default-features = false }
 # Already pulled in transitively by rustls's "ring" feature below; named directly so
 # ferrowl-modbus can hash a rejected TLS peer certificate (MB-R-111) without pinning its
 # own, possibly-divergent, copy.
@@ -79,21 +79,21 @@ rustls = { version = "0.23", default-features = false, features = [
 ] }
 rustls-pki-types = { version = "1.15", default-features = false, features = ["alloc"] }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
-syn = "3.0.5"
+serde_json = "1.0.154"
+syn = "3.0.9"
 # Already pulled in transitively by rustls's "ring" feature above; named directly so
 # ferrowl-ocpp can do a constant-time Basic Auth credential comparison (NF-R-032) without
 # pinning its own, possibly-divergent, copy.
 subtle = "2.6.1"
 thiserror = "2.0"
-tokio = "1.53.1"
+tokio = "1.53.3"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 tokio-tungstenite = { version = "0.30", default-features = false, features = [
     "connect",
     "handshake",
     "rustls-tls-webpki-roots",
 ] }
-toml = "1.1.6"
+toml = "1.1.8"
 uuid = { version = "1", features = ["v4"] }
 validator = "0.21.0"
 webpki-roots = "1.0.9"
