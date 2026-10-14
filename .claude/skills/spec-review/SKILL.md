@@ -17,7 +17,7 @@ Criteria and output shape are `spec-reviewer.md`'s (`## Four axes, reported sepa
 
 ## Run the review
 
-Create a scratch `artifacts/<slug>/` and write the ticket's normative text into its `spec-diff.md` (one `## <ID>` per requirement, same shape as gate 1) so the reviewer reads it the way it reads every spec diff; `review.md` and `review.verdict.md` land there too. Spawn `spec-reviewer` (`.claude/agents/spec-reviewer.md`) with: scope `branch` (not a wave), the base ref, the artifact dir, the checkout path. No `plan.md` exists on this side — say so: no stage ids, every finding's stage column is `—`, spec fidelity is checked against `spec-diff.md` alone. It reads its own rules (its file names the `AGENTS.md` headings); give it nothing more, never the issue/PR number. It answers with a status line only (`### Agent hand-off`).
+Create a scratch `artifacts/<slug>/` and write the ticket's normative text into its `spec-diff.md` (one `## <ID> — <kind>` section per list item of the body's `## Spec`, same shape as gate 1) so the reviewer reads it the way it reads every spec diff; `review.md` and `review.verdict.md` land there too. Spawn `spec-reviewer` (`.claude/agents/spec-reviewer.md`) with: scope `branch` (not a wave), the base ref, the artifact dir, the checkout path. No `plan.md` exists on this side — say so: no stage ids, every finding's stage column is `—`, spec fidelity is checked against `spec-diff.md` alone. It reads its own rules (its file names the `AGENTS.md` headings); give it nothing more, never the issue/PR number. It answers with a status line only (`### Agent hand-off`).
 
 A fresh session may review inline with the same axes and rigor; a session that implemented any of it spawns.
 

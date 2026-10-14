@@ -2,9 +2,8 @@
 Ferrowl is spec-driven: docs/specs/ is the authoritative statement of what the
 software must do. See CONTRIBUTING.md for the full expectations.
 
-Four sections below, in order. Drop one only when genuinely inapplicable
-(e.g. Approach for a one-line fix) — don't drop Verification or its
-coverage line.
+Five sections below, in order; one fact per line, lists over sentences. Drop
+Tests or Decisions only when genuinely empty — never Verification.
 
 No tool attribution trailers anywhere in this PR (title, body, or its
 commits) — no `Co-Authored-By`, no "Generated with" line.
@@ -12,38 +11,41 @@ commits) — no `Co-Authored-By`, no "Generated with" line.
 
 ## Why
 
-<!-- The problem this solves, not a restatement of the diff. -->
+<!-- What the user gets, one line. What it costs today, one line. -->
 
-## What changed
-
-<!--
-New or changed requirement IDs (MB-R-*, OC-R-*, UI-R-*, ...), each quoted with its
-normative text so a reviewer does not have to go look it up. Mark changes old -> new.
-Write "None — no behavior change." for a refactor, docs or tooling PR.
--->
-
-- `XX-R-000` — "The system shall …"
-
-## Approach
-
-<!-- How the issue was resolved: structure or design decisions the issue itself omitted. -->
-
-## Verification
+## Changes
 
 <!--
-What you actually ran, not what could have been run. Be specific: the tests that pin
-the new requirements, driving the demo TUI (`cargo run --release -- --demo`), a real
-CSMS, a physical device. Paste the outcome if it is interesting.
-End with the current line-coverage percentage (`cargo llvm-cov`).
+One line per crate module: what changed and the requirement IDs it serves.
+Spec and README lines last. Write "None — no behavior change." for a refactor,
+docs or tooling PR.
 -->
 
-- [ ] `cargo fmt --check`
-- [ ] `cargo clippy --workspace -- -D warnings`
-- [ ] `cargo check`
-- [ ] `cargo test --workspace`
-- [ ] Spec updated in `docs/specs/<area>/` — a behavior change with no spec change is incomplete
-- [ ] Each new or changed requirement has a test whose doc comment cites its ID
-- [ ] README updated, if user-facing commands, keybindings, config fields or the Lua API changed
+- `<crate> <module>` — <what changed> (`XX-R-000`)
+- `docs/specs/<area>` — <n> entries added, <n> changed
+
+## Tests
+
+<!--
+"<n> of <m> entries pinned", then exceptions only: an entry pinned by a
+real-view or integration test instead of a unit test, or not unit-testable
+per docs/specs/README.md.
+-->
+
+## Verification beyond the gauntlet
+
+<!--
+The gauntlet (fmt, clippy, check, test, llvm-cov >= 80 %) is CI-gated and not
+listed. Here: what else you actually ran — the demo TUI, a real CSMS, a
+physical device — and what you saw. "not run:" is always present.
+-->
+
+- <manual run, what was done and seen>
+- not run: none
 - Coverage: __% lines (`cargo llvm-cov`)
+
+## Decisions
+
+<!-- Design choices the issue did not settle, each with the rejected alternative. -->
 
 Closes #

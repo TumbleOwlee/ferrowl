@@ -28,7 +28,7 @@ Also given the **absolute path of your own task card** (main checkout, outside y
 2026-01-02T14:12 stopped: <what and why>
 ```
 
-May be given every stage (sequential) or some (others run in parallel). Implement assigned stages only, in plan order, touching only their listed files — another agent owns the rest; editing it causes an invisible merge conflict, and the reviewer blocks on it. Not in `files` = not yours, however small — tooling, test helpers, config, scripts, flaky-test fixes you notice on the way included. Stage `s0` (`Land spec`), when the plan has one, is yours: copy the approved text where the plan says, one commit, no code. A spec revision landing after `s0` (or in a plan without one) goes into `docs/specs/` before you continue, inside your current stage's commit — those `docs/specs/` files count as your stage's `files`.
+May be given every stage (sequential) or some (others run in parallel). Implement assigned stages only, in plan order, touching only their listed files — another agent owns the rest; editing it causes an invisible merge conflict, and the reviewer blocks on it. Not in `files` = not yours, however small — tooling, test helpers, config, scripts, flaky-test fixes you notice on the way included. Stage `s0` (`Land spec`), when the plan has one, is yours: copy the approved text where the plan says — `**bold**` marks in a changed entry are stripped, the landed line is plain — one commit, no code. A spec revision landing after `s0` (or in a plan without one) goes into `docs/specs/` before you continue, inside your current stage's commit — those `docs/specs/` files count as your stage's `files`.
 
 ## Stage flow
 
@@ -36,10 +36,11 @@ May be given every stage (sequential) or some (others run in parallel). Implemen
 - Fast lane (brief says `lane=fast`): commit on green — no `status=inreview` — then end turn on `status=committed stage=s<n>`; resumed, take the next stage. Fixes (review findings, PR feedback, a red gauntlet) are committed on green the same way, answering `status=committed`. The orchestrator pushes and verifies between stages; a review comes once, over the whole branch.
 - Sequential, full lane: commit only once resumed with approval, then `status=committed stage=s<n>`. Parallel (one stage, own worktree): commit on green in your worktree before `status=inreview` — a merge needs a commit; resumed with findings, fix and amend that commit. Stage messages cheap, squashed later.
 - Resumed with a `review.md` path: fix exactly its findings for your stage, re-run the gauntlet, `status=inreview` again.
+- Minors in your brief (the `minor=` log lines of your card, or of the parent card after a branch review) are folded into your next stage's work, or into the gate 4 fixes — never a separate pass, never skipped.
 
 ## PR feedback
 
-Resumed with a `pr-feedback.md` path: the user's inline PR comments, one `## thread` each — findings with the same authority as the approved plan's reviewer. Fix each thread that falls inside your stage's files, then fill that thread's `reply:` line (one line, what changed — never a sha, the orchestrator's push decides it) and leave everything else in the file untouched; log `feedback=<n>` on your card; re-run the gauntlet, `status=inreview`. A thread asking for behavior the approved spec doesn't cover → `status=spec-gap`; a thread that is a question, or ambiguous → `status=blocked stage=s<n> reason=<thread id: the question>`; `reply:` stays empty in both cases.
+Resumed with a `pr-feedback.md` path: the user's inline PR comments, one `## thread` each — findings with the same authority as the approved plan's reviewer. Fix each thread that falls inside your stage's files, then fill that thread's `reply:` block and leave everything else in the file untouched. A reply is `reply: fixed` or `reply: declined` followed by indented `- ` lines (what changed, an example if any, the test; or the reason — a cited ID or plan step — and what the user can do); never a sha or stage, the orchestrator's push fills `Fixed in s<n> (<sha>)`. `declined` leaves the thread open for the user; log `feedback=<n>` on your card; re-run the gauntlet, `status=inreview`. A thread asking for behavior the approved spec doesn't cover → `status=spec-gap`; a thread that is a question, or ambiguous → `status=blocked stage=s<n> reason=<thread id: the question>`; `reply:` stays empty in both cases.
 
 ## Order, per stage, no exceptions
 
@@ -61,7 +62,7 @@ Run the full gauntlet from `AGENTS.md`'s `## Build / test / lint`; the card gets
 
 - Commit a stub, `unimplemented!()`, `TODO`, skipped test, or weakened assertion as "green". Incomplete stage = report, not commit.
 - Claim a verification you didn't run — quote real output.
-- Push, open a PR, merge, reply on or resolve a PR thread — orchestrator's (`pr-feedback.sh reply` posts your `reply:` lines after the push).
+- Push, open a PR, merge, reply on or resolve a PR thread — orchestrator's (`pr-feedback.sh reply` posts your reply blocks after the push).
 - Move your card to `done/` — orchestrator's, after merge + independent verify.
 - Touch another agent's card, the parent card, a wave-gate card.
 - Log a step you didn't run or a fake `commit=` sha.
