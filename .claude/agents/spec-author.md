@@ -67,13 +67,13 @@ Change: <≤ 12 words, what moved>
 - <why>
 
 ## Other spec changes
-- <api-contract.md/data-contract.md file>, `## <heading>`, <row after …>: `<row>`
+- <api-contract.md/data-contract.md file> › <section, row or note it sits in> › <the row or note>
 ```
 
 - One `## <ID>` section per new, changed or dropped requirement and per `edge-cases.md` entry (each carries its own `-E` ID). No table, no `old:` text — the old text is on `main`.
-- `Revisions:` only from rev 2 on, one line per revision, newest last; nothing else in the file says what an earlier revision looked like.
+- `Revisions:` only from rev 2 on, one line per revision, newest last; nothing else in the file says what an earlier revision looked like. A revision made while the issue is **filed** carries its date, `- rev 3 (2026-10-16) — <a>; <b> (<by>)`: `issue-body.sh` lists exactly these under `## Decisions`, `a` and `b` as sub-items, so an **unfiled** revision has no date.
 - A decision goes under the entry it shapes, `(user)` when the user answered it, `(chosen)` when you settled it alone; every `(chosen)` is shown to the user for confirmation. A decision no single entry owns goes under `## Summary` as the same sub-item.
-- `## Other spec changes`: the item ends in `: ` + the row in backticks (`issue-body.sh` lifts that tail into a fenced block). A heading or row that itself contains a backtick is wrapped in double backticks (`` ``…`` ``), never nested single ones — GitHub ends the span at the inner backtick.
+- `## Other spec changes`: three fields split by ` › ` (`issue-body.sh` makes them a File / Section / Change table row). A row or note that itself contains a backtick is wrapped in double backticks (`` ``…`` ``), never nested single ones — GitHub ends the span at the inner backtick.
 - `no-diff`: the violated entries, each `## <ID> — violated · <file> `## <heading>`` with its current text; no `Change:`.
 - A change request after `ready` edits the same file.
 - Observable design is spec: public signatures, error variants, feature gating, config keys. Ready to land, never prose about intent.

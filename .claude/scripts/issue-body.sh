@@ -9,12 +9,17 @@
 #   parent card     spec rev, lane, pr, split (frontmatter) — the status line
 #   spec-diff.md    ## Spec (rev N): `### Requirements`, one table row per
 #                   `## <ID>` section (kind + `Change:` in the Kind cell);
-#                   `### Decisions`, one table row per `- decided` line, the
-#                   `## Summary` ones first; `### Other spec changes`, each
-#                   item's trailing `: <row>` moved into a fenced block
-#   plan.summary.md ## Plan: the stage table (Stage, What)
-#   plan.md         ## Plan `### Decisions` from `## Shared` `Decisions:`
+#                   `### Other spec changes`, one table row per
+#                   `- <file> › <section> › <change>` item;
+#                   ## Decisions, one item per dated `Revisions:` line
+#                   (`- rev N (YYYY-MM-DD) — a; b (who)`): `- <date>, <who>`
+#                   with `a`, `b` as sub-items. Only a revision made after
+#                   filing carries a date, so the section is absent when the
+#                   filed spec never changed; the `- decided` lines are the
+#                   drafting history and stay in spec-diff.md
 #   request.md      the reused issue's original body, collapsed (if present)
+# The plan is deliberately absent: the issue states the requirement, the PR
+# the implementation.
 # A run without spec-diff.md (non-behavior change) states "no spec change".
 # The heading `## Spec (rev N)` and the `<details>` block are parsed by
 # issue-request.sh and the Resume table — keep them when changing the shape.
@@ -24,28 +29,6 @@ root=${CLAUDE_PROJECT_DIR:-.}
 a=$root/.claude/tasks/artifacts/$slug
 field() { sh "$root/.claude/scripts/card-field.sh" "$slug" "$1"; }
 [ -f "$a/issue.md" ] || { echo "issue-body: missing $a/issue.md" >&2; exit 1; }
-
-# Shared awk: a `- decided (who): choice — rejected: alt; why` line, or the
-# plan's `- choice (who) — rejected: alt; why`, as one decision-table row. Pipes inside a cell are escaped; empty cells print `—`.
-decision_row='
-function cell(s) { gsub(/\|/, "\\|", s); gsub(/^[ \t]+|[ \t]+$/, "", s); return s == "" ? "—" : s }
-function decision(line, entry,    who, rest, chosen, rej, alt, why, i) {
-    who = "—"
-    if (match(line, /^- decided \([a-z-]+\): /)) {
-        who = substr(line, 12, RLENGTH - 14); rest = substr(line, RLENGTH + 1)
-    } else if (match(line, /^- decided: /)) {
-        rest = substr(line, RLENGTH + 1)
-    } else { rest = substr(line, 3) }
-    rej = ""
-    if ((i = index(rest, " — rejected: ")) > 0) { chosen = substr(rest, 1, i - 1); rej = substr(rest, i + 13) }
-    else if ((i = index(rest, "; rejected: ")) > 0) { chosen = substr(rest, 1, i - 1); rej = substr(rest, i + 12) }
-    else chosen = rest
-    if (match(chosen, / \((user|chosen)\)$/)) { who = substr(chosen, RSTART + 2, RLENGTH - 3); chosen = substr(chosen, 1, RSTART - 1) }
-    alt = rej; why = ""
-    if ((i = index(rej, "; ")) > 0) { alt = substr(rej, 1, i - 1); why = substr(rej, i + 2) }
-    sub(/\.$/, "", chosen); sub(/\.$/, "", alt); sub(/\.$/, "", why)
-    return (entry == "" ? "" : "| " cell(entry) " ") "| " cell(chosen) " | " cell(alt) " | " cell(why) " | " who " |"
-}'
 
 head -1 "$a/issue.md"
 echo
@@ -70,12 +53,22 @@ if [ -f "$a/spec-diff.md" ]; then
     area=$(sed -n 's/^Area: \([^ ]*\).*/\1/p' "$a/spec-diff.md" | head -1)
     printf '## Spec (rev %s)%s\n\n' "$rev" "${area:+ — $area}"
     [ "$nvio" -gt 0 ] && printf 'No spec change: the code violates the entries below.\n\n'
-    awk "$decision_row"'
+    awk '
+        function cell(s) { gsub(/\|/, "\\|", s); gsub(/^[ \t]+|[ \t]+$/, "", s); return s == "" ? "—" : s }
         function flush() {
             if (id == "") return
             if (text == "" && why != "") text = why
             reqs = reqs "| " id " | " cell(kind) " | " cell(text) " |\n"
             id = ""
+        }
+        function revision(line,    date, who, body, k, i) {
+            if (!match(line, /^- rev [0-9]+ \([0-9-]+\) — /)) return
+            date = line; sub(/^- rev [0-9]+ \(/, "", date); sub(/\).*/, "", date)
+            body = substr(line, RLENGTH + 1); who = "agent"
+            if (match(body, / \([a-z-]+\)$/)) { who = substr(body, RSTART + 2, RLENGTH - 3); body = substr(body, 1, RSTART - 1) }
+            revs = revs "- " date ", " who "\n"
+            k = split(body, item, /; /)
+            for (i = 1; i <= k; i++) revs = revs "  - " item[i] "\n"
         }
         /^## Summary$/ { flush(); sec = "summary"; next }
         /^## Other spec changes$/ { flush(); sec = "other"; next }
@@ -86,36 +79,21 @@ if [ -f "$a/spec-diff.md" ]; then
             next
         }
         sec == "entry" && /^Change: / { kind = kind " · " substr($0, 9); next }
-        sec == "entry" && /^- decided/ { decs = decs decision($0, id) "\n"; next }
         sec == "entry" && /^- / { why = why (why == "" ? "" : "<br>") substr($0, 3); next }
         sec == "entry" && /^[^ ]/ { text = text (text == "" ? "" : "<br>") $0; next }
-        sec == "summary" && /^- decided/ { sdecs = sdecs decision($0, "—") "\n"; next }
+        sec == "summary" && /^- rev / { revision($0); next }
         sec == "other" && /^- / {
-            line = substr($0, 3); row = ""
-            # The row is the backtick-wrapped tail after the last ": `".
-            for (i = length(line); i > 2; i--)
-                if (substr(line, i - 2, 3) == ": `") { row = substr(line, i); line = substr(line, 1, i - 3); break }
-            gsub(/^`+ ?| ?`+$/, "", row)
-            others = others "- " line (row == "" ? "" : ":\n  ```\n  " row "\n  ```") "\n"
+            line = substr($0, 3); k = split(line, f, / › /)
+            others = others "| " cell(f[1]) " | " cell(k > 2 ? f[2] : "") " | " cell(k > 2 ? f[3] : f[k]) " |\n"
             next
         }
         END {
             flush()
             if (reqs != "") printf "### Requirements\n| ID | Kind | Requirement |\n|---|---|---|\n%s\n", reqs
-            if (sdecs decs != "") printf "### Decisions\n| Entry | Chosen | Rejected | Why | By |\n|---|---|---|---|---|\n%s%s\n", sdecs, decs
-            if (others != "") printf "### Other spec changes\n%s\n", others
+            if (others != "") printf "### Other spec changes\n| File | Section | Change |\n|---|---|---|\n%s\n", others
+            if (revs != "") printf "## Decisions\n%s\n", revs
         }
     ' "$a/spec-diff.md"
-fi
-
-# --- plan
-stages=; dec=
-[ -f "$a/plan.summary.md" ] && stages=$(awk -F'|' '/^\| s[0-9]/ { gsub(/^ +| +$/, "", $2); gsub(/^ +| +$/, "", $3); printf "| %s | %s |\n", $2, $3 }' "$a/plan.summary.md")
-[ -f "$a/plan.md" ] && dec=$(sh "$root/.claude/scripts/extract-section.sh" '## Shared' "$a/plan.md" 2>/dev/null | awk "$decision_row"'/^Decisions:/ { on = 1; next } on && /^- / { print decision($0, ""); next } on && !/^- / && !/^$/ { on = 0 }')
-if [ -n "$stages$dec" ]; then
-    printf '## Plan\n\n'
-    [ -n "$stages" ] && printf '| Stage | Title |\n|---|---|\n%s\n\n' "$stages"
-    [ -n "$dec" ] && printf '### Decisions\n| Chosen | Rejected | Why | By |\n|---|---|---|---|\n%s\n\n' "$dec"
 fi
 
 # --- original request
