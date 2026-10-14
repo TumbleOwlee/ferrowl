@@ -12,8 +12,8 @@
 #   issue.md           Issue: <title>
 #   split-issue.md     Split: <title>
 #   pr.md              PR: <title>
-#   merge-message.txt  Merge: <subject>
 #   question.md        the whole file (it is written to be quoted)
+#   revision.md        the whole file (the delta of one spec revision)
 # then, once, over every file given: Confirm: with every `decided (chosen)`
 # line of spec-diff.md (prefixed with its ID) and every `Decisions taken`
 # line of plan.summary.md, or `Confirm: nothing flagged`.
@@ -52,7 +52,6 @@ for f in "$@"; do
     issue.md) printf 'Issue: %s\n' "$(head -1 "$f" | sed 's/^# //')" ;;
     split-issue.md) printf 'Split: %s\n' "$(head -1 "$f" | sed 's/^# //')" ;;
     pr.md) printf 'PR: %s\n' "$(head -1 "$f" | sed 's/^# //')" ;;
-    merge-message.txt) printf 'Merge: %s\n' "$(head -1 "$f")" ;;
     question.md) cat "$f" ;;
     esac
 done

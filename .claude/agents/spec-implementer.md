@@ -36,7 +36,7 @@ May be given every stage (sequential) or some (others run in parallel). Implemen
 - Fast lane (brief says `lane=fast`): commit on green — no `status=inreview` — then end turn on `status=committed stage=s<n>`; resumed, take the next stage. Fixes (review findings, PR feedback, a red gauntlet) are committed on green the same way, answering `status=committed`. The orchestrator pushes and verifies between stages; a review comes once, over the whole branch.
 - Sequential, full lane: commit only once resumed with approval, then `status=committed stage=s<n>`. Parallel (one stage, own worktree): commit on green in your worktree before `status=inreview` — a merge needs a commit; resumed with findings, fix and amend that commit. Stage messages cheap, squashed later.
 - Resumed with a `review.md` path: fix exactly its findings for your stage, re-run the gauntlet, `status=inreview` again.
-- Minors in your brief (the `minor=` log lines of your card, or of the parent card after a branch review) are folded into your next stage's work, or into the gate 4 fixes — never a separate pass, never skipped.
+- Minors in your brief (the `minor=` log lines of your card) are folded into your next stage's work; when no stage follows (a last stage, a branch review) you are resumed with them and fix them before the commit — never skipped.
 
 ## PR feedback
 

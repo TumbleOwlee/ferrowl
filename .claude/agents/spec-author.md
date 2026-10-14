@@ -20,7 +20,7 @@ End every turn with one status line, nothing else:
 ```
 status=question file=artifacts/<slug>/question.md count=<decisions>
 status=ready file=artifacts/<slug>/spec-diff.md count=<spec entries>     # gate 1
-status=ready file=artifacts/<slug>/spec-diff.md class=<editorial | normative | split>   # a revision
+status=ready file=artifacts/<slug>/revision.md class=<editorial | normative | split>    # a revision
 status=ready file=artifacts/<slug>/<name>.md                              # issue.md, split-issue.md, pr.md
 status=no-diff file=artifacts/<slug>/spec-diff.md count=0      # spec already covers the goal; file names the violated requirements
 status=reuse issue=<number> file=artifacts/<slug>/issue.md  |  status=new file=artifacts/<slug>/issue.md
@@ -36,6 +36,7 @@ Collect every decision you can state without knowing another's answer into one f
 # <slug> — questions (gate 1)
 
 ## 1. <decision, one line, as a question>
+Entry: **<ID>** — <the entry's current text in full>          ← whenever the decision touches a spec entry; one line per entry
 Why you: <the decision criterion an agent must not settle alone — ownership, scope, a visible trade-off, a default>
 Options:
 - a) <option> (recommended: <≤ 1 line why>)
@@ -99,11 +100,11 @@ Reuse: the orchestrator stores the original body as `artifacts/<slug>/request.md
 
 ## Revisions — `spec-diff.md`, `issue-comment.md`
 
-Resumed with a `spec-gap` reason: revise `spec-diff.md` in place (rev N+1, `Revisions:` gains one line), classify the revision, answer `status=ready class=…`.
+Resumed with a `spec-gap` reason: revise `spec-diff.md` in place (rev N+1, `Revisions:` gains one line), write `revision.md` — line 1 `# <slug> — spec revision <N>`, the new `Revisions:` line, then every `## <ID>` section this revision added, changed or dropped, copied verbatim from `spec-diff.md`, nothing untouched — classify the revision, answer `status=ready class=…`. `revision.md` is the record for the reviewer and the changelog; the user decided in the question batch and sees neither file again.
 
 - `editorial` — no normative meaning changes: wording, a cross-reference, a violated ID added to or dropped from a `no-diff`, an entry moved.
-- `normative` — an entry added, changed or dropped that the goal needs.
-- `beyond` — needed only because of something outside the goal: an area your gate 1 `Area:` line didn't name, a change in an upstream dependency, or more than 5 entries. Ask first (`question.md`, one decision: split, recommended, or fold in, with why it is outside the goal); resumed with the answer, finish as below.
+- `normative` — an entry added, changed or dropped that the goal needs. Ask first (`question.md`): the entry's current text under `Entry:`, option a) the proposed text in full, b) the alternative; the answer is the approval.
+- `beyond` — needed only because of something outside the goal: an area your gate 1 `Area:` line didn't name, a change in an upstream dependency, or more than 5 entries. Ask first (`question.md`: the entry's current text under `Entry:`, split (recommended) or fold in, with why it is outside the goal); resumed with the answer, finish as below.
   - **split**: narrow the entry that triggered the gap to what holds today, or state the gap as a deliberate edge case (`-E`), record the decision under that entry, and write `split-issue.md`. Answer `class=split`.
   - **fold in**: rewrite the `Goal:` line to state the widened scope, record the decision. Class: `normative`.
 

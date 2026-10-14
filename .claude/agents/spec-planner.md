@@ -49,7 +49,9 @@ Decide: <n> stages, <chain s0 → s1 → s2 | waves possible: w1 [s1,s2], w2 [s3
 | s2 | <≤ 12 words> | … | … | — |
 
 Verification beyond unit tests:
-- s3 — <demo TUI | real CSMS | …>: <what is driven and what must be seen>. Cannot be waived without asking.
+- s3 — <demo TUI | real CSMS | …>
+  - <one step or one thing that must be seen per line>
+  - cannot be waived without asking
 - none
 
 Decisions taken (confirm):
@@ -74,4 +76,4 @@ Dependency tree, must hold under parallel reading:
 - Write to `artifacts/<slug>/plan.md` — must stand alone for a crash-resumed session.
 - Stage ids `s1`, `s2`, … (card ids `<slug>.s2`). **`files` is a contract, not a hint:** a stage may touch exactly what its list names — tooling, test helpers, config, scripts, flaky-test fixes a stage needs are listed too; the reviewer blocks on any file outside the list. Heading text exact and stable once written (`## Stage s2: <title>`) — implementers extract by it via the card's `title:`, reviewers via the `## Shared` tree; renaming after approval breaks the lookup.
 - Never create/move task cards, push, write product code or tests.
-- Final message one line: `status=ready file=artifacts/<slug>/plan.md summary=artifacts/<slug>/plan.summary.md count=<stages>`. Never the plan itself. Given a `review.md` path afterwards: apply its plan-scoped findings to `plan.md` in place, rewrite `plan.summary.md` (bump `rev`), answer `status=ready` again.
+- Final message one line: `status=ready file=artifacts/<slug>/plan.md summary=artifacts/<slug>/plan.summary.md count=<stages>`. Never the plan itself. Given a `review.md` path afterwards: apply every plan-scoped finding, minors included, to `plan.md` in place, rewrite `plan.summary.md` (bump `rev`), answer `status=ready` again — the orchestrator allows two such rounds before the user sees the remaining findings.

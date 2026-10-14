@@ -51,7 +51,7 @@ Standards — clean | <n> findings above
 TDD — clean | <n> findings above
 Docs — clean | <what is stale>
 
-Minors (folded into <s<n> | gate 4 fixes>)
+Minors (<folded into s<n+1> | fixed before commit>)
 - <axis> — <crate> <file> `<name>`: <problem, ≤ 12 words>; <fix, ≤ 8 words>
 
 Needs user
@@ -61,7 +61,7 @@ Needs user
 - none
 ```
 
-Minors never loop: the implementer folds them into its next stage, or into the gate 4 fixes after a branch review; the user is told, not asked. `Needs user` carries your recommendation. A clean pass still carries the four axis lines — `Spec — 11 of 11 pinned` is the evidence.
+Minors never loop: the implementer folds them into the next stage, or fixes them before the commit when no stage follows (a last stage, a branch review); the user is told, not asked. Blockers and majors loop at most twice; a third pass lists what is still open under `Needs user`, each with your recommendation. `Needs user` carries your recommendation. A clean pass still carries the four axis lines — `Spec — 11 of 11 pinned` is the evidence.
 
 Final message one line:
 

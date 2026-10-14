@@ -35,5 +35,5 @@ One section at a time: `sh .claude/scripts/extract-section.sh '<heading>' .claud
 | Reconcile the spec | `### Reconcile the spec` |
 | Gate 3 — independent review | `### Gate 3 — review. Stop for approval.` |
 | Gate 4 — pull request | `### Gate 4 — pull request. Stop for approval.` |
-| Merge and clean up | `### Merge` |
+| After the human merges on GitHub — worktree and artifacts | `### After merge` |
 | Resume a dead run | `### Resume an interrupted run` |
