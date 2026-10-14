@@ -50,8 +50,7 @@ sed -n '/^## Goal$/,/^## /{ /^## /d; p; }' "$a/issue.md" | sed '/^$/d' | { echo 
 
 # --- spec
 if [ -f "$a/spec-diff.md" ]; then
-    area=$(sed -n 's/^Area: \([^ ]*\).*/\1/p' "$a/spec-diff.md" | head -1)
-    printf '## Spec (rev %s)%s\n\n' "$rev" "${area:+ — $area}"
+    printf '## Spec (rev %s)\n\n' "$rev"
     [ "$nvio" -gt 0 ] && printf 'No spec change: the code violates the entries below.\n\n'
     awk '
         function cell(s) { gsub(/\|/, "\\|", s); gsub(/^[ \t]+|[ \t]+$/, "", s); return s == "" ? "—" : s }
