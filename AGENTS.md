@@ -12,9 +12,10 @@ Ferrowl — Rust TUI simulator for Modbus (client/server, TCP/RTU) and OCPP (Cha
 - Before editing an area: pull the headings the task touches from its `requirements.md` and their `edge-cases.md` counterparts (`## Conventions — reading`); the whole file only for a cross-cutting change. `edge-cases.md` = deliberate ugliness; check before "fixing".
 - Behavior change with no spec change = incomplete.
 - `main` never holds unfinished spec: a requirement on `main` describes code that exists and is tested. A branch may hold a spec commit ahead of its code; squash merge keeps it off `main`.
+- A run's spec settles with its code. Gate 1 drafts it best effort under local IDs (`S<n>` scenarios, `R<n>`, `E<n>`); architecture and planning refine it; the planner assigns fixed IDs. On the branch the implementer updates `docs/specs/` inside the stage commit; a reviewer classifies every change, and a meaningful one (contradicts an agreed scenario, a user decision or a user-decided architecture item, or changes what a user sees beyond a deferred point) needs the user's approval.
 - Pre-existing spec/code disagreement outside your task: stop, raise separately. Folding it in widens approved work and skips its own review.
 - Specs carry no `file:line`. Locate code with search tools.
-- Requirement and edge-case IDs (`-R-`, `-E-`) stable, append-only (sole exception: `docs/specs/README.md` rule 2). Cite in commits and PRs.
+- Requirement and edge-case IDs (`-R-`, `-E-`) stable, append-only once on `main` (sole exception: `docs/specs/README.md` rule 2). A fixed ID added on a branch may be dropped before merge; its number is never reused within that run. Cite in commits and PRs.
 
 ## TDD — fixed order, every stage
 
@@ -33,7 +34,7 @@ Triggers on **behavior change, any size**: new public function, changed default,
 
 Gate/task-board mechanics (Gate 1 through Merge, Resume): [`.claude/AGENTS.workflow.md`](./.claude/AGENTS.workflow.md).
 
-A plan stage's `files` list is a contract: the stage touches exactly the files it names — tooling, test helpers, config, scripts, a flaky-test fix, a drive-by rename included.
+A plan stage's `files` list is a contract: the stage touches exactly the files it names — tooling, test helpers, config, scripts, a flaky-test fix, a drive-by rename included; the `docs/specs/` files its logged spec changes touch count as named.
 
 ## Where to look for task X
 
