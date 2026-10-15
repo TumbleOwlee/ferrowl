@@ -120,6 +120,8 @@ pub(crate) struct MockHandle {
     /// MB-R-150 — the registry `App::rebuild_registry` most recently attached via
     /// `set_serial_paths`, if any.
     serial_paths: Arc<Mutex<Option<SerialPathRegistry>>>,
+    view_area: Arc<Mutex<Option<Rect>>>,
+    overlay_area: Arc<Mutex<Option<Rect>>>,
     keys: Arc<Mutex<Vec<(KeyModifiers, KeyCode)>>>,
     clone_slot: Arc<Mutex<Option<MockHandle>>>,
 }
@@ -154,6 +156,16 @@ impl MockHandle {
     pub(super) fn serial_paths(&self) -> Option<SerialPathRegistry> {
         self.serial_paths.lock().unwrap().clone()
     }
+
+    /// The area `App` last passed to `render`.
+    pub(super) fn view_area(&self) -> Option<Rect> {
+        *self.view_area.lock().unwrap()
+    }
+
+    /// The area `App` last passed to `render_overlay`.
+    pub(super) fn overlay_area(&self) -> Option<Rect> {
+        *self.overlay_area.lock().unwrap()
+    }
 }
 
 /// What makes a `MockView` open its dialog.
@@ -181,6 +193,8 @@ pub(crate) struct MockView {
     renders: Arc<AtomicUsize>,
     commands: Arc<Mutex<Vec<String>>>,
     serial_paths: Arc<Mutex<Option<SerialPathRegistry>>>,
+    view_area: Arc<Mutex<Option<Rect>>>,
+    overlay_area: Arc<Mutex<Option<Rect>>>,
     keys: Arc<Mutex<Vec<(KeyModifiers, KeyCode)>>>,
     command_result: Option<CommandResult>,
     clone_valid: bool,
@@ -208,6 +222,8 @@ impl MockView {
         let renders = Arc::new(AtomicUsize::new(0));
         let commands = Arc::new(Mutex::new(Vec::new()));
         let serial_paths = Arc::new(Mutex::new(None));
+        let view_area = Arc::new(Mutex::new(None));
+        let overlay_area = Arc::new(Mutex::new(None));
         let keys = Arc::new(Mutex::new(Vec::new()));
         let clone_slot = Arc::new(Mutex::new(None));
         let handle = MockHandle {
@@ -215,6 +231,8 @@ impl MockView {
             renders: renders.clone(),
             commands: commands.clone(),
             serial_paths: serial_paths.clone(),
+            view_area: view_area.clone(),
+            overlay_area: overlay_area.clone(),
             keys: keys.clone(),
             clone_slot: clone_slot.clone(),
         };
@@ -233,6 +251,8 @@ impl MockView {
             renders,
             commands,
             serial_paths,
+            view_area,
+            overlay_area,
             keys,
             command_result: None,
             clone_valid: true,
@@ -383,11 +403,14 @@ impl ModuleView for MockView {
         self.name.clone()
     }
 
-    fn render(&mut self, _frame: &mut Frame, _area: Rect) {
+    fn render(&mut self, _frame: &mut Frame, area: Rect) {
         self.renders.fetch_add(1, Ordering::Relaxed);
+        *self.view_area.lock().unwrap() = Some(area);
     }
 
-    fn render_overlay(&mut self, _frame: &mut Frame, _area: Rect) {}
+    fn render_overlay(&mut self, _frame: &mut Frame, area: Rect) {
+        *self.overlay_area.lock().unwrap() = Some(area);
+    }
 
     fn handle_events(&mut self, modifiers: KeyModifiers, code: KeyCode) -> EventResult {
         self.keys.lock().unwrap().push((modifiers, code));

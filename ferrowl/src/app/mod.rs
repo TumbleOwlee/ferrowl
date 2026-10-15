@@ -269,6 +269,11 @@ impl Tab {
         self.view_focused && matches!(self.focus, TabFocus::LogView)
     }
 
+    /// The log pane is the tab's selected pane, whether or not the tab holds keyboard focus.
+    pub fn log_pane_selected(&self) -> bool {
+        matches!(self.focus, TabFocus::LogView)
+    }
+
     /// Swap in a replacement content view (e.g. after an OCPP role switch), carrying over the log
     /// channel and re-applying focus so the fresh view isn't left unfocused mid-session.
     pub fn replace_view(&mut self, new_view: Box<dyn ModuleView>) {
@@ -949,6 +954,109 @@ mod tests {
             row(h - 1).contains(":  command"),
             "the command line is the bottom row"
         );
+    }
+
+    #[test]
+    /// UI-R-002, UI-R-373 — with the content view focused, the log pane keeps its fixed height
+    /// and the content area takes the rest below the tab bar.
+    fn ut_content_focus_keeps_log_at_fixed_height() {
+        use super::testkit::{MockView, build_app};
+        let tb = crate::view::tabs::tab_bar_height();
+        let (v, h) = MockView::pair("alpha");
+        let mut app = build_app(vec![v.boxed()]);
+        app.draw().unwrap();
+        let area = h.view_area().unwrap();
+        assert_eq!(area.y, tb);
+        assert_eq!(area.height, 40 - tb - render::LOG_HEIGHT - 1);
+    }
+
+    #[test]
+    /// UI-R-374 — focusing the log pane swaps the heights; focusing the content view restores
+    /// the default layout.
+    fn ut_log_focus_swaps_content_and_log_heights() {
+        use super::testkit::{MockView, build_app};
+        let tb = crate::view::tabs::tab_bar_height();
+        let (v, h) = MockView::pair("alpha");
+        let mut app = build_app(vec![v.boxed()]);
+        app.handle_nav_key(KeyModifiers::SHIFT, KeyCode::Down);
+        app.draw().unwrap();
+        assert_eq!(h.view_area().unwrap().height, render::LOG_HEIGHT);
+        app.handle_nav_key(KeyModifiers::SHIFT, KeyCode::Up);
+        app.draw().unwrap();
+        assert_eq!(
+            h.view_area().unwrap().height,
+            40 - tb - render::LOG_HEIGHT - 1
+        );
+    }
+
+    #[tokio::test]
+    /// UI-R-375 — the command line, a module dialog and an app overlay keep the layout of the
+    /// pane whose focus is restored on close.
+    async fn ut_command_and_dialog_keep_enlarged_log() {
+        use super::testkit::{MockView, build_app};
+        let (v, h) = MockView::pair("alpha");
+        let mut app = build_app(vec![v.with_dialog_on_command("edit").boxed()]);
+        let none = KeyModifiers::NONE;
+        let enlarged = |app: &mut App<super::testkit::MockScreen>| {
+            app.draw().unwrap();
+            assert_eq!(h.view_area().unwrap().height, render::LOG_HEIGHT);
+        };
+        app.handle_key(KeyModifiers::SHIFT, KeyCode::Down).await;
+        enlarged(&mut app);
+        app.handle_key(none, KeyCode::Char(':')).await;
+        enlarged(&mut app);
+        app.handle_key(none, KeyCode::Esc).await;
+        enlarged(&mut app);
+        for c in ":edit".chars() {
+            app.handle_key(none, KeyCode::Char(c)).await;
+        }
+        app.handle_key(none, KeyCode::Enter).await;
+        assert!(app.tabs.titles[0].view.is_overlay_active());
+        enlarged(&mut app);
+        app.handle_key(none, KeyCode::Esc).await;
+        enlarged(&mut app);
+        for c in ":new".chars() {
+            app.handle_key(none, KeyCode::Char(c)).await;
+        }
+        app.handle_key(none, KeyCode::Enter).await;
+        assert!(app.overlay.is_some());
+        enlarged(&mut app);
+        app.handle_key(none, KeyCode::Esc).await;
+        assert!(app.overlay.is_none());
+        enlarged(&mut app);
+    }
+
+    #[test]
+    /// UI-R-376 — each tab renders with the layout its own pane focus selects.
+    fn ut_tab_switch_renders_each_tabs_own_layout() {
+        use super::testkit::{MockView, build_app};
+        let tb = crate::view::tabs::tab_bar_height();
+        let default = 40 - tb - render::LOG_HEIGHT - 1;
+        let (a, ha) = MockView::pair("a");
+        let (b, hb) = MockView::pair("b");
+        let mut app = build_app(vec![a.boxed(), b.boxed()]);
+        app.handle_nav_key(KeyModifiers::SHIFT, KeyCode::Down);
+        app.handle_nav_key(KeyModifiers::SHIFT, KeyCode::Right);
+        app.draw().unwrap();
+        assert_eq!(hb.view_area().unwrap().height, default);
+        app.handle_nav_key(KeyModifiers::SHIFT, KeyCode::Left);
+        app.draw().unwrap();
+        assert_eq!(ha.view_area().unwrap().height, render::LOG_HEIGHT);
+    }
+
+    #[test]
+    /// UI-R-377 — a module dialog keeps the placement the default layout gives, while the log
+    /// pane is enlarged.
+    fn ut_module_dialog_keeps_default_layout_area() {
+        use super::testkit::{MockView, build_app};
+        let (v, h) = MockView::pair("alpha");
+        let mut app = build_app(vec![v.boxed()]);
+        app.draw().unwrap();
+        let default = h.view_area();
+        app.handle_nav_key(KeyModifiers::SHIFT, KeyCode::Down);
+        app.draw().unwrap();
+        assert_eq!(h.overlay_area(), default);
+        assert_ne!(h.view_area(), default);
     }
 
     #[test]
