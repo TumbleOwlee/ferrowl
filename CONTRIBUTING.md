@@ -214,7 +214,7 @@ sequenceDiagram
         Orch->>Reviewer: fresh review: stage
         activate Reviewer
         loop until clean
-            Reviewer-->>Orch: clean, or findings; each spec change detail or meaningful
+            Reviewer-->>Orch: clean, or findings, each spec change classed detail or meaningful
             Orch->>Impl: findings, review path
             Impl-->>Orch: stage green again
             Orch->>Reviewer: follow-up pass: the stage diff again
@@ -222,7 +222,7 @@ sequenceDiagram
         deactivate Reviewer
         opt meaningful spec change
             Orch->>User: keep, revert, or split
-            Note over Orch,Author: kept after filing: changelog comment on the issue; split: a new issue
+            Note over Orch,Author: kept after filing: changelog comment on the issue, split: a new issue
         end
         opt draft PR exists and has unresolved review threads
             Orch->>Git: fetch the threads into a file
@@ -275,9 +275,9 @@ sequenceDiagram
     Orch->>User: approval stop: PR body, approve or manual run first?
     User->>Orch: approved
     Orch->>Git: push, rewrite the issue with the merged spec, replace the draft PR's title and body, mark ready
-    Orch->>Git: wait for CI; red: the implementer fixes, push, wait again
+    Orch->>Git: wait for CI, on red the implementer fixes, push, wait again
     Orch->>Orch: clean up: worktree, local branch, cards, artifact dir
-    Note over User,Git: the run ends here; the human reviews and merges on GitHub, outside the workflow
+    Note over User,Git: the run ends here, the human reviews and merges on GitHub, outside the workflow
     deactivate Orch
     end
 ```
