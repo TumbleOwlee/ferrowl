@@ -14,7 +14,7 @@ This area owns the *mechanism*: how `:` commands parse and dispatch, generic (ap
 
 **UI-R-001** — The application presents a full-screen terminal UI in the alternate screen buffer with raw mode enabled, and restores the terminal (leave alternate screen, disable raw mode) on normal exit, on the error exit path, and from a panic hook.
 
-**UI-R-002** — Screen layout top-to-bottom: the tab bar, a tab widget (UI-R-114) in `Horizontal` layout at its rendered extent across that direction (UI-R-121), one row under the default padding, flexible module content area, fixed-height log pane, one-row command line. The content area absorbs remaining height.
+**UI-R-002** — Screen layout top-to-bottom: the tab bar, a tab widget (UI-R-114) in `Horizontal` layout at its rendered extent across that direction (UI-R-121), one row under the default padding, module content area and log pane sized by pane focus (UI-R-373, UI-R-374), one-row command line.
 
 **UI-R-003** — The application owns an ordered list of tabs and one active index.
 
@@ -37,6 +37,16 @@ This area owns the *mechanism*: how `:` commands parse and dispatch, generic (ap
 **UI-R-072** — The `:` command line and any dialog remove keyboard focus from the active tab's panes (UI-R-006) while open and restore it on close.
 
 **UI-R-073** — Every keyboard-focus transition within the active tab (UI-R-006) routes through a single choke point.
+
+**UI-R-373** — While the active tab's content view holds pane focus (UI-R-006), the log pane has a fixed height and the content area absorbs the remaining height.
+
+**UI-R-374** — While the active tab's log pane holds pane focus (UI-R-006), the content area has the fixed height UI-R-373 gives the log pane and the log pane absorbs the remaining height.
+
+**UI-R-375** — While the command line, a dialog or an overlay holds keyboard focus (UI-R-072), the layout of UI-R-373/UI-R-374 follows the pane whose focus is restored on close.
+
+**UI-R-376** — The layout of UI-R-373/UI-R-374 follows the active tab's own pane focus, so switching tabs (UI-R-010) renders the newly active tab with the layout its own pane focus selects.
+
+**UI-R-377** — While the active tab's log pane holds the layout of UI-R-374, a module dialog keeps the size and position it has under the layout of UI-R-373.
 
 **UI-R-007** — Only key **press** events are acted upon; release/repeat kinds and non-key terminal events are ignored for command/navigation.
 
