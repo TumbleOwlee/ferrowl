@@ -482,7 +482,24 @@ impl ModbusModule {
         read_ranges: ReadRanges,
         tls: ferrowl_modbus::tcp::ModbusTlsConfig,
     ) -> Result<(), Error> {
-        // Adopt new explicit read ranges: cover their gaps in memory, then rebuild operations.
+        self.set_read_ranges(read_ranges).await;
+        let net_config = endpoint_to_config(endpoint, &timing, tls);
+        self.instance = build_instance(
+            role.client_or_server(),
+            net_config,
+            self.operations.clone(),
+            self.memory.clone(),
+            self.self_signed_cache.clone(),
+        );
+        self.own_serial_path = endpoint_serial_path(endpoint);
+        self.attach_path_conflict();
+        Ok(())
+    }
+
+    /// Adopts new explicit read ranges, declares their gap cells (MB-R-084, rejections logged
+    /// per MB-R-129) and rebuilds the shared operation list in place so a running client polls
+    /// with them from its next cycle (MB-R-295). Never undeclares cells (MB-E-105).
+    pub async fn set_read_ranges(&mut self, read_ranges: ReadRanges) {
         self.read_ranges = read_ranges;
         for (key, mem_kind, range) in explicit_read_coverage(&self.registers, &self.read_ranges) {
             let subject = gap_cell_subject(&key);
@@ -495,17 +512,14 @@ impl ModbusModule {
             }
         }
         self.rebuild_operations().await;
-        let net_config = endpoint_to_config(endpoint, &timing, tls);
-        self.instance = build_instance(
-            role.client_or_server(),
-            net_config,
-            self.operations.clone(),
-            self.memory.clone(),
-            self.self_signed_cache.clone(),
-        );
-        self.own_serial_path = endpoint_serial_path(endpoint);
-        self.attach_path_conflict();
-        Ok(())
+    }
+
+    #[allow(
+        dead_code,
+        reason = "no caller until the module settings dialog uses it"
+    )]
+    pub fn read_ranges(&self) -> &ReadRanges {
+        &self.read_ranges
     }
 
     /// MB-R-137/153 — superseded as the view-facing signal by `connection_status()` (which
@@ -1624,5 +1638,118 @@ if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
         }
         assert!(max > before);
         assert!(module.lua_running());
+    }
+
+    fn two_register_client() -> (
+        super::ModbusModule,
+        ferrowl_modbus::Key<ferrowl_modbus::SlaveKey>,
+        TempDirGuard,
+    ) {
+        use super::ModbusModule;
+        use crate::config::device::ReadRanges;
+        use crate::config::{Endpoint, ModuleSpec, Role};
+        use ferrowl_modbus::{Key, SlaveKey};
+
+        let (mut device, dir) = device_with_defs();
+        device.read_ranges = ReadRanges::default();
+        let mut other = device.definitions["hold"].clone();
+        other.address = Some(5);
+        device.definitions.insert("hold5".into(), other);
+        let spec = ModuleSpec {
+            name: "cli".into(),
+            device: String::new(),
+            role: Role::Client,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 0,
+            },
+        };
+        let module = ModbusModule::new(&spec, &device);
+        let key = Key {
+            id: SlaveKey {
+                slave_id: UnitId(1),
+                kind: Kind::HoldingRegister,
+            },
+        };
+        (module, key, dir)
+    }
+
+    fn holding_0_10() -> crate::config::device::ReadRanges {
+        crate::config::device::ReadRanges {
+            holding: Some("0-10".into()),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    /// MB-R-295 — set_read_ranges rebuilds the shared operation list in place and stores the ranges.
+    async fn ut_set_read_ranges_rebuilds_shared_operations() {
+        let (mut module, _key, _dir) = two_register_client();
+        let ops = module.operations.clone();
+        assert_eq!(ops.read().await.len(), 2);
+
+        module.set_read_ranges(holding_0_10()).await;
+
+        assert!(std::sync::Arc::ptr_eq(&ops, &module.operations));
+        let list = ops.read().await;
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].range.start(), 0);
+        assert_eq!(list[0].range.length(), 6);
+        drop(list);
+        assert_eq!(module.read_ranges().holding.as_deref(), Some("0-10"));
+    }
+
+    #[tokio::test]
+    /// MB-R-296 — set_read_ranges declares the new ranges' gap cells and logs a rejected declaration as a warning.
+    async fn ut_set_read_ranges_declares_gap_cells_and_logs_rejection() {
+        use crate::app::Level;
+        use ferrowl_store::{CellKind, CellType, Range};
+
+        let (mut module, key, _dir) = two_register_client();
+        module.set_read_ranges(holding_0_10()).await;
+        assert!(
+            module
+                .memory()
+                .read()
+                .readable(&key, &CellType::Register, &Range::new(1, 4))
+                .is_ok()
+        );
+
+        let (mut clash, key, _dir2) = two_register_client();
+        clash.memory().write().add_ranges(
+            key,
+            &CellKind::read_write(CellType::Register),
+            &[Range::new(1, 1)],
+        );
+        clash.set_read_ranges(holding_0_10()).await;
+        let warned = clash
+            .log()
+            .write()
+            .await
+            .peek_n(crate::app::LOG_SIZE)
+            .iter()
+            .any(|(_, level, msg)| *level == Level::Warning && msg.contains("read-range gap cell"));
+        assert!(warned);
+    }
+
+    #[tokio::test]
+    /// MB-E-105 — dropping a read range keeps the gap cells it declared; only the operation list shrinks back.
+    async fn ut_removed_read_range_keeps_gap_cells() {
+        use crate::config::device::ReadRanges;
+        use ferrowl_store::{CellType, Range};
+
+        let (mut module, key, _dir) = two_register_client();
+        let ops = module.operations.clone();
+        module.set_read_ranges(holding_0_10()).await;
+        module.set_read_ranges(ReadRanges::default()).await;
+
+        assert!(
+            module
+                .memory()
+                .read()
+                .readable(&key, &CellType::Register, &Range::new(1, 4))
+                .is_ok()
+        );
+        assert_eq!(ops.read().await.len(), 2);
     }
 }

@@ -155,24 +155,42 @@ impl ReadRanges {
 /// Malformed or reversed entries are skipped.
 fn parse_ranges(spec: &str) -> Vec<Range> {
     spec.split(',')
-        .filter_map(|part| {
-            let part = part.trim();
-            if part.is_empty() {
-                return None;
-            }
-            match part.split_once('-') {
-                Some((a, b)) => {
-                    let start = a.trim().parse::<usize>().ok()?;
-                    let end = b.trim().parse::<usize>().ok()?;
-                    (end >= start).then(|| Range::new(start, end - start + 1))
-                }
-                None => {
-                    let addr = part.parse::<usize>().ok()?;
-                    Some(Range::new(addr, 1))
-                }
-            }
-        })
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .filter_map(parse_entry)
         .collect()
+}
+
+/// One trimmed, non-empty `"5"` or `"0-100"` entry; `None` when malformed or reversed.
+fn parse_entry(part: &str) -> Option<Range> {
+    match part.split_once('-') {
+        Some((a, b)) => {
+            let start = a.trim().parse::<usize>().ok()?;
+            let end = b.trim().parse::<usize>().ok()?;
+            (end >= start).then(|| Range::new(start, end - start + 1))
+        }
+        None => {
+            let addr = part.parse::<usize>().ok()?;
+            Some(Range::new(addr, 1))
+        }
+    }
+}
+
+/// Strict counterpart of `parse_ranges`, used by interactive input (MB-R-291): the first
+/// malformed or reversed entry is an error; empty entries are ignored.
+#[allow(
+    dead_code,
+    reason = "no caller until the module settings dialog uses it"
+)]
+pub fn check_range_spec(spec: &str) -> Result<(), String> {
+    for part in spec.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+        if parse_entry(part).is_none() {
+            return Err(format!(
+                "'{part}' is not a range (use 5 or 0-100, start ≤ end)"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// A single register definition within a device type.
@@ -790,5 +808,16 @@ mod tests {
         assert_eq!(def.kind, Kind::HoldingRegister);
         assert_eq!(def.resolution, 1.0);
         assert_eq!(def.length, 1);
+    }
+
+    #[test]
+    fn ut_check_range_spec_accepts_and_rejects() {
+        for ok in ["", "5", "0-100,140-160", " 0 - 10 , 20 ", "0-5,,7", "0-5,"] {
+            assert_eq!(super::check_range_spec(ok), Ok(()), "{ok:?}");
+        }
+        for (bad, part) in [("10-5", "10-5"), ("a", "a"), ("1-", "1-"), ("0-5,x", "x")] {
+            let err = super::check_range_spec(bad).expect_err(bad);
+            assert!(err.contains(&format!("'{part}'")), "{err}");
+        }
     }
 }
