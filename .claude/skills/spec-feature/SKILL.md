@@ -7,7 +7,7 @@ description: Drive one behavior change through the repo's gated spec-driven TDD 
 
 **Concise, compact, facts only.**
 
-`.claude/AGENTS.workflow.md` is authority for every gate, the task board, and the subagents — follow exactly, one heading at a time per the table. Conflict → `.claude/AGENTS.workflow.md` wins.
+`.claude/AGENTS.workflow.md` is authority for every gate, the task board, and the subagents — follow exactly. Conflict → `.claude/AGENTS.workflow.md` wins.
 
 ## Before anything else
 

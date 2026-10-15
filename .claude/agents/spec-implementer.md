@@ -33,11 +33,11 @@ Vocabulary (the only events you log):
 2026-01-02T14:15 stopped: <what and why>
 ```
 
-Given up to 3 code stages of the run (`s0` aside) — and only the plan: a slice run's epic context reaches you through it, never directly; a fresh implementer takes the next ones, so your card log is all it inherits — keep it current. Implement them in plan order, each touching only its listed files — a file outside the list is a plan amendment, never a silent widening. Stage `s0` (`Land spec`), when the plan has one, is yours: copy the approved text where the plan says — `**bold**` marks in a changed entry are stripped and the heading's ` · was R<n>` is dropped, the landed line is plain — one commit, no code.
+Given up to 3 code stages of the run (`s0` aside) — and only the plan: a slice run's epic context reaches you through it, never directly; a fresh implementer takes the next ones from your card. Implement them in plan order, within the `files` contract (`AGENTS.md` `## Workflow`). Stage `s0` (`Land spec`), when the plan has one, is yours: copy the approved text where the plan says — `**bold**` marks in a changed entry are stripped and the heading's ` · was R<n>` is dropped, the landed line is plain — one commit, no code.
 
 ## Spec changes
 
-After `s0` the branch's `docs/specs/` is the spec, and it settles with the code. Implementation shows an entry wrong, incomplete or missing (a `## Deferred` item owned by `implementation` included): change `docs/specs/` inside the current stage's commit — those files count as your stage's `files` — and keep going. A new entry takes the next free ID of its prefix and series (`-R-` or `-E-`): one above the highest of the branch's `docs/specs/` (`grep -rhoE '<PREFIX>-R-[0-9]+' docs/specs/ | sort -t- -k3 -n | tail -1`), the fixed IDs in `artifacts/<slug>/spec-diff.md`, and every `spec-delta <ID> added` on the run's stage cards (`grep -h 'spec-delta' <board>/*/<slug>.s*.md`) — so a number dropped earlier in the run is never reused. `docs/specs/README.md` rules bind the text. Log each change on your card (`spec-delta`, below) and report the count in your status line (`delta=<n>`).
+After `s0` the branch's `docs/specs/` is the spec, and it settles with the code. Implementation shows an entry wrong, incomplete or missing (a `## Deferred` item owned by `implementation` included): change `docs/specs/` inside the current stage's commit and keep going. A new entry takes the next free ID of its prefix and series (`-R-` or `-E-`): one above the highest of the branch's `docs/specs/` (`grep -rhoE '<PREFIX>-R-[0-9]+' docs/specs/ | sort -t- -k3 -n | tail -1`), the fixed IDs in `artifacts/<slug>/spec-diff.md`, and every `spec-delta <ID> added` on the run's stage cards (`grep -h 'spec-delta' <board>/*/<slug>.s*.md`) — so a number dropped earlier in the run is never reused. `docs/specs/README.md` rules bind the text. Log each change on your card (`spec-delta`, below) and report the count in your status line (`delta=<n>`).
 
 A reviewer classifies every change; one that contradicts a scenario or a user decision goes to the user, who may have you revert it. Before such a change, read the entry's and the scenarios' sections of `artifacts/<slug>/spec-diff.md` (`extract-section.sh '## <ID>' '## S<n>' …`); make it only when the code leaves no way around it. Never change an entry to make a failing test pass when the code is what is wrong.
 
@@ -84,4 +84,4 @@ status=committed stage=s<n> delta=<n>
 status=blocked stage=s<n> reason=<one line>       # any Stop-and-report case
 ```
 
-Everything else goes on your card as the rules above say. Not verification — orchestrator re-runs the gauntlet and a reviewer reads the diff.
+Everything else goes on your card as the rules above say.

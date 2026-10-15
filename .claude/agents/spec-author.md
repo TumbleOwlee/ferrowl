@@ -100,7 +100,7 @@ Change: <≤ 12 words, what moved>
 - <open point, one line> — <architecture | plan | implementation>
 ```
 
-- **Local IDs.** `S<n>` per scenario, `R<n>` per new requirement, `E<n>` per new edge case, each series from 1. A changed, dropped or violated existing entry keeps its fixed ID. A dropped local ID is retired — never reused in the run, so a decision citing it stays unambiguous. The architect and the planner append the next free number; the planner replaces every local `R`/`E` with a fixed ID at gate 2.
+- **Local IDs** (`AGENTS.md` `## Spec-driven`): each series from 1. A changed, dropped or violated existing entry keeps its fixed ID.
 - **Scenarios** are the agreed anchors: one flow each, `Given`/`When`/`Then` one line each (`And` lines allowed). Later agents never contradict one without asking the user. They never land in `docs/specs/`; the issue carries them.
 - **Entries** state one observable rule each, best effort: coarser than landed spec is fine (`docs/specs/README.md` binds text once it lands). No public signatures, error variants or config-key spelling unless the user decided them — that is the architect's.
 - `Revisions:` only from rev 2 on, one line per revision, newest last; nothing else in the file says what an earlier revision looked like. A revision made while the issue is **filed** carries its date, `- rev 5 (2026-10-16) — <a>; <b> (<by>)`: `issue-body.sh` lists exactly these under `## Decisions`, `a` and `b` as sub-items.
@@ -140,72 +140,14 @@ The architect, the planner and the implementer change the spec themselves. You a
 - decided (user): <choice>
 ```
 
-- **A split** — the brief carries the reason and the entry it narrows. Write `split-issue.md` (below).
+- **A split** — the brief carries the reason and the entry it narrows. Write `split-issue.md` (`## Split issue, gate 4`).
 
-## Split issue — `split-issue.md`
+## Split issue, gate 4
 
-```
-# <title, plain language>
-
-## Goal
-<what the user gets, one or two lines>
-<what happens today, one line>
-
-## Found
-- reproduction
-  - <step>
-  - <observed>
-- cause
-  - <fact>
-- constraint
-  - <what a fix needs, one fact per line>
-- parent assumes
-  - <what the parent's narrowed entry now states>
-  - <what stays unfixed until this lands>
-
-## Existing spec
-- <ID>, <ID> — <what they say>
-  - <gap, one line>
-  - likely to change | cited
-```
-
-Existing IDs only, never a planned one. No issue number anywhere — the orchestrator prepends the status line.
-
-## Gate 4 — sync, then `pr.md`
-
-**Sync first.** In the worktree, `git diff main...HEAD -- docs/specs` is the run's final spec. Rewrite `spec-diff.md` to match it: one `## <ID>` section per entry the branch added, changed or dropped, fixed IDs only, scenarios kept, `## Deferred` removed; bump the rev and add `- rev N (<date>) — synced from the branch: <IDs that differ from the filed text> (spec-author)` (`issue-body.sh` skips it), then one dated line per `### Spec change` comment on the issue (`issue-view.sh`), `- rev N (<date>) — <ID> kept: <choice> (user)` — these become the issue's `## Decisions`. The orchestrator rewrites the issue body from it.
-
-**Then `pr.md`**, full form. Inputs: `spec-diff.md`, `plan.md`, `review.md`, `gauntlet.log` (its coverage line), `git log main..HEAD --stat` in the worktree. Line 1 = `issue.md`'s line 1. The orchestrator prepends the status line and appends the architecture and the closing line; write none of them. Answer `status=ready file=artifacts/<slug>/pr.md`.
-
-```
-# <title>
-
-## Why
-<what the user gets, one line>
-<what it cost today, one line>
-
-## Changes
-- <crate> <module> — <what changed> (<IDs it serves>)
-- docs/specs/<area> — <n> entries added, <n> changed
-- README — <what>                                            ← when touched
-
-## Tests
-<n> of <m> entries pinned
-- <ID> — <exception: pinned by a real-view test | not unit-testable per docs/specs/README.md | …>
-
-## Verification beyond the gauntlet
-- <manual run, what was done and seen>
-- not run: <what and who waived it> | none
-
-## Decisions
-- <plan-level decision> (<user | chosen>)
-```
-
-`## Changes` per crate module, never per file. `## Tests` lists exceptions only. `not run:` is always present. `## Decisions` = `plan.md`'s decisions only; spec decisions are in the issue.
+Resumed for a split or for gate 4: read `.claude/agent-parts/spec-author-late.md` first — it holds the `split-issue.md` shape, the gate 4 sync and the `pr.md` shape.
 
 ## Never
 
 - Propose implementation or structure, estimate effort.
 - Create cards, worktrees, branches; run any issue/PR create, edit, comment or merge command.
 - Reference an issue or PR number inside `spec-diff.md`, plan-facing text, or `pr.md` (`issue.md`/`issue-comment.md`/`split-issue.md` are the issue).
-- Return anything beyond the status line.

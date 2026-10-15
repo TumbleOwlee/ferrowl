@@ -40,11 +40,11 @@ Check `plan.md` against `spec-diff.md`, spec-fidelity axis only:
 - the plan reaches `architecture.md`: every new or changed component has a stage, no stage builds one it doesn't name, and every signature in `## Interfaces` appears as written in the step that builds it
 - spec edits the planner made since the architecture stop are recorded (`Revisions:`, a `decided` line under each)
 - every stage's `files` list covers what its steps touch and matches `## Shared`
-- every stage title obeys `spec-planner.md` `## Output` and matches its heading and tree entry
+- every stage title obeys `sh .claude/scripts/extract-section.sh '## Stage title' .claude/agents/spec-planner.md` and matches its heading and tree entry
 
 ## Axes, reported separately
 
-**Spec fidelity** — every requirement implemented as written in the branch's `docs/specs/` (quote requirement + satisfying code path); nothing beyond it (scope creep is a finding even if good code); every new ID pinned by a test that genuinely exercises it (citing an ID but asserting something else is worse than none); every scenario walked by its pinning test or Verification; every spec change on the branch classified (`## Spec changes`). **Any file in the diff outside the in-scope stages' `files` lists is a blocker** (`AGENTS.md` `## Workflow`); the fix is a plan amendment, never a silent widening. A `docs/specs/` file carrying a logged `spec-delta` counts as listed.
+**Spec fidelity** — every requirement implemented as written in the branch's `docs/specs/` (quote requirement + satisfying code path); nothing beyond it (scope creep is a finding even if good code); every new ID pinned by a test that genuinely exercises it (citing an ID but asserting something else is worse than none); every scenario walked by its pinning test or Verification; every spec change on the branch classified (`## Spec changes`). **Any file in the diff outside the in-scope stages' `files` lists is a blocker** (`AGENTS.md` `## Workflow`).
 
 **Architecture conformance** — the code builds the components of `architecture.md` with their ownership, interactions, interfaces and public surface. A signature that differs from `## Interfaces` (a method added, dropped or re-typed, a field or variant changed) is a deviation. A deviation from a `(user)` decision, a user-approved component or the public surface → `Needs user` (a) keep — the architect revises `architecture.md` to match; b) revert to the approved structure — with your recommendation). Any other deviation → major, fix: conform, or name it as a plan amendment.
 
@@ -99,7 +99,7 @@ Needs user
 - none
 ```
 
-Minors never loop: the implementer folds them into the next stage, or fixes them before the commit when no stage follows (a last stage, a branch review); the user is told, not asked. Blockers and majors loop at most twice; a third pass lists what is still open under `Needs user`. Every `Needs user` item carries your recommendation. A clean pass still carries the axis lines — `Spec — 11 of 11 pinned` is the evidence. A `delta` scope verdict carries only `Verdict:`, `Spec changes`, `Needs user`.
+Minors are information, never asked: `folded into s<n+1>` when a stage follows, `fixed before commit` when none does. Blockers and majors loop at most twice; a third pass lists what is still open under `Needs user`. Every `Needs user` item carries your recommendation. A clean pass still carries the axis lines — `Spec — 11 of 11 pinned` is the evidence. A `delta` scope verdict carries only `Verdict:`, `Spec changes`, `Needs user`.
 
 Final message one line:
 

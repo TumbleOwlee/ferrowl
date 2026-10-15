@@ -19,13 +19,13 @@ Read both files whole. `architecture.md` is the target: every new or changed com
 
 ## Interview before drafting
 
-Surface every plan-shaped decision (stage boundaries, test strategy, file layout — structure is settled in `architecture.md`) via the orchestrator, with a recommendation, in `artifacts/<slug>/question.md` — shape, batching and the `Why you:` rule per `spec-author.md` `## Questions`, title `# <slug> — questions (gate 2)` — and end turn on `status=question file=… count=<n>`. No plan until every decision is resolved.
+Surface every plan-shaped decision (stage boundaries, test strategy, file layout — structure is settled in `architecture.md`) via the orchestrator, with a recommendation, in `artifacts/<slug>/question.md` — shape, batching and the `Why you:` rule: `sh .claude/scripts/extract-section.sh '## Questions' .claude/agents/spec-author.md`, title `# <slug> — questions (gate 2)` — and end turn on `status=question file=… count=<n>`. No plan until every decision is resolved.
 
 Every decision, asked or not, is recorded in `plan.md` `## Shared` under `Decisions:`, one line each: `- <choice> (<user | chosen>) — <≤ 1 line why>`. `issue-body.sh` copies them into the issue.
 
 **Non-behavior run** (no `spec-diff.md`): no spec edits; a plan that needs observable behavior to change → `status=behavior-change reason=<what and why>`, stay running; the orchestrator runs gate 1, then resumes you.
 
-**Spec edits.** Planning shows an entry wrong, coarse or missing: edit `spec-diff.md` in place — add with the next free local ID (`R<n>`, `E<n>`, never a retired one), sharpen, split per `docs/specs/README.md` rule 9, or drop (the local ID retires). Resolve `## Deferred` items owned by `plan`, removing each. A change that contradicts a scenario or a `decided (user)` line goes into the question batch first (`Entry:` line quoting it); every other change is recorded under its entry as `decided (chosen, rev N)`. Each pass bumps the rev and adds one `Revisions:` line ending `(spec-planner)`. A change needed only for something outside the goal: ask split (recommended) or fold in; split → narrow the entry, record the decision, end turn on `status=split reason=<what is split off, one line>`, continue when resumed.
+**Spec edits.** Planning shows an entry wrong, coarse or missing: edit `spec-diff.md` in place — add with the next free local ID (`AGENTS.md` `## Spec-driven`), sharpen, split per `docs/specs/README.md` rule 9, or drop. Resolve `## Deferred` items owned by `plan`, removing each. A change that contradicts a scenario or a `decided (user)` line goes into the question batch first (`Entry:` line quoting it); every other change is recorded under its entry as `decided (chosen, rev N)`. Each pass bumps the rev and adds one `Revisions:` line ending `(spec-planner)`. A change needed only for something outside the goal: ask split (recommended) or fold in; split → narrow the entry, record the decision, end turn on `status=split reason=<what is split off, one line>`, continue when resumed.
 
 **Fixed IDs** — last, once every decision is settled. Per local `R`/`E` entry, the next free ID of its area's prefix and series: highest on `main` (`git grep -hoE '<PREFIX>-R-[0-9]+' main -- docs/specs | sort -t- -k3 -n | tail -1`, `-E-` likewise — never the working tree, which may be another branch), plus one, counting up across the run's entries. Rewrite the heading `## <PREFIX>-R-nnn — new · <file> `## <heading>` · was R<n>` and every reference to the local ID in `spec-diff.md` and `plan.md`. Retired local IDs get none. Scenarios keep `S<n>` — they never land. After this no `R<n>`/`E<n>` remains anywhere; tests and the implementer cite fixed IDs.
 
@@ -38,8 +38,6 @@ Every decision, asked or not, is recorded in `plan.md` `## Shared` under `Decisi
 - `## Shared` — first section. **Dependency tree** (below), `Decisions:` (above), verification approach if uniform across stages, any code reference cited by 2+ stages. Tree lists every stage's `title`, `files` and `blocked-by` — orchestrator copies those three fields onto cards from this section alone.
 - `## Stage s0: Land spec` — the first stage whenever `spec-diff.md` has entries to land: copy each `## <ID>` into its `docs/specs/<area>/` file (exact target file + insertion point per ID, contract-file rows likewise; the heading's ` · was R<n>` never lands), one commit, no code. Every other stage is `blocked-by: [s0]`. A `no-diff` or non-behavior plan has no `s0` — no empty stage.
 - `## Stage s<n>: <title>` — one per stage, self-contained: numbered file-level steps, tests added, `files` touched, `blocked-by`, ID→test table (scenarios included: `S<n>` → the integration test or the Verification step that walks it), the `## Deferred` items owned by `implementation` this stage meets, **Verification** (how exercised beyond unit tests — in this project: unit tests alone, driving the demo TUI, or a real CSMS — plus expected coverage impact), expected commits.
-
-**Title** — the stage's display name, also its card's `title:`: imperative, verb first (`Update README`); ≤ 3 words, ≤ 20 characters; letters, digits, hyphens, spaces only; unique within the plan; no stage id. s0, when present, is always `Land spec`.
 
 `plan.summary.md` — the user's file, written last, rewritten whole on every revision, **≤ 25 lines / 2 KB** (`show-file.sh` refuses more). Decisions only, never how. `Files` is a count with the crate modules in brackets, never full paths. `Pins` lists ID ranges with a count; every entry and every scenario of `spec-diff.md` appears in exactly one stage's `Pins`. `Spec since architecture` names the local IDs you added (`+`), dropped (`−`) or changed (`~`) and the fixed-ID count. `Stop` marks a stage that must stop for the user's approval even when clean: one that lands something later stages consume (a new trait method or type, a wire/config-schema change, a new error variant, a public-surface change, any stage with ≥ 2 dependants) — `yes — <why>`; every other stage `—`. The user settles the column at gate 2; the orchestrator copies it onto the stage cards. Blank line between blocks:
 
@@ -76,6 +74,10 @@ Existing-code references inline at the step: the exact signature/pattern to matc
 Dependency tree — stages run one at a time in plan order, so the tree records what each stage consumes, for review and resume:
 - stage depends on every stage producing what it consumes (type, module, fixture, config key)
 - plan order respects every `blocked-by`
+
+## Stage title
+
+The stage's display name, also its card's `title:`: imperative, verb first (`Update README`); ≤ 3 words, ≤ 20 characters; letters, digits, hyphens, spaces only; unique within the plan; no stage id. s0, when present, is always `Land spec`.
 
 ## Rules
 
