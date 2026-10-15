@@ -74,7 +74,6 @@ impl SetupView for ModbusSetupView {
         if let Some(reconnect) = values.reconnect {
             device.reconnect = Some(reconnect);
         }
-        device.read_ranges = values.read_ranges.clone();
         if let Some(tls) = values.tls.clone() {
             device.tls = tls;
         }
@@ -128,6 +127,33 @@ mod tests {
         // The setup modal draws something into the buffer.
         let text: String = buf.content().iter().map(|c| c.symbol()).collect();
         assert!(!text.trim().is_empty());
+    }
+
+    #[tokio::test]
+    /// MB-R-299 — confirming with a device file keeps the file's read ranges.
+    async fn ut_confirm_with_device_path_keeps_file_read_ranges() {
+        use crate::dialog::widgets::{set_input, set_suggest_input};
+        let dir = ferrowl_test_support::reserve_temp_dir("ferrowl_modbus_setup");
+        let path = dir.join("dev.toml").to_str().unwrap().to_string();
+        let out = dir.join("out.toml").to_str().unwrap().to_string();
+        std::fs::write(
+            &path,
+            "[read_ranges]\nholding = \"0-10\"\n\n[definitions]\n",
+        )
+        .unwrap();
+        let mut sv = ModbusSetupView::new_create();
+        set_input(&mut sv.dialog_mut().name, "m");
+        set_suggest_input(&mut sv.dialog_mut().config_path, &path);
+        let (_, factory) = sv.confirm().expect("valid");
+        let mut view = factory();
+        view.handle_command(&format!("write-device {out}")).await;
+        assert_eq!(
+            crate::config::load_device(&out)
+                .expect("saved")
+                .read_ranges
+                .holding,
+            Some("0-10".into())
+        );
     }
 
     #[test]

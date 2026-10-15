@@ -253,7 +253,6 @@ impl ModbusModuleView {
         if let Some(reconnect) = values.reconnect {
             self.device.reconnect = Some(reconnect);
         }
-        self.device.read_ranges = values.read_ranges.clone();
         if let Some(tls) = values.tls.clone() {
             self.device.tls = tls;
         }
@@ -269,7 +268,6 @@ impl ModbusModuleView {
                 endpoint: values.endpoint,
                 role: values.role,
                 timing,
-                read_ranges: Box::new(values.read_ranges),
                 tls: Box::new(self.device.tls.clone()),
                 then: None,
             });
@@ -283,7 +281,6 @@ impl ModbusModuleView {
                     endpoint: values.endpoint,
                     role: values.role,
                     timing,
-                    read_ranges: Box::new(values.read_ranges),
                     tls: Box::new(self.device.tls.clone()),
                     then: None,
                 });
@@ -303,7 +300,6 @@ impl ModbusModuleView {
                         &values.endpoint,
                         values.role,
                         timing,
-                        values.read_ranges,
                         self.device.tls.clone(),
                     )
                     .await

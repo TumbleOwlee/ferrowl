@@ -12,7 +12,7 @@ use ratatui::layout::Rect;
 
 use crate::app::Level;
 use crate::config::script::ScriptDef;
-use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role, device::ReadRanges};
+use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
 use crate::dialog::close_confirm::CloseConfirmEvent;
 use crate::dialog::lua_help::ScriptContext;
 use crate::dialog::scripts::ScriptDialog;
@@ -111,7 +111,6 @@ enum PendingLifecycle {
         endpoint: Endpoint,
         role: Role,
         timing: Timing,
-        read_ranges: Box<ReadRanges>,
         tls: Box<ferrowl_modbus::tcp::ModbusTlsConfig>,
         then: Option<MergedCommand>,
     },
@@ -127,7 +126,6 @@ impl ModbusModuleView {
             self.spec.role.client_or_server(),
             &self.spec.endpoint,
             timing,
-            &self.device.read_ranges,
             Some(&self.device.tls),
         )
     }
@@ -637,7 +635,6 @@ impl ModuleView for ModbusModuleView {
                         endpoint: new_endpoint,
                         role: new_role,
                         timing,
-                        read_ranges,
                         tls,
                         then,
                     }) => {
@@ -664,7 +661,7 @@ impl ModuleView for ModbusModuleView {
                             }
                             let reconfigured = self
                                 .module
-                                .reconfigure(&new_endpoint, new_role, timing, *read_ranges, *tls)
+                                .reconfigure(&new_endpoint, new_role, timing, *tls)
                                 .await;
                             let lines = match reconfigured {
                                 Err(e) => {
@@ -726,7 +723,7 @@ impl ModuleView for ModbusModuleView {
                             }
                         } else if let Err(e) = self
                             .module
-                            .reconfigure(&new_endpoint, new_role, timing, *read_ranges, *tls)
+                            .reconfigure(&new_endpoint, new_role, timing, *tls)
                             .await
                         {
                             self.log()
@@ -1415,6 +1412,34 @@ mod tests {
                 port: 5020,
             },
         }
+    }
+
+    #[tokio::test]
+    /// MB-R-300 — an `:edit` confirm leaves the device's and the running module's read ranges alone.
+    async fn ut_edit_confirm_keeps_read_ranges() {
+        let mut device = empty_device();
+        device.read_ranges.holding = Some("0-10".into());
+        let spec = tcp_server_spec();
+        let module = super::super::ModbusModule::new(&spec, &device);
+        let mut view = ModbusModuleView::new(module, spec, device);
+        view.apply_setup(SetupValues {
+            name: "renamed".into(),
+            config_path: String::new(),
+            role: Role::Server,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 0,
+            },
+            timeout_ms: None,
+            delay_ms: None,
+            interval_ms: None,
+            reconnect: None,
+            tls: Default::default(),
+        })
+        .await;
+        assert_eq!(view.device.read_ranges.holding.as_deref(), Some("0-10"));
+        assert_eq!(view.module.read_ranges().holding.as_deref(), Some("0-10"));
+        view.module.stop().await.ok();
     }
 
     fn new_view() -> ModbusModuleView {
@@ -2880,7 +2905,6 @@ mod tests {
             delay_ms: None,
             interval_ms: None,
             reconnect: None,
-            read_ranges: Default::default(),
             tls: Default::default(),
         };
         view.apply_setup(values).await;
@@ -2939,7 +2963,6 @@ mod tests {
             delay_ms: None,
             interval_ms: None,
             reconnect: None,
-            read_ranges: Default::default(),
             tls: Default::default(),
         };
 
@@ -3002,7 +3025,6 @@ mod tests {
             delay_ms: None,
             interval_ms: None,
             reconnect: None,
-            read_ranges: Default::default(),
             tls: Default::default(),
         };
 
@@ -3146,7 +3168,6 @@ mod tests {
             delay_ms: None,
             interval_ms: None,
             reconnect: None,
-            read_ranges: Default::default(),
             tls: Some(ModbusTlsConfig::default()),
         };
 
@@ -3222,7 +3243,6 @@ mod tests {
             delay_ms: None,
             interval_ms: None,
             reconnect: None,
-            read_ranges: Default::default(),
             tls: Default::default(),
         };
 
@@ -3297,7 +3317,6 @@ mod tests {
             delay_ms: None,
             interval_ms: None,
             reconnect: None,
-            read_ranges: Default::default(),
             tls: Default::default(),
         };
         view.apply_setup(values).await;
@@ -3393,7 +3412,6 @@ mod tests {
             delay_ms: None,
             interval_ms: None,
             reconnect: None,
-            read_ranges: Default::default(),
             tls: Default::default(),
         };
         view.apply_setup(values).await;
@@ -3856,18 +3874,7 @@ mod tests {
                 assert_eq!(edit.$f.state.input(), clone.$f.state.input(), stringify!($f));
             )*};
         }
-        same_input!(
-            ip,
-            port,
-            timeout,
-            delay,
-            interval,
-            holding_ranges,
-            input_ranges,
-            coil_ranges,
-            discrete_ranges,
-            config_path
-        );
+        same_input!(ip, port, timeout, delay, interval, config_path);
         {
             use ferrowl_ui::widgets::GetValue;
             assert_eq!(

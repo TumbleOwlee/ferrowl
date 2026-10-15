@@ -473,16 +473,16 @@ impl ModbusModule {
     /// deferred stop of any previously running instance before calling; the caller is expected to
     /// `start()` afterwards. This keeps the instance in sync with the spec so writes dispatch
     /// correctly. The simulation thread is decoupled from the network instance and keeps running
-    /// untouched (SC-R-081).
+    /// untouched (SC-R-081). Re-covers the current read ranges' gap cells; the ranges themselves
+    /// never change here (MB-R-300).
     pub async fn reconfigure(
         &mut self,
         endpoint: &Endpoint,
         role: Role,
         timing: Timing,
-        read_ranges: ReadRanges,
         tls: ferrowl_modbus::tcp::ModbusTlsConfig,
     ) -> Result<(), Error> {
-        self.set_read_ranges(read_ranges).await;
+        self.set_read_ranges(self.read_ranges.clone()).await;
         let net_config = endpoint_to_config(endpoint, &timing, tls);
         self.instance = build_instance(
             role.client_or_server(),
@@ -856,7 +856,6 @@ mod tests {
     /// MB-R-089 — reconfiguring a module's endpoint/role rebuilds the instance against the same store and preserves the stored register values.
     async fn ut_reconfigure_preserves_stored_values() {
         use super::ModbusModule;
-        use crate::config::device::ReadRanges;
         use crate::config::{Endpoint, ModuleSpec, Role};
         use ferrowl_modbus::{Key, SlaveKey};
         use ferrowl_store::Range;
@@ -897,7 +896,6 @@ mod tests {
                 },
                 Role::Client,
                 timing,
-                ReadRanges::default(),
                 device.tls.clone(),
             )
             .await
@@ -1016,7 +1014,6 @@ mod tests {
     /// instance sharing the same path.
     async fn ut_module_reconfigure_reattaches_path_conflict() {
         use super::ModbusModule;
-        use crate::config::device::ReadRanges;
         use crate::config::{Endpoint, ModuleSpec, Role};
         use crate::module::modbus::SerialPathRegistry;
 
@@ -1053,7 +1050,6 @@ mod tests {
                 },
                 Role::Client,
                 timing,
-                ReadRanges::default(),
                 Default::default(),
             )
             .await
@@ -1621,7 +1617,6 @@ if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
                 },
                 Role::Client,
                 ModbusModule::resolve_timing(&device),
-                device.read_ranges.clone(),
                 device.tls.clone(),
             )
             .await
