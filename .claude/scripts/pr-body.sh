@@ -12,7 +12,8 @@
 #         (one checklist line per stage card: ticked with its sha in done/,
 #         else its board state), ## Review here.
 # full:   status line (spec rev, stages, entries, coverage, review, splits),
-#         then pr.md from line 2 on.
+#         then pr.md from line 2 on, then ## Architecture (the Decide line and
+#         component table of architecture.summary.md, when the run had one).
 [ $# -eq 2 ] || { echo "usage: $0 <slug> draft|full" >&2; exit 2; }
 slug=$1; form=$2
 root=${CLAUDE_PROJECT_DIR:-.}
@@ -104,6 +105,12 @@ full)
     [ -n "$split" ] && line="$line · split off: $(printf '%s' "$split" | tr -d '[] ' | sed 's/\([0-9][0-9]*\)/#\1/g; s/,/, /g')"
     printf '%s\n\n' "$line"
     tail -n +2 "$a/pr.md" | sed '1{/^$/d;}'
+    if [ -f "$a/architecture.summary.md" ]; then
+        printf '\n## Architecture\n'
+        sed -n 's/^Decide: //p' "$a/architecture.summary.md"
+        echo
+        sed -n '/^|/p' "$a/architecture.summary.md"
+    fi
     ;;
 *) echo "usage: $0 <slug> draft|full" >&2; exit 2 ;;
 esac

@@ -1,22 +1,30 @@
 #!/bin/sh
-# Assemble the tracking issue's body from a run's artifacts — the body is
-# always the current spec, so this runs at filing and after every revision.
+# Assemble the tracking issue's body from a run's artifacts — the spec as
+# filed, then as merged: this runs at filing, when a split is filed, and at
+# gate 4 after spec-author synced spec-diff.md from the branch.
 #
 #   sh .claude/scripts/issue-body.sh <slug> > <out>
 #
 # Line 1 is `# <title>` (the orchestrator strips it for --title). Sources:
 #   issue.md        title, ## Goal
 #   parent card     spec rev, lane, pr, split (frontmatter) — the status line
-#   spec-diff.md    ## Spec (rev N): `### Requirements`, one table row per
-#                   `## <ID>` section (kind + `Change:` in the Kind cell);
+#   spec-diff.md    ## Spec (rev N): `### Scenarios`, one item per `## S<n>`
+#                   section with its Given/When/Then lines as sub-items;
+#                   `### Requirements`, one table row per other
+#                   `## <ID>` section (kind + `Change:` in the Kind cell; local
+#                   R<n>/E<n> IDs before gate 2, as a /spec-request issue files);
 #                   `### Other spec changes`, one table row per
-#                   `- <file> › <section> › <change>` item;
+#                   `- <file> › <section> › <change>` item; `### Deferred`,
+#                   the open points and their owners (gone after the sync);
 #                   ## Decisions, one item per dated `Revisions:` line
 #                   (`- rev N (YYYY-MM-DD) — a; b (who)`): `- <date>, <who>`
-#                   with `a`, `b` as sub-items. Only a revision made after
+#                   with `a`, `b` as sub-items; the gate 4 sync's own
+#                   `(spec-author)` line is skipped. Only a revision made after
 #                   filing carries a date, so the section is absent when the
 #                   filed spec never changed; the `- decided` lines are the
 #                   drafting history and stay in spec-diff.md
+#   architecture.summary.md  ## Architecture: the Decide line, the component
+#                   table and the public surface (absent on no-arch)
 #   request.md      the reused issue's original body, collapsed (if present)
 # The plan is deliberately absent: the issue states the requirement, the PR
 # the implementation.
@@ -47,11 +55,8 @@ printf '%s\n\n' "$line"
 # --- goal
 sed -n '/^## Goal$/,/^## /{ /^## /d; p; }' "$a/issue.md" | sed '/^$/d' | { echo "## Goal"; cat; echo; }
 
-# --- spec
-if [ -f "$a/spec-diff.md" ]; then
-    printf '## Spec (rev %s)\n\n' "$rev"
-    [ "$nvio" -gt 0 ] && printf 'No spec change: the code violates the entries below.\n\n'
-    awk '
+# --- spec; the same pass renders the Decisions section with part=decisions
+spec_awk='
         function cell(s) { gsub(/\|/, "\\|", s); gsub(/^[ \t]+|[ \t]+$/, "", s); return s == "" ? "—" : s }
         function flush() {
             if (id == "") return
@@ -60,7 +65,7 @@ if [ -f "$a/spec-diff.md" ]; then
             id = ""
         }
         function revision(line,    date, who, body, k, i) {
-            if (!match(line, /^- rev [0-9]+ \([0-9-]+\) — /)) return
+            if (!match(line, /^- rev [0-9]+ \([0-9-]+\) — /) || line ~ /\(spec-author\)$/) return
             date = line; sub(/^- rev [0-9]+ \(/, "", date); sub(/\).*/, "", date)
             body = substr(line, RLENGTH + 1); who = "agent"
             if (match(body, / \([a-z-]+\)$/)) { who = substr(body, RSTART + 2, RLENGTH - 3); body = substr(body, 1, RSTART - 1) }
@@ -70,6 +75,15 @@ if [ -f "$a/spec-diff.md" ]; then
         }
         /^## Summary$/ { flush(); sec = "summary"; next }
         /^## Other spec changes$/ { flush(); sec = "other"; next }
+        /^## Deferred$/ { flush(); sec = "deferred"; next }
+        /^## S[0-9]+ — / {
+            flush(); sec = "scenario"
+            t = $0; sub(/^## S[0-9]+ — /, "", t)
+            scens = scens "- **" $2 "** — " t "\n"
+            next
+        }
+        sec == "scenario" && /^(Given|When|Then|And) / { scens = scens "  - " $0 "\n"; next }
+        sec == "deferred" && /^- / { defs = defs $0 "\n"; next }
         /^## / {
             flush(); sec = "entry"
             id = $2; kind = "new"; text = ""; why = ""
@@ -87,12 +101,32 @@ if [ -f "$a/spec-diff.md" ]; then
         }
         END {
             flush()
+            if (part == "decisions") { if (revs != "") printf "## Decisions\n%s\n", revs; exit }
+            if (scens != "") printf "### Scenarios\n%s\n", scens
             if (reqs != "") printf "### Requirements\n| ID | Kind | Requirement |\n|---|---|---|\n%s\n", reqs
             if (others != "") printf "### Other spec changes\n| File | Section | Change |\n|---|---|---|\n%s\n", others
-            if (revs != "") printf "## Decisions\n%s\n", revs
+            if (defs != "") printf "### Deferred\n%s\n", defs
         }
-    ' "$a/spec-diff.md"
+'
+if [ -f "$a/spec-diff.md" ]; then
+    printf '## Spec (rev %s)\n\n' "$rev"
+    [ "$nvio" -gt 0 ] && printf 'No spec change: the code violates the entries below.\n\n'
+    awk -v part=spec "$spec_awk" "$a/spec-diff.md"
 fi
+
+# --- architecture
+if [ -f "$a/architecture.summary.md" ]; then
+    echo "## Architecture"
+    sed -n 's/^Decide: //p' "$a/architecture.summary.md"
+    echo
+    sed -n '/^|/p' "$a/architecture.summary.md"
+    echo
+    surface=$(awk '/^Public surface:/ { on = 1; next } on && /^- / { if ($0 == "- none") next; print; next } on { on = 0 }' "$a/architecture.summary.md")
+    [ -n "$surface" ] && printf 'Public surface:\n%s\n\n' "$surface"
+fi
+
+# --- decisions
+[ -f "$a/spec-diff.md" ] && awk -v part=decisions "$spec_awk" "$a/spec-diff.md"
 
 # --- original request
 if [ -f "$a/request.md" ]; then
