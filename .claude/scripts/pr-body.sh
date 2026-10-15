@@ -44,6 +44,11 @@ draft)
     sed -n '/^## Goal$/{ n; p; q; }' "$a/issue.md"
     echo
 
+    dups=$(ls "$board"/*/"$slug".s*.md 2>/dev/null | xargs -n1 basename | sort | uniq -d | tr '\n' ' ')
+    if [ -n "$dups" ]; then
+        echo "pr-body: card in more than one state directory: $dups— merge the log lines and delete the stale copy first" >&2
+        exit 2
+    fi
     echo "## Stages"
     last_done=; next_line=
     grep '^| s[0-9]' "$a/plan.summary.md" | while IFS='|' read -r _ sid what _; do

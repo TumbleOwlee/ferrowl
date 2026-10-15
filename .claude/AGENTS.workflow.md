@@ -78,7 +78,7 @@ Directory a card sits in **is** its state:
     pr-feedback.md     unresolved PR review threads (*PR feedback*)
 ```
 
-Directories tracked; cards gitignored. Cards live in **main checkout only** — a worktree agent gets its own card's absolute path, writes only that file. No per-worktree board copy.
+Directories tracked; cards gitignored. Cards live in **main checkout only** — a worktree agent gets its own card's id and the board root, locates the card with `ls .claude/tasks/*/<id>.md` before every write (its directory changes under the agent), writes only that file. No per-worktree board copy.
 
 | Card | File | Owner |
 |---|---|---|
