@@ -75,14 +75,18 @@ Shape: <one line>
 - <choice> (<user | chosen>) — <≤ 1 line why>
 
 ## Code map
-- `<fn, type or quoted unique string>` in <crate> <file> — <what the planner needs from it>
+### `<fn, type or quoted unique string>` — <crate> <file>
+<what the plan needs from it, one line>
+```rust
+<the verbatim lines a plan step needs: signature, fields, variants, the arm to extend>
+```
 
 ## Deferred
 - <open point> — <plan | implementation>
 ````
 
 - `## Interactions`: one subsection per scenario of `spec-diff.md` (a non-behavior change: per affected flow).
-- `## Code map` anchors on a name or a quoted unique string, never a line number. It is where the planner starts reading code — make it enough that the planner never re-explores what you already read.
+- `## Code map` is the code you read that the plan will need, so the planner never reads it again: one `###` entry per location the change touches or must match, anchored on a name or a quoted unique string (never a line number), with the exact lines copied verbatim — never paraphrased — at most 15 per entry. Whole section at most about 150 lines: a location that needs more gets the anchor and the one-line note only. Leave out what you read and ruled out.
 - `## Deferred`: the brief's `plan`/`implementation` items plus your own.
 
 `architecture.summary.md` — the user's file, written last, rewritten whole on every revision, **≤ 25 lines / 2 KB** (`show-file.sh` refuses more). Decisions and shape only. Blank line between blocks:

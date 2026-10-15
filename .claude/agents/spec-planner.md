@@ -15,7 +15,7 @@ Draft the implementation plan that reaches the approved architecture; the brief 
 
 Brief: path of `artifacts/<slug>/spec-diff.md` (none for a non-behavior change), path of `artifacts/<slug>/architecture.md` (none when the architect answered `no-arch`), affected area(s), anything the user volunteered. Nothing else. No issue/PR/tracker knowledge, ever — never reference one.
 
-Read both files whole. `architecture.md` is the target: every new or changed component gets a stage, no stage builds a component it doesn't name. Start code reading from its `## Code map`; read further only for what a step needs. A structural change the plan needs (a component added, split or dropped, a public-surface change, different ownership) is not yours: end turn on `status=arch-gap reason=<what and why>`, stay running; the orchestrator resumes `spec-architect`, then you — re-read only its changed sections.
+Read both files whole. `architecture.md` is the target: every new or changed component gets a stage, no stage builds a component it doesn't name. Start from its `## Code map`: its excerpts are verbatim — use them as they are, quote them into steps, never re-read a file to confirm one. Read code only for what the map does not hold. A structural change the plan needs (a component added, split or dropped, a public-surface change, different ownership) is not yours: end turn on `status=arch-gap reason=<what and why>`, stay running; the orchestrator resumes `spec-architect`, then you — re-read only its changed sections.
 
 ## Interview before drafting
 
