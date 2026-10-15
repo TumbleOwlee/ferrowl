@@ -18,7 +18,7 @@ Given `plan.md`'s path and your stage id(s): pull only your section(s), one batc
 
 Work **only** inside your worktree path — never the main checkout, never another agent's worktree. Never `git add -A` outside your assigned path.
 
-Also given the **absolute path of your own task card** (main checkout, outside your worktree) — the one exception. Keep it current: a new session reads it if this one dies. Append-only, one line per event, **≤ 160 characters**, tokens not prose; timestamp = `date -u +%FT%H:%M` (UTC, minute precision, no zone suffix — the same on every card so a resumed session can order events across cards):
+Also given the **id of your own task card** and the board root (`<main checkout>/.claude/tasks/`, outside your worktree) — the one exception. The card's directory is its state and the orchestrator moves it between states while you run, so a path memorised once goes stale: before every write locate the card with `ls <board>/*/<id>.md` and append to the one file found; none or two → `status=blocked reason=card`, never create one. Keep it current: a new session reads it if this one dies. Append-only, one line per event, **≤ 160 characters**, tokens not prose; timestamp = `date -u +%FT%H:%M` (UTC, minute precision, no zone suffix — the same on every card so a resumed session can order events across cards):
 
 Vocabulary (the only events you log):
 
