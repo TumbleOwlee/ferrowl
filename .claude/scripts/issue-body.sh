@@ -36,12 +36,11 @@ echo
 # --- status line
 rev=; nvio=0
 [ -f "$a/spec-diff.md" ] && { rev=$(sed -n '1s/.*(rev \([0-9]*\)).*/\1/p' "$a/spec-diff.md"); nvio=$(grep -c '^## [A-Z][A-Z]-[RE]-[0-9]* — violated' "$a/spec-diff.md"); }
-lane=$(field lane); pr=$(field pr); split=$(field split)
+lane=$(field lane); split=$(field split)
 if [ -z "$rev" ]; then line="**Spec** none"
 elif [ "$nvio" -gt 0 ]; then line="**Spec** none · **Violated** $nvio entries (rev $rev)"
 else line="**Spec** rev $rev"; fi
 [ -n "$lane" ] && line="$line · **Lane** $lane"
-[ -n "$pr" ] && line="$line · **PR** #$pr"
 [ -n "$split" ] && line="$line · **Split off** $(printf '%s' "$split" | tr -d '[] ' | sed 's/\([0-9][0-9]*\)/#\1/g; s/,/, /g')"
 printf '%s\n\n' "$line"
 
