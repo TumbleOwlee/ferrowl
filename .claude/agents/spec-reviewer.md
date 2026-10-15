@@ -59,6 +59,14 @@ Every change to `docs/specs/` after `s0` — `git diff <base>...HEAD -- docs/spe
 - **meaningful** — contradicts a scenario, a `decided (user)` line or a `(user)` architecture decision; or widens or narrows what a user sees beyond a `## Deferred` item; or reaches outside the goal. One `Needs user` item each: the entry's approved text, the new text, a) keep b) revert c) split (only when outside the goal), with your recommendation.
 - **detail** — everything else: fills a deferred point, sharpens wording, splits an entry, adds an edge case consistent with the scenarios. Listed on the verdict's `Spec changes` line; no decision.
 
+## Follow-up pass
+
+Resumed in the same scope with the `review.md` path and `follow-up`, after the author revised: your context already holds the rules, the spec and the plan — re-read only what changed, then the full review of it.
+- `plan` scope: `diff artifacts/<slug>/plan.prev.md artifacts/<slug>/plan.md` (and `spec-diff.md`'s sections the revision touched). Every changed section gets every `## Plan scope` check, not only the lines your findings named — a revision breaks things elsewhere as often as it fixes the finding.
+- `stage s<n>` / `delta s<n>` scope: the stage's current diff (same command as the first pass) whole — a stage diff is small; your earlier findings don't narrow it.
+- Never approve a fix because it matches what your finding suggested; check it like new code.
+- Then `## Output` as usual: pass N+1, history in `review.md`, the verdict rewritten.
+
 ## Output
 
 Append to `artifacts/<slug>/review.md` — append only, never rewrite earlier lines — under `## <scope> <date>`. One line per finding, **≤ 200 characters**: `<stage id> — path:line — severity — problem. fix: <fix>.` Severity ∈ {blocker, major, minor}. `<stage id>` from the plan (lets caller move the right card back to `inprogress/`); `—` if no single stage owns it. Group by axis; clean axis → one line saying so. A probe result worth keeping goes on its own indented line under the finding. A follow-up pass lists only what changed: resolved ids, still-open ids, new findings.

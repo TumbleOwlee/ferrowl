@@ -55,7 +55,7 @@ Recommended full, user picks fast at the brief stop: the architecture stop is fa
 
 By running, never by reading:
 - **Gauntlet** — `sh .claude/scripts/gauntlet.sh <worktree> .claude/tasks/artifacts/<slug>` in the agent's worktree: one status line in context, full output in `artifacts/<slug>/gauntlet.log`.
-- **Every reviewer is a fresh `spec-reviewer`** — never the implementer, never a resumed reviewer: one sharing the implementer's context reproduces its blind spots.
+- **A fresh `spec-reviewer` per scope** — never the planner or implementer: one sharing the author's context reproduces its blind spots. A follow-up pass in the same scope (plan, a stage, a delta) **resumes that reviewer** (`SendMessage`) with the `review.md` path and `follow-up`; it re-reads only what the revision changed (`spec-reviewer.md` `## Follow-up pass`). Fresh anyway when that reviewer is gone (a resumed session) and on every gate 3 `branch` pass — the last check before the PR gets fresh eyes. Plan scope: before resuming the planner with findings, the orchestrator snapshots `cp artifacts/<slug>/plan.md artifacts/<slug>/plan.prev.md`, so the follow-up diffs the revision itself instead of trusting the planner's account.
 - **Minors never wait for the user.** The verdict names where they go: `Minors (folded into s<n+1>)` when a stage follows, `Minors (fixed before commit)` when none does — a last stage, a branch review. Folded: the orchestrator logs each as `<ts> minor=<verdict line>` on the next stage's card and repeats them in the implementer's brief. Fixed before commit: the implementer is resumed with them at once, fixes, gauntlet, no re-review, then the stage's commit (fast lane: commit on green). Only `count>0` (blockers + majors) loops, and at most **two** fix-and-review rounds per scope: findings still open after the second round go to the user as `Needs user` items on the verdict.
 
 ### Task board
@@ -71,6 +71,7 @@ Directory a card sits in **is** its state:
     architecture.summary.md  architecture decisions the user approves, capped
     plan.md            gate 2 stages, steps, dependency tree — the implementer's contract
     plan.summary.md    gate 2 decisions the user approves, capped
+    plan.prev.md       plan.md as the last plan review saw it, for the follow-up pass
     review.md          review findings + history, keyed by stage id, append-only
     review.verdict.md  open findings per stage, rewritten every pass, capped
     gauntlet.log       full build/test/lint output of the last gauntlet.sh run
@@ -244,7 +245,7 @@ Spawn `spec-planner` with: `artifacts/<slug>/spec-diff.md` path (none for a non-
 - `status=arch-gap` → resume `spec-architect` with the reason verbatim; it may relay a question; its `ready` → resume the planner. No stop of its own.
 - `status=split` → *Spec changes*, split.
 - `status=behavior-change` (non-behavior run) → *Principles — implementation*.
-- `status=ready` → fresh `spec-reviewer`, scope `plan`. Any finding, minors included → resume the planner with the `review.md` path, it revises the plan, fresh review — no user interaction; rounds and their end per *Verify before an approval stop*.
+- `status=ready` → fresh `spec-reviewer`, scope `plan`. Any finding, minors included → snapshot `plan.prev.md`, resume the planner with the `review.md` path, it revises the plan, the same reviewer runs a follow-up pass — no user interaction; rounds and their end per *Verify before an approval stop*.
 - The plan's `Stop` column (which stages stop for approval beyond the *Stage stop* rules) is settled at this stop: the user may tick or untick stages in the answer.
 - `clean`, or `findings` with `count=0` → `spec-author` drafts `issue.md` (*Tracking issue*, no stop of its own; a non-behavior run spawns the author now with the goal verbatim, `plan.summary.md`, `artifacts/<slug>/`).
   - `show-file.sh` (*Agent hand-off*): `plan.summary.md`; `review.verdict.md` only when findings survived two rounds; `spec-diff.md` when the planner's `spec=` is above 0 (with `PROMPT_SINCE_REV`) or fast lane with `no-arch`. Never `issue.md`: the prompt's `Issue:` line is its one decision.
@@ -301,7 +302,7 @@ gh pr create --draft --title "$(head -1 artifacts/<slug>/pr-draft.md | sed 's/^#
 Per stage:
 
 1. Green: the implementer commits, card → `inreview/`, answers `status=committed stage=s<n> delta=<n>` — no per-stage code review, no approval stop.
-2. Orchestrator runs `gauntlet.sh`, pushes, logs `gauntlet=pass sha=<sha>` on the parent card. `delta>0` → fresh `spec-reviewer`, scope `delta s<n>` (*Spec changes*): `count>0` → resume the implementer with the `review.md` path, fixes committed on green, gauntlet, push, fresh `delta` review, rounds per *Verify before an approval stop*; a `Needs user` item → a *Delta* stop (*Approval prompt*). Then card → `done`, resume the implementer for the next stage. Red gauntlet → card → `inprogress/`, resume the implementer with the gauntlet line.
+2. Orchestrator runs `gauntlet.sh`, pushes, logs `gauntlet=pass sha=<sha>` on the parent card. `delta>0` → fresh `spec-reviewer`, scope `delta s<n>` (*Spec changes*): `count>0` → resume the implementer with the `review.md` path, fixes committed on green, gauntlet, push, follow-up pass by the same reviewer, rounds per *Verify before an approval stop*; a `Needs user` item → a *Delta* stop (*Approval prompt*). Then card → `done`, resume the implementer for the next stage. Red gauntlet → card → `inprogress/`, resume the implementer with the gauntlet line.
 3. Last stage `done` → *PR feedback*, then *Gate 3 — review*: its branch review is the only code review of a fast-lane run.
 
 Fixes in the fast lane (gate 3 findings, PR feedback, red gauntlet) are committed on green too: the implementer answers `status=committed`, the orchestrator runs `gauntlet.sh` and pushes before any re-review — a review diffs commits, never a dirty worktree.
@@ -319,7 +320,7 @@ Per stage:
 Full lane. Every green stage, before its approval stop:
 - Fresh `spec-reviewer`. Base ref = previous stage's commit (branch point for the first stage); scope = that stage id; `spec-reviewer.md`'s `## Axes, reported separately` and `## Spec changes` on one stage's diff.
 - `clean`, or `findings` with `count=0` → approval stop, forward the gauntlet line; minors per *Verify before an approval stop*.
-- `count>0` → card → `inprogress/`, resume implementer with `review.md` path and stage id, re-run `gauntlet.sh`, fresh reviewer; rounds per *Verify before an approval stop*. An unreviewed stage is never committed.
+- `count>0` → card → `inprogress/`, resume implementer with `review.md` path and stage id, re-run `gauntlet.sh`, follow-up pass by the same reviewer; rounds per *Verify before an approval stop*. An unreviewed stage is never committed.
 - **The last code stage**: review in scope `branch` instead — it is gate 3's review, and the stage's approval stop is gate 3's stop. Gate 3 re-runs only if code changed after it.
 
 #### Stage stop
@@ -381,7 +382,7 @@ Before `s0` every other change is recorded `decided (chosen)` and confirmed at t
 - **detail** → listed on the verdict and the auto-continue line; no decision.
 - **meaningful** → a `Needs user` item: keep, revert, or split. Stage-stop rule 1 fires. The answer goes to the implementer.
   - **keep**, issue filed → resume `spec-author` for `issue-comment.md`, post it (*Tracking issue*), log `spec-keep=<IDs>` on the parent card. A kept architecture deviation → also a fresh `spec-architect` records it in `architecture.md` and its summary, no stop.
-  - **revert** → the implementer reworks to the approved text, gauntlet, fresh review.
+  - **revert** → the implementer reworks to the approved text, gauntlet, follow-up pass by the same reviewer.
   - **split** → below; the implementer narrows the entry.
 
 **Split** — a change needed only for something outside the goal; the user's choice at a question or a `Needs user` item. Before `s0` the raising agent (architect, planner) has already narrowed the entry when it answers `status=split reason=…`; after `s0` the reviewer only raised it, and the implementer narrows it last (below). Orchestrator resumes `spec-author` with the reason verbatim (after `s0`: the verdict item and the `review.md` path); it writes `split-issue.md`. Orchestrator files it (`gh issue create`, as in *Tracking issue*) with `Split from #<issue>` appended as its last line — at once if the tracking issue is filed, else right after gate 2 approval step 1 — appends it to the parent card's `split:`, reassembles and edits the issue body, posts one notice line `Split · <slug> · <IDs> · #<m> filed`, then resumes the architect or planner that raised it — after `s0`, the implementer with `split <ID>: narrow it`, gauntlet, the usual review. The split issue's body is `split-issue.md` with the status line `Split from #<issue> · no spec yet` prepended. The new issue is its own later run.
@@ -395,7 +396,7 @@ Gate 3's reviewer checks every branch spec change was classified; gate 4's sync 
 Before proposing a PR, whole-branch pass — cross-stage bugs, spec drift across stages, scope creep:
 - Fresh `spec-reviewer`, scope `branch`. Give it base ref, artifact dir, worktree path, all stage ids; it reads its own rules (`AGENTS.md`, `spec-reviewer.md`'s `## Axes, reported separately`). Already run as the last code stage's review (*Per-stage review*) → skip to gate 4.
 - Orchestrator runs `gauntlet.sh` on the branch, forwards both status lines.
-- `count>0` → as *Per-stage review*, the same implementer, then a fresh branch review. Findings needing a user decision are relayed as questions, never fixed unasked.
+- `count>0` → as *Per-stage review*, the same implementer, then a fresh branch review — never a follow-up pass here. Findings needing a user decision are relayed as questions, never fixed unasked.
 - Log `review=clean` or `review=<n>-resolved` on the parent card once the branch review is clean (the PR status line reads it). Minors (*Verify before an approval stop*) are resolved before `spec-author` writes `pr.md`; gauntlet re-run, `gauntlet=pass sha=<sha>` logged on the parent card.
 - **Fast lane:** no stop here — clean goes straight to gate 4, whose stop shows the verdict.
 - **Board:** reviewer appends to `artifacts/<slug>/review.md`, keyed to stage id, and rewrites `review.verdict.md`. Parent card → `inreview/` when review starts.
