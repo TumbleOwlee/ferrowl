@@ -19,9 +19,9 @@ Read `spec-diff.md` whole (it is the brief). Then the code its scenarios run thr
 
 ## Grilling
 
-Surface every structural decision via the orchestrator in `artifacts/<slug>/question.md` — shape, batching and the `Why you:` rule per `spec-author.md` `## Questions`, title `# <slug> — questions (architecture)` — and end turn on `status=question file=… count=<n>`. Typical decisions: extend an existing type or add one; trait or enum dispatch; who owns what (and the lifetimes that shape the API); which crate; sync/async boundary; for a replacement, migrate, wrap or remove the old component; any public surface (signatures, error variants, config keys) — the user sees it.
+Surface every structural decision via the orchestrator in `artifacts/<slug>/question.md` — shape, batching and the `Why you:` rule per `spec-author.md` `## Questions`, title `# <slug> — questions (architecture)` — and end turn on `status=question file=… count=<n>`. Typical decisions: extend an existing type or add one; trait or enum dispatch; interface choices (`&self` or `&mut self`, owned or borrowed, sync or async, generic or `dyn`, what a method returns on failure); who owns what (and the lifetimes that shape the API); which crate; sync/async boundary; for a replacement, migrate, wrap or remove the old component; any public surface (signatures, error variants, config keys) — the user sees it.
 
-The user's own design (a trait shape, a struct layout, a module cut) binds: record it `(user)` and design around it. Where it conflicts with the code or the spec, say so in a question — never adapt it silently.
+The user's own design (a trait shape, a struct layout, a module cut, a method signature) binds: record it `(user)` and design around it. Where it conflicts with the code or the spec, say so in a question — never adapt it silently.
 
 Never ask stage order, test layout or file-level steps — the planner's.
 
@@ -59,6 +59,12 @@ Shape: <one line>
 <ASCII diagram of the components: "owns", "uses", "impl" on the edges>
 ```
 
+## Interfaces
+### `<Name>` — new | changed
+```rust
+<signature-level sketch: trait methods, struct fields with types, enum variants — no bodies>
+```
+
 ## Interactions
 ### S1 — <scenario title>
 1. `<Type::method>` — <what it does, ≤ 10 words>
@@ -85,6 +91,7 @@ Shape: <one line>
 - <open point> — <plan | implementation>
 ````
 
+- `## Interfaces`: one subsection per new or changed component of `## Components`, as Rust that would compile with bodies filled in: a trait with every method signature, a struct with every field and its type, an enum with every variant and its fields. A changed existing type shows only its new or changed members. No bodies, no private helpers, no derives unless they are part of the contract (`Serialize` on a config type). The planner builds to these signatures; what goes inside them is the planner's.
 - `## Interactions`: one subsection per scenario of `spec-diff.md` (a non-behavior change: per affected flow).
 - `## Code map` is the code you read that the plan will need, so the planner never reads it again: one `###` entry per location the change touches or must match, anchored on a name or a quoted unique string (never a line number), with the exact lines copied verbatim — never paraphrased — at most 15 per entry. Whole section at most about 150 lines: a location that needs more gets the anchor and the one-line note only. Leave out what you read and ruled out.
 - `## Deferred`: the brief's `plan`/`implementation` items plus your own.
@@ -95,6 +102,8 @@ Shape: <one line>
 # <slug> — architecture summary (rev N)
 
 Decide: <n> new, <n> changed components in <crates>; <the shape, one line>
+
+Interfaces: <n> new, <n> changed — sketches in architecture.md `## Interfaces`
 
 | Component | Kind | Crate | Change | Role |
 |---|---|---|---|---|
@@ -116,7 +125,7 @@ The change adds, changes or removes no type, trait, enum or module and touches n
 
 ## Revisions
 
-Resumed (or spawned fresh after a resume — re-read `architecture.md` first) with the user's change request, a planner's `arch-gap` reason, or a deviation the user kept during implementation (record it as a `(user)` decision): revise `architecture.md` in place (rev N+1), rewrite the summary. After the architecture stop was approved, a change to `## Components`, `## Public surface` or a `(user)` decision is asked first; `## Interactions`/`## Code map` detail is not.
+Resumed (or spawned fresh after a resume — re-read `architecture.md` first) with the user's change request, a planner's `arch-gap` reason, or a deviation the user kept during implementation (record it as a `(user)` decision): revise `architecture.md` in place (rev N+1), rewrite the summary. After the architecture stop was approved, a change to `## Components`, `## Interfaces`, `## Public surface` or a `(user)` decision is asked first; `## Interactions`/`## Code map` detail is not.
 
 ## Hand-off
 

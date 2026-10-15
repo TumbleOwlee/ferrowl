@@ -9,7 +9,7 @@
 #   spec-diff.md       Goal: · Scenarios: (count + S-IDs) · Entries: (counts + IDs, local
 #                      R<n>/E<n> or fixed, or the violated list for a no-diff) ·
 #                      Deferred: (count per owner)
-#   architecture.summary.md  Architecture: (the Decide line) · Surface: (public-surface lines)
+#   architecture.summary.md  Architecture: (the Decide line) · Interfaces: · Surface: (public-surface lines)
 #   plan.summary.md    Plan: (the Decide line) · Spec: (the Spec-since-architecture line) ·
 #                      Stops: (stages whose Stop column says yes) · Verification:
 #   review.verdict.md  Review: (the Verdict line) · Spec: · Spec changes: · Minors (…): · Needs user: — a block whose only item is `- none` is skipped
@@ -50,6 +50,7 @@ for f in "$@"; do
         [ -n "$c" ] && confirm="$confirm$c$nl" ;;
     architecture.summary.md)
         sed -n 's/^Decide: /Architecture: /p' "$f"
+        sed -n 's/^Interfaces: /Interfaces: /p' "$f"
         awk '/^Public surface:/ { on = 1; next } on && /^- / { if ($0 == "- none") next; if (!p) { print "Surface:"; p = 1 } print; next } on { on = 0 }' "$f"
         c=$(awk '/^Decisions taken \(confirm\):/ { on = 1; next } on && /^- / { print; next } on { on = 0 }' "$f")
         [ -n "$c" ] && confirm="$confirm$c$nl" ;;

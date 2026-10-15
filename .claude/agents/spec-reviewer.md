@@ -23,7 +23,7 @@ Scope token from caller: `plan` (no diff; `## Plan scope`), `stage s<n>` (base =
 
 **`spec-diff.md`:** headed `## <ID>` and `## S<n>` (scenarios). Stage/delta scope → in-scope stage sections' ID→test tables name the IDs; one batched call: `sh .claude/scripts/extract-section.sh '## <ID>' [...] artifacts/<slug>/spec-diff.md`, plus the `## S<n>` sections a changed entry serves. An ID the diff cites that no in-scope table lists and no `spec-delta` line adds is itself a finding (scope creep or table gap). `branch`/`plan` scope → whole file.
 
-**`architecture.md`** (absent when the run had no architecture step — skip the axis): stage scope → `## Components`, `## Public surface`, `## Decisions`; `branch`/`plan` scope → whole file.
+**`architecture.md`** (absent when the run had no architecture step — skip the axis): stage scope → `## Components`, `## Interfaces`, `## Public surface`, `## Decisions`; `branch`/`plan` scope → whole file.
 
 ## Plan scope
 
@@ -35,7 +35,7 @@ Check `plan.md` against `spec-diff.md`, spec-fidelity axis only:
 - `s0` lands every ID (no `s0` when `spec-diff.md` has no entries to land, or there is no `spec-diff.md`)
 - no local `R<n>`/`E<n>` left; every fixed ID new to the run is unused on `main` (`git grep -n <ID> main -- docs/specs`) and sequential within its prefix
 - every scenario `S<n>` is pinned by a test or a stage's Verification
-- the plan reaches `architecture.md`: every new or changed component has a stage, no stage builds one it doesn't name
+- the plan reaches `architecture.md`: every new or changed component has a stage, no stage builds one it doesn't name, and every signature in `## Interfaces` appears as written in the step that builds it
 - spec edits the planner made since the architecture stop are recorded (`Revisions:`, a `decided` line under each)
 - every stage's `files` list covers what its steps touch and matches `## Shared`
 - every stage title obeys `spec-planner.md` `## Output` and matches its heading and tree entry
@@ -44,7 +44,7 @@ Check `plan.md` against `spec-diff.md`, spec-fidelity axis only:
 
 **Spec fidelity** — every requirement implemented as written in the branch's `docs/specs/` (quote requirement + satisfying code path); nothing beyond it (scope creep is a finding even if good code); every new ID pinned by a test that genuinely exercises it (citing an ID but asserting something else is worse than none); every scenario walked by its pinning test or Verification; every spec change on the branch classified (`## Spec changes`). **Any file in the diff outside the in-scope stages' `files` lists is a blocker** (`AGENTS.md` `## Workflow`); the fix is a plan amendment, never a silent widening. A `docs/specs/` file carrying a logged `spec-delta` counts as listed.
 
-**Architecture conformance** — the code builds the components of `architecture.md` with their ownership, interactions and public surface. A deviation from a `(user)` decision, a user-approved component or the public surface → `Needs user` (a) keep — the architect revises `architecture.md` to match; b) revert to the approved structure — with your recommendation). Any other deviation → major, fix: conform, or name it as a plan amendment.
+**Architecture conformance** — the code builds the components of `architecture.md` with their ownership, interactions, interfaces and public surface. A signature that differs from `## Interfaces` (a method added, dropped or re-typed, a field or variant changed) is a deviation. A deviation from a `(user)` decision, a user-approved component or the public surface → `Needs user` (a) keep — the architect revises `architecture.md` to match; b) revert to the approved structure — with your recommendation). Any other deviation → major, fix: conform, or name it as a plan amendment.
 
 **Standards** — every bullet of `AGENTS.md` `## Conventions — code`; test naming and ID citation placement; unflagged semver-relevant public surface changes. Comment severity: a violation of the comment bullet = minor, except a workflow citation (that bullet's list) = major, it rots on contact.
 

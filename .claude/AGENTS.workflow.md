@@ -162,6 +162,7 @@ Scenarios: <spec-diff.md's count and S-IDs>
 Entries: <spec-diff.md's counts and IDs>
 Deferred: <spec-diff.md's count per owner>
 Architecture: <architecture.summary.md's Decide line>
+Interfaces: <architecture.summary.md's Interfaces line>
 Surface:
 - <architecture.summary.md's public-surface lines>
 Plan: <plan.summary.md's Decide line>
@@ -233,7 +234,7 @@ Answers go back to the **same** agent (`SendMessage`, never a respawn) in one me
 - `status=split` → *Spec changes*, split.
 - `status=behavior-change` (non-behavior run) → *Principles — implementation*.
 - `status=no-arch` → record `arch: no-arch`; no stop; gate 2. Fast lane: the brief is approved at gate 2's stop, which always stops.
-- `status=ready` → `show-file.sh`: `architecture.summary.md`, plus `spec-diff.md` when fast lane or its rev moved since gate 1's approval. One *Approval prompt* (fast lane: lane too). Change requested → relay to the same agent.
+- `status=ready` → `show-file.sh`: `architecture.summary.md` and `architecture.md` (the interface sketches are there; the viewer shows them, the orchestrator never reads them), plus `spec-diff.md` when fast lane or its rev moved since gate 1's approval. One *Approval prompt* (fast lane: lane too). Change requested → relay to the same agent.
   - Approved → record `arch` (fast lane: `gate1` too) on the parent card; *Gate 2*.
 - The agent stays alive until gate 2's approval, for the planner's `arch-gap`; a resumed run spawns a fresh one, which re-reads `architecture.md`.
 

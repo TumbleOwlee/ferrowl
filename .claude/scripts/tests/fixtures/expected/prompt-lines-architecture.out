@@ -1,4 +1,5 @@
 Architecture: 1 new, 1 changed components in ferrowl-modbus; `ReconnectPolicy` owned by the client task
+Interfaces: 1 new, 1 changed — sketches in architecture.md `## Interfaces`
 Surface:
 - `ClientError::Reconnecting`
 Confirm:
