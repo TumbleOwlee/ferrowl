@@ -11,6 +11,6 @@ Public surface:
 - `ClientError::Reconnecting`
 
 Decisions taken (confirm):
-- policy owned by the client task — rejected: inside `Transport`; RTU and TCP would duplicate it
+- policy owned by the client task — RTU and TCP share it
 
 Open: none

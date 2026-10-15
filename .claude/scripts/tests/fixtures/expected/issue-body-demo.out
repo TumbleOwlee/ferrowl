@@ -45,7 +45,7 @@ Public surface:
 ## Decisions
 - 2026-10-05, user
   - MB-R-161 kept: retry forever
-  - rejected: give up after 5
+  - MB-E-031 kept: drop in-flight requests
 
 <details><summary>Original request</summary>
 

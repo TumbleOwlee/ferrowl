@@ -21,7 +21,7 @@ Read both files whole. `architecture.md` is the target: every new or changed com
 
 Surface every plan-shaped decision (stage boundaries, test strategy, file layout — structure is settled in `architecture.md`) via the orchestrator, with a recommendation, in `artifacts/<slug>/question.md` — shape, batching and the `Why you:` rule per `spec-author.md` `## Questions`, title `# <slug> — questions (gate 2)` — and end turn on `status=question file=… count=<n>`. No plan until every decision is resolved.
 
-Every decision, asked or not, is recorded in `plan.md` `## Shared` under `Decisions:`, one line each: `- <choice> (<user | chosen>) — rejected: <alternative>; <≤ 1 line why>`. `issue-body.sh` copies them into the issue.
+Every decision, asked or not, is recorded in `plan.md` `## Shared` under `Decisions:`, one line each: `- <choice> (<user | chosen>) — <≤ 1 line why>`. `issue-body.sh` copies them into the issue.
 
 **Non-behavior run** (no `spec-diff.md`): no spec edits; a plan that needs observable behavior to change → `status=behavior-change reason=<what and why>`, stay running; the orchestrator runs gate 1, then resumes you.
 
@@ -63,7 +63,7 @@ Verification beyond unit tests:
 - none
 
 Decisions taken (confirm):
-- <choice> — rejected: <alternative>; <≤ 1 line why>        ← only the (chosen) ones; (user) ones stay in plan.md
+- <choice> — <≤ 1 line why>        ← only the (chosen) ones; (user) ones stay in plan.md
 
 Out of scope, raise separately:
 - <one line each, or none>

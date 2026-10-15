@@ -72,7 +72,7 @@ Shape: <one line>
 - ARCHITECTURE.md — <section to update | none>
 
 ## Decisions
-- <choice> (<user | chosen>) — rejected: <alternative>; <≤ 1 line why>
+- <choice> (<user | chosen>) — <≤ 1 line why>
 
 ## Code map
 - `<fn, type or quoted unique string>` in <crate> <file> — <what the planner needs from it>
@@ -101,7 +101,7 @@ Public surface:
 - none
 
 Decisions taken (confirm):
-- <choice> — rejected: <alternative>; <≤ 1 line why>        ← only the (chosen) ones
+- <choice> — <≤ 1 line why>        ← only the (chosen) ones
 
 Open: <decision the user still owes, or none>
 ```

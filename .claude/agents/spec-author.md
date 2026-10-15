@@ -72,12 +72,12 @@ Revisions:
 Given <state>
 When <action>
 Then <observable outcome>
-- decided (user): <choice> — rejected: <alternative>; <≤ 1 line why>
+- decided (user): <choice>
 
 ## R1 — new · requirements `## <heading>`
 <normative text, one line>
-- decided (user): <choice> — rejected: <alternative>; <≤ 1 line why>
-- decided (chosen): <choice> — rejected: <alternative>; <≤ 1 line why>
+- decided (user): <choice>
+- decided (chosen): <choice> — <≤ 1 line why>
 
 ## XX-R-nnn — changed · requirements `## <heading>`
 Change: <≤ 12 words, what moved>
@@ -133,7 +133,7 @@ The architect, the planner and the implementer change the spec themselves. You a
 ### Spec change — <IDs> (<spec-architect | spec-planner | spec-implementer>, <gate 2 | s3 | gate 3 | PR feedback>)
 - <ID> <added | changed | dropped> — <≤ 8 words>
 - found: <what was discovered, one line>
-- decided (user): <choice>; rejected: <alternative>
+- decided (user): <choice>
 ```
 
 - **A split** — the brief carries the reason and the entry it narrows. Write `split-issue.md` (below).
@@ -169,7 +169,7 @@ Existing IDs only, never a planned one. No issue number anywhere — the orchest
 
 ## Gate 4 — sync, then `pr.md`
 
-**Sync first.** In the worktree, `git diff main...HEAD -- docs/specs` is the run's final spec. Rewrite `spec-diff.md` to match it: one `## <ID>` section per entry the branch added, changed or dropped, fixed IDs only, scenarios kept, `## Deferred` removed; bump the rev and add `- rev N (<date>) — synced from the branch: <IDs that differ from the filed text> (spec-author)` (`issue-body.sh` skips it), then one dated line per `### Spec change` comment on the issue (`issue-view.sh`), `- rev N (<date>) — <ID> kept: <choice>; rejected: <alternative> (user)` — these become the issue's `## Decisions`. The orchestrator rewrites the issue body from it.
+**Sync first.** In the worktree, `git diff main...HEAD -- docs/specs` is the run's final spec. Rewrite `spec-diff.md` to match it: one `## <ID>` section per entry the branch added, changed or dropped, fixed IDs only, scenarios kept, `## Deferred` removed; bump the rev and add `- rev N (<date>) — synced from the branch: <IDs that differ from the filed text> (spec-author)` (`issue-body.sh` skips it), then one dated line per `### Spec change` comment on the issue (`issue-view.sh`), `- rev N (<date>) — <ID> kept: <choice> (user)` — these become the issue's `## Decisions`. The orchestrator rewrites the issue body from it.
 
 **Then `pr.md`**, full form. Inputs: `spec-diff.md`, `plan.md`, `review.md`, `gauntlet.log` (its coverage line), `git log main..HEAD --stat` in the worktree. Line 1 = `issue.md`'s line 1. The orchestrator prepends the status line and appends the architecture and the closing line; write none of them. Answer `status=ready file=artifacts/<slug>/pr.md`.
 
@@ -194,7 +194,7 @@ Existing IDs only, never a planned one. No issue number anywhere — the orchest
 - not run: <what and who waived it> | none
 
 ## Decisions
-- <plan-level decision> (<user | chosen>) — rejected: <alternative>
+- <plan-level decision> (<user | chosen>)
 ```
 
 `## Changes` per crate module, never per file. `## Tests` lists exceptions only. `not run:` is always present. `## Decisions` = `plan.md`'s decisions only; spec decisions are in the issue.

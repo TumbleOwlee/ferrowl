@@ -16,7 +16,7 @@ Verification beyond unit tests:
   - cannot be waived without asking
 
 Decisions taken (confirm):
-- one stage per crate — rejected: one stage; the UI change is reviewed apart
+- one stage per crate — the UI change is reviewed apart
 
 Out of scope, raise separately:
 - none

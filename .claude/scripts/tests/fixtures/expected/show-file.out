@@ -8,7 +8,7 @@ Verification:
   - stop the demo server, see "reconnecting", restart it, polling resumes
   - cannot be waived without asking
 Confirm:
-- one stage per crate — rejected: one stage; the UI change is reviewed apart
+- one stage per crate — the UI change is reviewed apart
 show-file: no viewer (SHOW_FILE_VIEWER=none): <P>/.claude/tasks/artifacts/demo/review.verdict.md (approval marker: <P>/.claude/tasks/artifacts/demo/approval)
 Review: findings — 0 must fix, 1 needs you
 Spec: 2 of 2 pinned
