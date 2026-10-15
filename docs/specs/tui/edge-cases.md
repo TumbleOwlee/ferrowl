@@ -228,6 +228,7 @@
 |---|---|---|
 | **UI-E-046** | Terminal resize | next tick re-lays out; content, log, command rows reflow |
 | **UI-E-047** | Very small terminal | no app-level minimum-size guard; content area squeezed, content clips. Popups skip drawing when their area is zero-sized |
+| **UI-E-172** | Log pane focused (UI-R-374) on a terminal too short for the content area's fixed height plus one log row | no minimum-size guard (UI-E-047); the log pane keeps one row, the content area is squeezed below its fixed height and its view clips |
 | **UI-E-050** | Tabs overflow the tab bar's width | the bar scrolls horizontally per the tab widget's centering scroll (UI-R-117, UI-R-118), keeping the active tab visible |
 | **UI-E-051** | No input for one redraw interval (~100 ms) | UI redraws anyway |
 

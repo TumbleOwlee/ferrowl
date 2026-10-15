@@ -19,6 +19,27 @@ use crate::view::tabs::{render_tabs, tab_bar_height};
 
 use super::{Focus, Overlay, Tab, help};
 
+/// Rows of the log pane in the default layout, and of the content area while the log pane is
+/// enlarged.
+pub(super) const LOG_HEIGHT: u16 = 10;
+
+/// Splits the screen into `[tab bar, content, log, command line]`. `enlarged` swaps the content
+/// and log heights. The log is never `Fill`: it must keep one row on a short terminal.
+fn screen_layout(area: Rect, enlarged: bool) -> [Rect; 4] {
+    let (view, log) = if enlarged {
+        (Constraint::Length(LOG_HEIGHT), Constraint::Min(1))
+    } else {
+        (Constraint::Min(1), Constraint::Length(LOG_HEIGHT))
+    };
+    Layout::vertical([
+        Constraint::Length(tab_bar_height()),
+        view,
+        log,
+        Constraint::Length(1),
+    ])
+    .areas(area)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render(
     frame: &mut Frame,
@@ -31,13 +52,12 @@ pub(super) fn render(
     help_scroll: &mut u16,
 ) {
     let area = frame.area();
-    let [tabs_area, view_area, log_area, cmd_area] = Layout::vertical([
-        Constraint::Length(tab_bar_height()),
-        Constraint::Min(1),
-        Constraint::Length(10),
-        Constraint::Length(1),
-    ])
-    .areas(area);
+    let enlarged = tabs
+        .titles
+        .get(tabs.selected_index())
+        .is_some_and(Tab::log_pane_selected);
+    let [tabs_area, view_area, log_area, cmd_area] = screen_layout(area, enlarged);
+    let [_, dialog_area, _, _] = screen_layout(area, false);
 
     // Phase 1: background and tab bar.
     let active = {
@@ -71,10 +91,11 @@ pub(super) fn render(
     }
 
     // Phase 4: overlays, painted on top of content and log (bottom-to-top z-order).
-    // 1. Module dialogs. Drawn first so command help and the app dialog sit above them. The view's
-    //    own match no-ops when no overlay is open, so this is called unconditionally.
+    // 1. Module dialogs, placed under the default layout whatever the log pane's size (UI-R-377).
+    //    Drawn first so command help and the app dialog sit above them. The view's own match
+    //    no-ops when no overlay is open, so this is called unconditionally.
     if let Some(tab) = tabs.titles.get_mut(active) {
-        tab.view.render_overlay(frame, view_area);
+        tab.view.render_overlay(frame, dialog_area);
     }
     // 2. Command help popup and 3. app-level modal dialog. Both draw to the buffer; the module
     //    overlay above needed `&mut Frame`, so these go in a separate, sequential borrow.
@@ -282,5 +303,45 @@ fn render_command(command: &mut CommandLine, focus: Focus, area: Rect, buf: &mut
             "  :  command  |  C-w+j C-w+k S-Up S-Down  table/log  |  C-t+h C-t+l S-Left S-Right  tabs  |  ?  help",
             Style::default().fg(COLOR_SCHEME.text).bg(COLOR_SCHEME.bg),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn heights(layout: [Rect; 4]) -> [u16; 4] {
+        layout.map(|r| r.height)
+    }
+
+    #[test]
+    /// UI-R-373 — by default the log pane has the fixed height and the content area the rest.
+    fn ut_screen_layout_default_gives_log_fixed_height() {
+        let tb = tab_bar_height();
+        let l = screen_layout(Rect::new(0, 0, 120, 40), false);
+        assert_eq!(heights(l), [tb, 40 - tb - LOG_HEIGHT - 1, LOG_HEIGHT, 1]);
+        assert_eq!(l[3].y, 39);
+        assert_eq!(l[1].y, l[0].bottom());
+        assert_eq!(l[2].y, l[1].bottom());
+        assert_eq!(l[3].y, l[2].bottom());
+    }
+
+    #[test]
+    /// UI-R-374 — enlarged, the content area has the fixed height and the log pane the rest.
+    fn ut_screen_layout_enlarged_swaps_heights() {
+        let tb = tab_bar_height();
+        let l = screen_layout(Rect::new(0, 0, 120, 40), true);
+        assert_eq!(heights(l), [tb, LOG_HEIGHT, 40 - tb - LOG_HEIGHT - 1, 1]);
+        assert_eq!(l[2].y, l[1].bottom());
+    }
+
+    #[test]
+    /// UI-E-172 — on a terminal too short for the fixed content height plus one log row, the
+    /// log pane keeps one row and the content area is squeezed.
+    fn ut_screen_layout_short_terminal_keeps_one_log_row() {
+        let tb = tab_bar_height();
+        let h = tb + LOG_HEIGHT;
+        let l = screen_layout(Rect::new(0, 0, 120, h), true);
+        assert_eq!(heights(l), [tb, h - tb - 2, 1, 1]);
     }
 }
