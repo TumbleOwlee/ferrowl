@@ -1,0 +1,6 @@
+Architecture: 1 new, 1 changed components in ferrowl-modbus; `ReconnectPolicy` owned by the client task
+Surface:
+- `ClientError::Reconnecting`
+Confirm:
+- policy owned by the client task — rejected: inside `Transport`; RTU and TCP would duplicate it
+exit=0

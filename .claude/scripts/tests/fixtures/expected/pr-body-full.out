@@ -1,0 +1,21 @@
+# Reconnect dropped Modbus clients
+
+Spec rev 5 · 3 stages · 4 entries (2 new, 1 changed, 1 dropped) · coverage 81.2% · review clean · split off: #56
+
+## Why
+A client tab reconnects on its own.
+Today the user restarts the tab by hand.
+
+## Changes
+- ferrowl-modbus client_core — retry with backoff (MB-R-161)
+
+## Architecture
+1 new, 1 changed components in ferrowl-modbus; `ReconnectPolicy` owned by the client task
+
+| Component | Kind | Crate | Change | Role |
+|---|---|---|---|---|
+| `ReconnectPolicy` | struct | ferrowl-modbus | new | backoff 1s to 30s |
+| `ConnectedCell` | struct | ferrowl-modbus | changed | holds a three-state `ConnState` |
+
+Closes #12
+exit=0

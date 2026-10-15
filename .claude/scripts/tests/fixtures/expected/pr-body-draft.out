@@ -1,0 +1,18 @@
+# Reconnect dropped Modbus clients
+
+Draft · lane full · spec rev 5 · gauntlet green at bbb2222
+
+## Why
+A client tab reconnects on its own after the server drops the connection.
+
+## Stages
+- [x] s0 — Land spec (aaa1111)
+- [ ] s1 — Retry with backoff in the client task — in review
+- [ ] s2 — Render reconnecting in the tab — blocked by s1
+
+## Review here
+- on the branch: s0 — inline comments on their files come back to the implementer before the next stop
+- later stages land after their review and the user's approval
+
+Closes #12
+exit=0

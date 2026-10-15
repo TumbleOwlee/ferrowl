@@ -1,0 +1,11 @@
+Plan: 3 stages, s0 → s1 → s2. Backoff before UI, the tab reads the new state.
+Spec since arch: +E1 ~R1 · fixed IDs 2
+Stops:
+- s1 — yes — new public error variant
+Verification:
+- s2 — demo TUI
+  - stop the demo server, see "reconnecting", restart it, polling resumes
+  - cannot be waived without asking
+Confirm:
+- one stage per crate — rejected: one stage; the UI change is reviewed apart
+exit=0

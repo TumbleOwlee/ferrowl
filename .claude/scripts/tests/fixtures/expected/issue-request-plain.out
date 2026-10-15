@@ -1,0 +1,4 @@
+As a user I want my client to reconnect.
+
+- after a server restart
+exit=0

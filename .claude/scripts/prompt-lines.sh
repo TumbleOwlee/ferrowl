@@ -57,7 +57,7 @@ for f in "$@"; do
         sed -n 's/^Decide: /Plan: /p' "$f"
         sed -n 's/^Spec since architecture: /Spec since arch: /p' "$f"
         awk -F'|' '/^\| s[0-9]/ { sid = $2; st = $6; gsub(/^ +| +$/, "", sid); gsub(/^ +| +$/, "", st); if (st ~ /^yes/) { if (!p) { print "Stops:"; p = 1 } print "- " sid " — " st } }' "$f"
-        awk '/^Verification beyond unit tests:/ { on = 1; next } on && /^- / { if (!p) { print "Verification:"; p = 1 } if ($0 != "- none") print; next } on { on = 0 }' "$f"
+        awk '/^Verification beyond unit tests:/ { on = 1; next } on && /^(- |  - )/ { if ($0 == "- none") next; if (!p) { print "Verification:"; p = 1 } print; next } on { on = 0 }' "$f"
         c=$(awk '/^Decisions taken \(confirm\):/ { on = 1; next } on && /^- / { print; next } on { on = 0 }' "$f")
         [ -n "$c" ] && confirm="$confirm$c$nl" ;;
     review.verdict.md)

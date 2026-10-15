@@ -1,0 +1,22 @@
+show-file: no viewer (SHOW_FILE_VIEWER=none): <P>/.claude/tasks/artifacts/demo/plan.summary.md (approval marker: <P>/.claude/tasks/artifacts/demo/approval)
+Plan: 3 stages, s0 → s1 → s2. Backoff before UI, the tab reads the new state.
+Spec since arch: +E1 ~R1 · fixed IDs 2
+Stops:
+- s1 — yes — new public error variant
+Verification:
+- s2 — demo TUI
+  - stop the demo server, see "reconnecting", restart it, polling resumes
+  - cannot be waived without asking
+Confirm:
+- one stage per crate — rejected: one stage; the UI change is reviewed apart
+show-file: no viewer (SHOW_FILE_VIEWER=none): <P>/.claude/tasks/artifacts/demo/review.verdict.md (approval marker: <P>/.claude/tasks/artifacts/demo/approval)
+Review: findings — 0 must fix, 1 needs you
+Spec: 2 of 2 pinned
+Spec changes: MB-R-162 detail, MB-R-161 needs you
+Minors (folded into s2)
+- standards — ferrowl-modbus client_core.rs `next_delay`: comment restates the code; drop it
+Needs user:
+- MB-R-161 now gives up after 1 hour of retries; keep it?
+  - a) revert to retry forever (recommended: S1 decided by the user)
+  - b) keep the 1 hour limit
+exit=0

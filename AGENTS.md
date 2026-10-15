@@ -59,6 +59,7 @@ cargo clippy --workspace -- -D warnings
 cargo check --workspace
 cargo test --workspace
 cargo llvm-cov --workspace --fail-under-lines 80
+sh .claude/scripts/tests/run.sh      # workflow scripts, fixture tests
 ```
 
 Narrow the loop while iterating. `cargo test --workspace <name>` still builds and runs every crate's test binary (each prints `test result: ok. 0 passed`), even though only one crate can match:

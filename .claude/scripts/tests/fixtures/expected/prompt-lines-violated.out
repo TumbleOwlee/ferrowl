@@ -1,0 +1,4 @@
+Goal: Register 65535 reads correctly.
+Entries: no spec change — 1 violated: MB-R-010
+Confirm: nothing flagged
+exit=0

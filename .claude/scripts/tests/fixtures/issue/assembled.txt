@@ -1,0 +1,37 @@
+#8 Reconnect dropped Modbus clients [OPEN]
+https://github.com/o/r/issues/8
+by someone
+
+# ignored
+
+**Spec** rev 2
+
+## Goal
+A client tab reconnects on its own.
+
+## Spec (rev 2)
+
+### Scenarios
+- **S1** — Server restarts during polling
+  - Given a client tab polling a TCP server
+
+### Requirements
+| ID | Kind | Requirement |
+|---|---|---|
+| R1 | new | A dropped client enters the reconnecting state. |
+
+### Deferred
+- log wording — implementation
+
+## Architecture
+1 new component
+
+## Decisions
+- 2026-10-05, user
+  - kept
+
+<details><summary>Original request</summary>
+
+As a user I want my client to reconnect.
+</details>
+--- 0 comment(s) ---

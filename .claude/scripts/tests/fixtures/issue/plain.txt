@@ -1,0 +1,11 @@
+#7 Reconnect clients [OPEN]
+https://github.com/o/r/issues/7
+by someone
+
+As a user I want my client to reconnect.
+
+- after a server restart
+
+--- 1 comment(s) ---
+
+[someone @ 2026-10-01] ping
