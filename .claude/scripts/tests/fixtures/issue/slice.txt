@@ -1,0 +1,18 @@
+#71 Load balancing core: Walking skeleton [OPEN]
+https://github.com/o/r/issues/71
+by someone
+
+**Part of epic** #70 · **Slice** 1 of 3 · **Depends on** none
+
+## Goal
+Two EVSEs share a site limit.
+
+## Spec (rev 1)
+
+### Scenarios
+- **S1** — Two EVSEs share a limit
+  - Given a 32 A site limit and two charging EVSEs
+
+## Architecture
+Adds: `Device`, `Allocator`, `Node` with minimal bodies
+--- 0 comment(s) ---

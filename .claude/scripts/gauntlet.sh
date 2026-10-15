@@ -3,11 +3,14 @@
 # status line; everything else goes to <artifacts>/gauntlet.log. The
 # orchestrator reads the line, never the log.
 # Usage: gauntlet.sh <worktree> <artifacts-dir>
+# An <artifacts-dir> written as the workflow's shorthand `artifacts/<slug>`
+# resolves under the main checkout's .claude/tasks/, never the caller's cwd.
 # Prints: gauntlet=pass cov=<lines%> sha=<short>
 #     or: gauntlet=fail step=<fmt|clippy|check|test|cov> sha=<short> log=<path>
 #     or: gauntlet=fail step=<fmt|clippy|check|test|cov> sha=<short> reason=timeout log=<path>
 set -u
 wt="${1:?worktree}"; art="${2:?artifacts dir}"
+case $art in artifacts/*) art="${CLAUDE_PROJECT_DIR:-.}/.claude/tasks/$art" ;; esac
 mkdir -p "$art"
 log="$art/gauntlet.log"
 : > "$log"

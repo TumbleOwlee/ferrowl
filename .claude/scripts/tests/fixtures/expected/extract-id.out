@@ -1,0 +1,3 @@
+specs/modbus/requirements.md:7:**MB-R-002** — The client polls.
+specs/modbus/edge-cases.md:3:**MB-E-001** — A slow server times out.
+exit=0

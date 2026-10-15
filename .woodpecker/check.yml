@@ -26,6 +26,12 @@ steps:
     commands:
       - cargo test --workspace
 
+  # Fixture tests for the agent-workflow scripts in .claude/scripts/.
+  scripts:
+    image: rust:latest
+    commands:
+      - sh .claude/scripts/tests/run.sh
+
   # Advisories, licenses, and banned/duplicate crates. Policy lives in deny.toml.
   deny:
     image: rust:latest

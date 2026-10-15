@@ -7,12 +7,13 @@
 # Line 1 is `# <title>` (stripped for --title). Both forms end with
 # `Closes #<issue>` when the parent card carries `issue`.
 #
-# draft:  status line (lane, mode, spec rev, last green sha from the parent
+# draft:  status line (lane, spec rev, last green sha from the parent
 #         card's log), ## Why (first line of issue.md's ## Goal), ## Stages
 #         (one checklist line per stage card: ticked with its sha in done/,
 #         else its board state), ## Review here.
 # full:   status line (spec rev, stages, entries, coverage, review, splits),
-#         then pr.md from line 2 on.
+#         then pr.md from line 2 on, then ## Architecture (the Decide line and
+#         component table of architecture.summary.md, when the run had one).
 [ $# -eq 2 ] || { echo "usage: $0 <slug> draft|full" >&2; exit 2; }
 slug=$1; form=$2
 root=${CLAUDE_PROJECT_DIR:-.}
@@ -21,7 +22,7 @@ board=$root/.claude/tasks
 field() { sh "$root/.claude/scripts/card-field.sh" "$slug" "$1"; }
 [ -f "$a/issue.md" ] || { echo "pr-body: missing $a/issue.md" >&2; exit 1; }
 
-issue=$(field issue); lane=$(field lane); mode=$(field mode); split=$(field split)
+issue=$(field issue); lane=$(field lane); split=$(field split)
 rev=; [ -f "$a/spec-diff.md" ] && rev=$(sed -n '1s/.*(rev \([0-9]*\)).*/\1/p' "$a/spec-diff.md")
 spec_tok="no spec change"; [ -n "$rev" ] && spec_tok="spec rev $rev"
 Spec_tok="No spec change"; [ -n "$rev" ] && Spec_tok="Spec rev $rev"
@@ -35,7 +36,6 @@ draft)
     sha=$(field pass-sha)
     line="Draft"
     [ -n "$lane" ] && line="$line · lane $lane"
-    [ -n "$mode" ] && line="$line · $mode"
     line="$line · $spec_tok"
     [ -n "$sha" ] && line="$line · gauntlet green at $sha"
     printf '%s\n\n' "$line"
@@ -104,6 +104,12 @@ full)
     [ -n "$split" ] && line="$line · split off: $(printf '%s' "$split" | tr -d '[] ' | sed 's/\([0-9][0-9]*\)/#\1/g; s/,/, /g')"
     printf '%s\n\n' "$line"
     tail -n +2 "$a/pr.md" | sed '1{/^$/d;}'
+    if [ -f "$a/architecture.summary.md" ]; then
+        printf '\n## Architecture\n'
+        sed -n 's/^Decide: //p' "$a/architecture.summary.md"
+        echo
+        sed -n '/^|/p' "$a/architecture.summary.md"
+    fi
     ;;
 *) echo "usage: $0 <slug> draft|full" >&2; exit 2 ;;
 esac

@@ -1,0 +1,18 @@
+## Spec (rev 2)
+
+### Scenarios
+- **S1** — Server restarts during polling
+  - Given a client tab polling a TCP server
+
+### Requirements
+| ID | Kind | Requirement |
+|---|---|---|
+| R1 | new | A dropped client enters the reconnecting state. |
+
+### Deferred
+- log wording — implementation
+
+## Architecture
+1 new component
+
+exit=0

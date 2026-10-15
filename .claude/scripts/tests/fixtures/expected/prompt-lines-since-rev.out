@@ -1,0 +1,7 @@
+Goal: A client tab reconnects on its own after the server drops the connection.
+Scenarios: 1 — S1
+Entries: 2 new — MB-R-161, MB-E-031 · 1 changed — MB-R-042 · 1 dropped — MB-E-007
+Deferred: 2 — 1 implementation · 1 unowned
+Confirm:
+- MB-E-031 — drop it — a replayed write may apply twice
+exit=0

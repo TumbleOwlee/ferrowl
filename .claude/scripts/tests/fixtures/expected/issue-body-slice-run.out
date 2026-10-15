@@ -1,0 +1,11 @@
+# Load balancing core: Walking skeleton
+
+**Part of epic** #70 · **Slice** 1 of 3 · **Depends on** none
+
+**Spec** none · **Lane** fast
+
+## Goal
+Two EVSEs share a site limit.
+Today every device draws its maximum.
+
+exit=0

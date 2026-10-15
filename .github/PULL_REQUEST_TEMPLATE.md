@@ -46,6 +46,6 @@ physical device — and what you saw. "not run:" is always present.
 
 ## Decisions
 
-<!-- Design choices the issue did not settle, each with the rejected alternative. -->
+<!-- Design choices the issue did not settle, one per line. -->
 
 Closes #

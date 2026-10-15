@@ -1,0 +1,4 @@
+Issue: Reconnect dropped Modbus clients
+Split: RTU clients reconnect
+PR: Reconnect dropped Modbus clients
+exit=0

@@ -2,7 +2,7 @@
 # Read one frontmatter field, or the last log value of one key, from a run's
 # parent card, wherever on the board it sits.
 #
-#   sh .claude/scripts/card-field.sh <slug> <field>         # frontmatter: issue, pr, lane, mode, …
+#   sh .claude/scripts/card-field.sh <slug> <field>         # frontmatter: issue, pr, lane, branch, …
 #   sh .claude/scripts/card-field.sh <slug> log:<key>       # last `<key>=<value>` token in the log
 #   sh .claude/scripts/card-field.sh <slug> pass-sha        # sha= of the last `gauntlet=pass` log line
 #   sh .claude/scripts/card-field.sh <slug> path            # the card's path

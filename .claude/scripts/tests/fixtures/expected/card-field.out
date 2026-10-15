@@ -1,0 +1,14 @@
+lane=full
+
+issue=12
+
+split=[56]
+
+log:cov=81.2%
+
+log:review=clean
+
+pass-sha=bbb2222
+
+nosuch=
+exit=0

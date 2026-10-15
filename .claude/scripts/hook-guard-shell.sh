@@ -97,7 +97,7 @@ for seg in $segments; do
   esac
 
   case "$seg" in
-    *git\ show\ *|*git\ diff\ *)
+    *git\ show\ *|*git\ diff\ *|*git\ show|*git\ diff)
       case "$seg" in
         *--stat*) ;;   # already narrowed to a summary
         *' -- '*) ;;   # already scoped to a pathspec

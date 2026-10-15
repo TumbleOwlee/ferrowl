@@ -14,9 +14,7 @@ cargo build --release
 
 Run the app during development with `cargo run --release -- --demo` (starts a demo server) or see `--help` for all runtime options.
 
-Optionally install [lefthook](https://github.com/evilmartians/lefthook) and run
-`lefthook install` to get the pre-commit checks locally. The coverage gate also
-needs `cargo-llvm-cov`:
+Optionally install [lefthook](https://github.com/evilmartians/lefthook) and run `lefthook install` to get the pre-commit checks locally. The coverage gate also needs `cargo-llvm-cov`:
 
 ```sh
 cargo install cargo-llvm-cov --locked
@@ -24,24 +22,15 @@ cargo install cargo-llvm-cov --locked
 
 ## Project Layout
 
-The repository is a Cargo workspace building the `ferrowl` binary. See
-[`ARCHITECTURE.md`](./ARCHITECTURE.md) for the crate dependency graph and each
-crate's responsibility, and [`PRD.md`](./PRD.md) for the product framing.
+The repository is a Cargo workspace building the `ferrowl` binary. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the crate dependency graph and each crate's responsibility, and [`PRD.md`](./PRD.md) for the product framing.
 
-Ferrowl is **spec-driven**: [`docs/specs/`](./docs/specs/) is the authoritative
-specification of what the software must do, split by capability area. The code is
-expected to conform to it. Before changing behavior, read the relevant area's
-`requirements.md` and `edge-cases.md`.
+Ferrowl is **spec-driven**: [`docs/specs/`](./docs/specs/) is the authoritative specification of what the software must do, split by capability area. The code is expected to conform to it. Before changing behavior, read the relevant area's `requirements.md` and `edge-cases.md`.
 
 ## Test-Driven Development
 
-Write the test first, watch it fail, then implement. A test written after the
-code it covers asserts what you built rather than what the specification
-requires — derive expected values from the authoritative source (protocol spec,
-upstream API), never from a debug print of your own implementation.
+Write the test first, watch it fail, then implement. A test written after the code it covers asserts what you built rather than what the specification requires — derive expected values from the authoritative source (protocol spec, upstream API), never from a debug print of your own implementation.
 
-Every new or changed requirement ships with at least one test whose doc comment
-cites the requirement ID, directly beside the test declaration:
+Every new or changed requirement ships with at least one test whose doc comment cites the requirement ID, directly beside the test declaration:
 
 ```rust
 #[test]
@@ -49,14 +38,9 @@ cites the requirement ID, directly beside the test declaration:
 fn ut_checksum_excludes_trailer() { /* … */ }
 ```
 
-A test may cite an edge-case ID (`MB-E-nnn`) in exactly the same position
-and form. A test whose assertions pin several rules lists every ID it pins,
-comma-separated (`/// MB-R-012, MB-R-157 — …`), and never an ID it does not
-assert; see `docs/specs/README.md` rule 8.
+A test may cite an edge-case ID (`MB-E-nnn`) in exactly the same position and form. A test whose assertions pin several rules lists every ID it pins, comma-separated (`/// MB-R-012, MB-R-157 — …`), and never an ID it does not assert; see `docs/specs/README.md` rule 8.
 
-Line coverage must stay at or above **80%**, enforced in CI. Coverage is a
-floor, not a goal — never pad it with tests that execute code without
-asserting on it.
+Line coverage must stay at or above **80%**, enforced in CI. Coverage is a floor, not a goal — never pad it with tests that execute code without asserting on it.
 
 ## Before Submitting
 
@@ -68,6 +52,7 @@ cargo clippy --workspace -- -D warnings
 cargo check --workspace
 cargo test --workspace
 cargo llvm-cov --workspace --fail-under-lines 80
+sh .claude/scripts/tests/run.sh   # only when .claude/scripts/ changed
 ```
 
 CI runs these as separate steps of the `check` pipeline — on every push **and every pull request** — so anything the pre-commit hook would reject is rejected by CI too. A `nightly` workflow (only run on `main`) builds the prebuilt executables published on the Release page.
@@ -85,40 +70,22 @@ CI runs these as separate steps of the `check` pipeline — on every push **and 
 
 ## Agent Workflow
 
-Agents working in this repo follow the gated workflow in
-[`AGENTS.md`](./AGENTS.md) and [`.claude/AGENTS.workflow.md`](./.claude/AGENTS.workflow.md);
-human contributors are welcome to, but the checks above are the hard requirements.
-The diagram below is the map; the workflow file is the authority when they disagree.
+Agents working in this repo follow the gated workflow in [`AGENTS.md`](./AGENTS.md) and [`.claude/AGENTS.workflow.md`](./.claude/AGENTS.workflow.md); human contributors are welcome to, but the checks above are the hard requirements. The diagram below is the map; the workflow file is the authority when they disagree.
 
-How to read it: each lane is one participant. The user only ever talks to the
-orchestrator. The orchestrator spawns agents, relays one question at a time, moves
-task-board cards and runs SCM and tracker plumbing; it never reads or writes spec,
-code, plan or review content. Every agent writes its output to a file under
-`artifacts/<slug>/` (or into its worktree) and ends its turn with a one-line status;
-only file paths and status lines cross the lane into the orchestrator. An activation
-bar on a lane marks the span in which that agent exists; a bar that ends is an agent
-that is gone, and the next bar on the same lane is a fresh spawn with no memory of
-the previous one.
+How to read it: each lane is one participant. The user only ever talks to the orchestrator. The orchestrator spawns agents, relays one question at a time, moves task-board cards and runs SCM and tracker plumbing; it never reads or writes spec, code, plan or review content. Every agent writes its output to a file under `artifacts/<slug>/` (or into its worktree) and ends its turn with a one-line status; only file paths and status lines cross the lane into the orchestrator. An activation bar on a lane marks the span in which that agent exists; a bar that ends is an agent that is gone, and the next bar on the same lane is a fresh spawn with no memory of the previous one.
 
 Three interactions recur at every gate and are drawn as one arrow each:
 
-- **approval stop** — a clean stage stops only when a stage-stop rule fires (a pending user decision, verification beyond unit tests, a spec revision, open PR threads, the last code stage, a plan-marked stage, a diff over 400 lines or 8 files, or three stages since the last stop); otherwise it auto-continues with a one-line notice. At a stop the orchestrator opens the file in a viewer outside the conversation and halts with a fixed-shape prompt: the file's own goal, entries, decisions to confirm and open questions, then what approving will do. A requested change goes back to the same, still-alive agent; only an explicit approval lets the run continue. Reviewer minors are listed, not asked: they are folded into the next stage.
-- **fresh review** — a new `spec-reviewer` with no shared context reads one scope (plan, stage, wave or branch), writes its review and is gone. Findings go back to the agent that wrote the work, never to the orchestrator, and another fresh review follows.
-- **assembled text** — the issue body and the PR body are generated by scripts from the agents' files and the task board (`issue-body.sh`, `pr-body.sh`); no agent and no orchestrator writes them by hand. The issue body is always the current spec; the draft PR body is the stage board, re-rendered on every card move. The run ends when the PR is marked ready: the human reviews and merges on GitHub.
-- **reopen gate 1** — the spec text turned out not to cover something the planner or implementer found. A `spec-author` classifies the revision: *editorial* (no meaning changes) goes through without a stop; *normative* (the goal needs it) and *beyond* (needed only for something outside the goal; split off into its own issue by default, the triggering entry narrowed to what holds today) are decided through one question that quotes the affected entry in full — the answer is the approval, the revised text is not shown again. Once the tracking issue exists, every revision rewrites its body — the body is always the current spec — and adds a short changelog comment.
+- **approval stop** — a clean stage stops only when a stage-stop rule fires (a pending user decision — a meaningful spec change included —, verification beyond unit tests, open PR threads, the last code stage, a plan-marked stage, a diff over 400 lines or 8 files, or three stages since the last stop); otherwise it auto-continues with a one-line notice. At a stop the orchestrator opens the file in a viewer outside the conversation and halts with a fixed-shape prompt: the file's own goal, entries, decisions to confirm and open questions, then what approving will do. A requested change goes back to the same, still-alive agent; only an explicit approval lets the run continue. Reviewer minors are listed, not asked: they are folded into the next stage.
+- **fresh review** — a new `spec-reviewer` with no shared context reads one scope (plan, stage, a stage's spec changes, or branch) and writes its review. Its follow-up pass on the same scope resumes it and re-reads only what the revision changed; the branch review is fresh on every pass. Findings go back to the agent that wrote the work, never to the orchestrator, and the same reviewer then checks the revision.
+- **assembled text** — the issue body and the PR body are generated by scripts from the agents' files and the task board (`issue-body.sh`, `pr-body.sh`); no agent and no orchestrator writes them by hand. The issue body is the spec as filed, rewritten once more at gate 4 with the spec as merged; the draft PR body is the stage board, re-rendered on every card move. The run ends when the PR is marked ready: the human reviews and merges on GitHub.
+- **spec change** — the spec is drafted best effort and settles as the run learns. Before the spec lands, the architect and the planner edit it in place and ask the user only when a change contradicts a scenario or an earlier user decision. After it lands, the implementer edits `docs/specs/` in the stage commit and a fresh reviewer classifies each change: *detail* (fills a deferred point, sharpens wording) is listed, *meaningful* (contradicts a scenario, a user decision or the approved architecture, or changes what a user sees) goes to the user — keep, revert, or split into its own issue. A kept change after filing adds a short changelog comment to the issue.
 
-The entry point depends on the kind of change: a behavior change of any size starts
-at gate 1; a non-behavior change (refactor, rename, test-only, docs, tooling) skips
-gate 1 and starts at gate 2; a trivial edit (one file, no semantics) needs no gates,
-just a branch and a PR.
+The entry point depends on the kind of change: a behavior change of any size starts at gate 1 (the brief); a non-behavior change (refactor, rename, test-only, docs, tooling) skips gate 1 and starts at the architecture step, which steps aside when no type, trait, module or public surface changes; a trivial edit (one file, no semantics) needs no gates, just a branch and a PR.
 
-Every run also picks a **lane** at its first approval stop; the user chooses, and
-size sets the recommended default. The diagram draws the **full** lane. The **fast**
-lane (default for a fix that changes no spec text or at most 3 entries) folds the
-gate 1 approval into gate 2's, commits and pushes each stage on green without a
-per-stage review or stop, and ends in one stop showing the branch review and the PR
-body. The tracking issue is filed in both lanes only at gate 2 approval, once the
-planner has checked the spec against the code.
+Every run also picks a **lane** at its first approval stop; the user chooses, and size sets the recommended default. The diagram draws the **full** lane. The **fast** lane (default for a fix that changes no spec text or at most 3 entries) approves brief and architecture at one stop that also pre-authorizes the plan, commits and pushes each stage on green without a per-stage review or stop, and ends in one stop showing the branch review and the PR body. The tracking issue is filed in both lanes only at gate 2 approval, once the planner has fixed the spec's IDs. An implementer works at most three code stages; a fresh one takes over from the stage cards.
+
+A feature too big for one run (more than about 8 scenarios, 12 spec entries, or more than one area) becomes an **epic**. The epic run writes no code: its architect settles only the shared skeleton (the core traits and types every part builds on) and cuts the feature into ordered slices, each filed as its own issue. Every slice is then a normal run. Slice 1 is a walking skeleton that lands the core as working code, so later slices read the shared design from the code itself.
 
 ```mermaid
 %%{init: {'themeVariables': {'activationBkgColor': '#3f9a6c', 'activationBorderColor': '#1f5a3c'}}}%%
@@ -126,6 +93,7 @@ sequenceDiagram
     actor User
     participant Orch as Orchestrator
     participant Author as spec-author
+    participant Architect as spec-architect
     participant Planner as spec-planner
     participant Impl as spec-implementer
     participant Reviewer as spec-reviewer
@@ -135,79 +103,100 @@ sequenceDiagram
     activate Orch
 
     rect rgba(47,111,78,0.10)
-    Note over User,Git: Gate 1 - spec diff (behavior change only)
-    Orch->>Author: spawn: goal, affected areas
+    Note over User,Git: Gate 1 - brief (behavior change only)
+    Orch->>Author: spawn: goal or request issue, affected areas
     activate Author
-    loop one decision at a time
-        Author-->>Orch: question
-        Orch->>User: question with recommendation
-        User->>Orch: answer
-        Orch->>Author: answer
+    loop grilling: scenarios, scope, edge cases
+        Author-->>Orch: question batch
+        Orch->>User: questions with recommendations
+        User->>Orch: answers
+        Orch->>Author: answers
     end
-    Author-->>Orch: ready, spec diff written
-    Orch->>User: approval stop: spec diff, and lane (fast or full)
+    Author-->>Orch: ready, brief written (scenarios, local IDs, deferred points)
+    Orch->>User: approval stop: brief, and lane (fast or full)
     User->>Orch: approved, full lane
+    end
+
+    rect rgba(124,58,237,0.10)
+    Note over User,Git: Architecture - structure the plan must reach
+    Orch->>Architect: spawn: brief path, affected areas
+    activate Architect
+    Note over Architect: reads the code, extends the brief's entries
+    loop grilling: types, traits, ownership, public surface
+        Architect-->>Orch: question batch
+        Orch->>User: questions with recommendations
+        User->>Orch: answers, own design input
+        Orch->>Architect: answers
+    end
+    Architect-->>Orch: ready, architecture written
+    Orch->>User: approval stop: architecture (fast lane: brief too)
+    User->>Orch: approved
     end
 
     rect rgba(29,78,216,0.10)
     Note over User,Git: Gate 2 - implementation plan and tracking issue
-    Orch->>Planner: spawn: spec diff path, affected areas
+    Orch->>Planner: spawn: brief path, architecture path, affected areas
     activate Planner
-    Note over Planner: explores the code itself
-    opt spec gap found while planning
-        Planner-->>Orch: spec gap, reason
-        Note over Orch,Author: reopen gate 1, then the same planner resumes
+    Note over Planner: starts from the architecture's code map, refines the entries, fixes their IDs
+    opt structure must change
+        Planner-->>Orch: architecture gap, reason
+        Orch->>Architect: reason
+        Architect-->>Orch: ready, architecture revised
+        Orch->>Planner: resume
     end
-    Planner-->>Orch: ready, plan written (stage 0 lands any spec text, stages, dependencies, verification)
+    Planner-->>Orch: ready, plan written (stage 0 lands the spec, stages, dependencies, verification)
+    Orch->>Reviewer: fresh review: plan
+    activate Reviewer
     loop until clean
-        Orch->>Reviewer: fresh review: plan
-        activate Reviewer
         Reviewer-->>Orch: clean, or findings
-        deactivate Reviewer
         Orch->>Planner: findings, review path
         Planner-->>Orch: ready, plan revised
+        Orch->>Reviewer: follow-up pass: the revision only
     end
+    deactivate Reviewer
     deactivate Planner
+    deactivate Architect
     Orch->>Git: list existing issues
     Orch->>Author: candidate issue numbers
     Author->>Git: read candidate issues
     Author-->>Orch: reuse or new, title and goal written
-    deactivate Author
-    Orch->>Orch: assemble the issue body from spec diff, plan and goal
-    Orch->>User: approval stop: plan and issue body, sequential or parallel
+    Orch->>Orch: assemble the issue body from goal, brief and architecture
+    Orch->>User: approval stop: plan and issue body
     User->>Orch: approved
     Orch->>Git: create or rewrite the issue from the assembled body
     Orch->>Git: create feature branch and worktree, one stage card per plan stage
     end
 
     rect rgba(180,83,9,0.10)
-    Note over User,Git: Implement - one implementer for the run (sequential) or one fresh per stage (parallel)
+    Note over User,Git: Implement - one implementer for the run, stages in plan order
     Orch->>Impl: spawn: worktree path, plan path, stage card paths
     activate Impl
     loop every stage, in plan order
         Impl->>Git: in worktree: failing test, minimum pass, refactor (stage 0, if any = spec text)
-        Impl-->>Orch: stage green, stage id
-        opt behavior must differ from approved spec
-            Impl-->>Orch: spec gap, reason
-            Note over Orch,Author: reopen gate 1, then the implementer lands the amended text first
-        end
+        Note over Impl: may update the spec in the stage commit, logged per change
+        Impl-->>Orch: stage green, stage id, spec change count
         Orch->>Git: run the full check suite in the worktree
+        Orch->>Reviewer: fresh review: stage
+        activate Reviewer
         loop until clean
-            Orch->>Reviewer: fresh review: stage
-            activate Reviewer
-            Reviewer-->>Orch: clean, or findings
-            deactivate Reviewer
+            Reviewer-->>Orch: clean, or findings, each spec change classed detail or meaningful
             Orch->>Impl: findings, review path
             Impl-->>Orch: stage green again
+            Orch->>Reviewer: follow-up pass: the stage diff again
+        end
+        deactivate Reviewer
+        opt meaningful spec change
+            Orch->>User: keep, revert, or split
+            Note over Orch,Author: kept after filing: changelog comment on the issue, split: a new issue
         end
         opt draft PR exists and has unresolved review threads
             Orch->>Git: fetch the threads into a file
             Orch->>Impl: feedback file, like review findings
             Impl-->>Orch: fixed, reply per thread filled in
-            Note over Orch,Reviewer: checks and a fresh review again before the approval stop
+            Note over Orch,Reviewer: checks and a review again before the approval stop
         end
         alt a stage-stop rule fires
-            Orch->>User: approval stop: stage (or wave)
+            Orch->>User: approval stop: stage
             User->>Orch: approved
         else
             Orch->>User: one-line notice, auto-continue
@@ -225,7 +214,6 @@ sequenceDiagram
         end
     end
     deactivate Impl
-    Note over Orch,Git: parallel: per-stage worktrees branch off the feature branch, clean stages merge into it and the feature branch is pushed, then a fresh review of the wave and an approval stop
     end
 
     rect rgba(29,78,216,0.10)
@@ -236,7 +224,7 @@ sequenceDiagram
     deactivate Reviewer
     Orch->>Git: run the full check suite on the branch
     opt findings
-        Note over Orch,Impl: the same implementer (sequential) or a fresh one per card (parallel) with the review path, checks again, fresh review again
+        Note over Orch,Impl: the same implementer with the review path, checks again, fresh review again
     end
     Orch->>User: approval stop: review and check result
     User->>Orch: approved
@@ -244,23 +232,22 @@ sequenceDiagram
 
     rect rgba(47,111,78,0.10)
     Note over User,Git: Gate 4 - pull request
-    Orch->>Author: spawn: spec diff, plan, review, check log, branch commit log
-    activate Author
+    Orch->>Author: resume: worktree, plan, review, check log
+    Note over Author: syncs the brief to the branch's spec, then writes the PR body
     Author-->>Orch: ready, PR body written
     deactivate Author
-    Orch->>Orch: assemble the final PR body
+    Orch->>Orch: assemble the final issue and PR bodies
     Orch->>User: approval stop: PR body, approve or manual run first?
     User->>Orch: approved
-    Orch->>Git: push, replace the draft PR's title and body, link the issue, mark ready, delete every card of the run
-    Note over User,Git: the human reviews and merges on GitHub; the orchestrator then removes the worktree and the artifact dir
+    Orch->>Git: push, rewrite the issue with the merged spec, replace the draft PR's title and body, mark ready
+    Orch->>Git: wait for CI, on red the implementer fixes, push, wait again
+    Orch->>Orch: clean up: worktree, local branch, cards, artifact dir
+    Note over User,Git: the run ends here, the human reviews and merges on GitHub, outside the workflow
     deactivate Orch
     end
 ```
 
-`.claude/tasks/` is the workflow's execution state: the directory a card sits in is
-its state (`open`, `inprogress`, `inreview`, `done`), so an interrupted session
-resumes instead of restarting. The directories are tracked, the cards inside are
-local and gitignored. Nothing there needs maintaining by hand.
+`.claude/tasks/` is the workflow's execution state: the directory a card sits in is its state (`open`, `inprogress`, `inreview`, `done`), so an interrupted session resumes instead of restarting. The directories are tracked, the cards inside are local and gitignored. Nothing there needs maintaining by hand.
 
 ## Reporting Issues
 
