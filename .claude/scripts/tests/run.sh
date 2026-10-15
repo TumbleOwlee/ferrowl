@@ -56,6 +56,13 @@ golden issue-body-nospec env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh"
 golden issue-body-violated env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" violated
 golden issue-body-missing env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" nosuch
 
+golden issue-body-epic env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" lb
+golden issue-body-slice-1 env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" lb --slice 1
+golden issue-body-slice-2 env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" lb --slice 2
+golden issue-body-slice-3 env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" lb --slice 3
+golden issue-body-slice-run env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" sl
+golden issue-body-slice-missing env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" lb --slice 9
+
 # --- pr-body.sh
 golden pr-body-draft env CLAUDE_PROJECT_DIR="$P" sh "$scripts/pr-body.sh" demo draft
 golden pr-body-full env CLAUDE_PROJECT_DIR="$P" sh "$scripts/pr-body.sh" demo full
@@ -72,6 +79,10 @@ golden prompt-lines-verdict sh "$scripts/prompt-lines.sh" "$A/review.verdict.md"
 golden prompt-lines-titles sh "$scripts/prompt-lines.sh" "$A/issue.md" "$A/split-issue.md" "$A/pr.md"
 golden prompt-lines-question sh "$scripts/prompt-lines.sh" "$A/question.md"
 golden prompt-lines-violated sh "$scripts/prompt-lines.sh" "$P/.claude/tasks/artifacts/violated/spec-diff.md"
+golden prompt-lines-slices sh "$scripts/prompt-lines.sh" "$P/.claude/tasks/artifacts/lb/slices.md"
+cp -R "$P/.claude/tasks/artifacts/lb" "$tmp/lbgap"
+sed -i 's/^Entries: R3$/Entries: none/; s/^Entries: R1$/Entries: R1, E1/' "$tmp/lbgap/slices.md"
+golden prompt-lines-slices-gaps sh "$scripts/prompt-lines.sh" "$tmp/lbgap/slices.md"
 golden prompt-lines-unreadable sh "$scripts/prompt-lines.sh" "$A/nosuch.md"
 
 # --- issue-request.sh, with issue-view.sh stubbed to print a fixture
@@ -80,6 +91,9 @@ printf '#!/bin/sh\ncat "$ISSUE_FIXTURE"\n' > "$tmp/ir/issue-view.sh"
 golden issue-request-plain env ISSUE_FIXTURE="$fx/issue/plain.txt" sh "$tmp/ir/issue-request.sh" 7
 golden issue-request-assembled env ISSUE_FIXTURE="$fx/issue/assembled.txt" sh "$tmp/ir/issue-request.sh" 8
 golden issue-request-spec env ISSUE_FIXTURE="$fx/issue/assembled.txt" sh "$tmp/ir/issue-request.sh" 8 --spec
+golden issue-request-epic env ISSUE_FIXTURE="$fx/issue/slice.txt" sh "$tmp/ir/issue-request.sh" 71 --epic
+golden issue-request-epic-none env ISSUE_FIXTURE="$fx/issue/plain.txt" sh "$tmp/ir/issue-request.sh" 7 --epic
+golden issue-request-slice-spec env ISSUE_FIXTURE="$fx/issue/slice.txt" sh "$tmp/ir/issue-request.sh" 71 --spec
 golden issue-request-spec-plain env ISSUE_FIXTURE="$fx/issue/plain.txt" sh "$tmp/ir/issue-request.sh" 7 --spec
 
 # --- card-field.sh
@@ -172,6 +186,18 @@ if [ "$out" = cleanup=done ] && [ ! -e "$W" ] && ! git -C "$tmp/r" rev-parse --v
     && [ -e "$B/artifacts/nospec/issue.md" ] && [ -e "$B/inreview/nospec.md" ]; then ok cleanup-done
 else bad cleanup-done "$out"; fi
 out=$(cleanup); [ "$out" = cleanup=done ] && ok cleanup-idempotent || bad cleanup-idempotent "$out"
+
+# --- id-collisions.sh: the branch and main both define the next free ID
+rm -rf "$tmp/ids"; git init -q -b main "$tmp/ids"; mkdir -p "$tmp/ids/docs/specs"
+printf '**MB-R-001** — The client connects.\n' > "$tmp/ids/docs/specs/r.md"
+g "$tmp/ids" add . ; g "$tmp/ids" commit -q -m base
+g "$tmp/ids" checkout -q -b feat/x
+printf '**MB-R-002** — The client polls.\n**MB-R-003** — The client retries.\n' >> "$tmp/ids/docs/specs/r.md"; g "$tmp/ids" commit -q -am x
+out=$(sh "$scripts/id-collisions.sh" "$tmp/ids" main); [ "$out" = ids=clean ] && ok ids-clean || bad ids-clean "$out"
+g "$tmp/ids" checkout -q main
+printf '**MB-R-002** — The server answers.\n' >> "$tmp/ids/docs/specs/r.md"; g "$tmp/ids" commit -q -am y
+g "$tmp/ids" checkout -q feat/x
+out=$(sh "$scripts/id-collisions.sh" "$tmp/ids" main); [ "$out" = "ids=collide MB-R-002" ] && ok ids-collide || bad ids-collide "$out"
 
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

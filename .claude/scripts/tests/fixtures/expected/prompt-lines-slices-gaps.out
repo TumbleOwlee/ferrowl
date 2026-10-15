@@ -1,0 +1,8 @@
+Slices:
+- 1: Walking skeleton — depends on none — S1 · R1, E1
+- 2: Batteries — depends on 1 — S2 · R2, E1
+- 3: Nested groups — depends on 1, 2 — S3 · none
+Confirm:
+- slices: R3 is in no slice
+- slices: E1 is in slices 1, 2
+exit=0

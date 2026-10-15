@@ -10,6 +10,8 @@
 #                      R<n>/E<n> or fixed, or the violated list for a no-diff) ·
 #                      Deferred: (count per owner)
 #   architecture.summary.md  Architecture: (the Decide line) · Interfaces: · Surface: (public-surface lines)
+#   slices.md          Slices: one line per slice — number, title, depends on, scenarios, entries;
+#                      Confirm: every S/R/E of the sibling spec-diff.md that no slice or two slices claim
 #   plan.summary.md    Plan: (the Decide line) · Spec: (the Spec-since-architecture line) ·
 #                      Stops: (stages whose Stop column says yes) · Verification:
 #   review.verdict.md  Review: (the Verdict line) · Spec: · Spec changes: · Minors (…): · Needs user: — a block whose only item is `- none` is skipped
@@ -54,6 +56,24 @@ for f in "$@"; do
         awk '/^Public surface:/ { on = 1; next } on && /^- / { if ($0 == "- none") next; if (!p) { print "Surface:"; p = 1 } print; next } on { on = 0 }' "$f"
         c=$(awk '/^Decisions taken \(confirm\):/ { on = 1; next } on && /^- / { print; next } on { on = 0 }' "$f")
         [ -n "$c" ] && confirm="$confirm$c$nl" ;;
+    slices.md)
+        awk '/^## Slice [0-9]+: / { if (t != "") print t; t = $0; sub(/^## Slice /, "- ", t); next }
+            /^Depends on: / { t = t " — depends on " substr($0, 13) } /^Scenarios: / { t = t " — " substr($0, 12) }
+            /^Entries: / { t = t " · " substr($0, 10) }
+            END { if (t != "") print t }' "$f" | { read -r first && { echo "Slices:"; printf '%s\n' "$first"; cat; }; }
+        sd=$(dirname -- "$f")/spec-diff.md
+        if [ -f "$sd" ]; then
+            c=$(awk '
+                FNR == 1 { file++ }
+                file == 1 && /^## (S[0-9]+|[RE][0-9]+|[A-Z][A-Z]-[RE]-[0-9]+) — / && $0 !~ / — (dropped|violated)/ { ids[$2] = 1; order[++n] = $2 }
+                file == 2 && /^## Slice [0-9]+: / { s = $3; sub(/:$/, "", s) }
+                file == 2 && /^(Scenarios|Entries): / { line = $0; sub(/^[A-Za-z]+: /, "", line); k = split(line, w, /, */)
+                    for (i = 1; i <= k; i++) if (w[i] != "" && w[i] != "none") { cnt[w[i]]++; where[w[i]] = where[w[i]] (where[w[i]] == "" ? "" : ", ") s } }
+                END { for (i = 1; i <= n; i++) { id = order[i]
+                        if (!cnt[id]) print "- slices: " id " is in no slice"
+                        else if (cnt[id] > 1) print "- slices: " id " is in slices " where[id] } }' "$sd" "$f")
+            [ -n "$c" ] && confirm="$confirm$c$nl"
+        fi ;;
     plan.summary.md)
         sed -n 's/^Decide: /Plan: /p' "$f"
         sed -n 's/^Spec since architecture: /Spec since arch: /p' "$f"
@@ -74,7 +94,7 @@ for f in "$@"; do
     esac
 done
 case " $* " in
-    *spec-diff.md*|*architecture.summary.md*|*plan.summary.md*)
+    *spec-diff.md*|*architecture.summary.md*|*plan.summary.md*|*slices.md*)
         if [ -n "$confirm" ]; then printf 'Confirm:\n%s' "$confirm"; else echo "Confirm: nothing flagged"; fi ;;
 esac
 exit $rc

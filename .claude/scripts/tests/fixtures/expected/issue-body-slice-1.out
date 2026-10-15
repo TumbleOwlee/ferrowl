@@ -1,0 +1,31 @@
+# Load balancing core: Walking skeleton
+
+**Part of epic** #70 · **Slice** 1 of 3 · **Depends on** none
+
+## Goal
+Two EVSEs share a site limit.
+
+## Spec (rev 1)
+
+### Scenarios
+- **S1** — Two EVSEs share a limit
+  - Given a 32 A site limit and two charging EVSEs
+  - When both request 32 A
+  - Then each is offered 16 A
+
+### Requirements
+| ID | Kind | Requirement |
+|---|---|---|
+| R1 | new | The allocator never offers more than the site limit in total. |
+
+### Other spec changes
+| File | Section | Change |
+|---|---|---|
+| ocpp/api-contract.md | Config keys | `site_limit_a` row (R1) |
+| ocpp/api-contract.md | Notes | units are amperes throughout |
+
+## Architecture
+Adds: `Device`, `Allocator`, `Node` with minimal bodies
+
+The skeleton every slice builds on is in epic #70, `## Architecture`.
+exit=0

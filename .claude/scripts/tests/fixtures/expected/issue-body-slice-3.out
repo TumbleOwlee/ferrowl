@@ -1,0 +1,34 @@
+# Load balancing core: Nested groups
+
+**Part of epic** #70 · **Slice** 3 of 3 · **Depends on** #71, slice 2
+
+## Goal
+Groups cap their members inside the site.
+
+## Spec (rev 1)
+
+### Scenarios
+- **S3** — Nested group cap
+  - Given a group capped at 20 A inside a 32 A site
+  - When three EVSEs in the group charge
+  - Then the group's EVSEs share 20 A
+
+### Requirements
+| ID | Kind | Requirement |
+|---|---|---|
+| R3 | new | A group's members never exceed the group's cap in total. |
+
+### Other spec changes
+| File | Section | Change |
+|---|---|---|
+| ocpp/api-contract.md | Config keys | `group.cap_a` row (R3) |
+
+### Deferred
+- master–slave setups
+- rounding at group level
+
+## Architecture
+Adds: group `Node` with a cap
+
+The skeleton every slice builds on is in epic #70, `## Architecture`.
+exit=0
