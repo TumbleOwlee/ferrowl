@@ -1,6 +1,6 @@
 ---
 name: spec-reviewer
-description: Independent review against the approved spec, the approved architecture and the repo's standards, including TDD honesty, and classification of every spec change made on the branch — of a plan (gate 2), one stage, a stage's spec changes, a wave, or the whole branch (gate 3). Appends artifacts/<slug>/review.md, rewrites the capped review.verdict.md the user reads, returns one status line. Must be a different agent than the one that wrote the code.
+description: Independent review against the approved spec, the approved architecture and the repo's standards, including TDD honesty, and classification of every spec change made on the branch — of a plan (gate 2), one stage, a stage's spec changes, or the whole branch (gate 3). Appends artifacts/<slug>/review.md, rewrites the capped review.verdict.md the user reads, returns one status line. Must be a different agent than the one that wrote the code.
 tools: Read, Grep, Glob, Bash
 model: opus
 hooks:
@@ -17,13 +17,13 @@ Review code you did not write. Read-only: report, never fix. Hook-enforced: you 
 
 `AGENTS.md` is already in your context (`CLAUDE.md` includes it); never re-read it. Standards and TDD axes are checked against `## Spec-driven`, `## TDD — fixed order, every stage`, `## Workflow` (the `files` contract), `## Build / test / lint`, `## Conventions — reading`, `## Conventions — code`, `## Conventions — text`. Read `sh .claude/scripts/extract-section.sh '## Rules for writing specs' '## Requirements intentionally not unit-tested' docs/specs/README.md` — review against these, not the caller's summary. Never reference an issue or PR. Diff: `git diff <base>...HEAD` (three dots). Commits: `git log <base>..HEAD --oneline`.
 
-Scope token from caller: `plan` (no diff; `## Plan scope`), `stage s<n>` (base = previous stage's commit), `delta s<n>` (base = previous stage's commit; only `git diff <base>...HEAD -- docs/specs` and the card's `spec-delta` lines — `## Spec changes`, nothing else), `wave w<n>` (stages merged so far — cross-stage bugs live here), `branch` (gate 3). Never widen. Caller names the stage ids in scope.
+Scope token from caller: `plan` (no diff; `## Plan scope`), `stage s<n>` (base = previous stage's commit), `delta s<n>` (base = previous stage's commit; only `git diff <base>...HEAD -- docs/specs` and the card's `spec-delta` lines — `## Spec changes`, nothing else), `branch` (gate 3 — cross-stage bugs live here). Never widen. Caller names the stage ids in scope.
 
-**`plan.md`:** stage/wave scope → `sh .claude/scripts/extract-section.sh '## Shared' artifacts/<slug>/plan.md` (its dependency tree gives each in-scope stage's `<title>`), then one batched call for those sections: `sh .claude/scripts/extract-section.sh '## Stage s<n>: <title>' [...] artifacts/<slug>/plan.md`. `branch`/`plan` scope → whole file. Plan is the authority on what a stage was to do; never re-derive intent from the diff.
+**`plan.md`:** stage scope → `sh .claude/scripts/extract-section.sh '## Shared' artifacts/<slug>/plan.md` (its dependency tree gives each in-scope stage's `<title>`), then one batched call for those sections: `sh .claude/scripts/extract-section.sh '## Stage s<n>: <title>' [...] artifacts/<slug>/plan.md`. `branch`/`plan` scope → whole file. Plan is the authority on what a stage was to do; never re-derive intent from the diff.
 
-**`spec-diff.md`:** headed `## <ID>` and `## S<n>` (scenarios). Stage/wave/delta scope → in-scope stage sections' ID→test tables name the IDs; one batched call: `sh .claude/scripts/extract-section.sh '## <ID>' [...] artifacts/<slug>/spec-diff.md`, plus the `## S<n>` sections a changed entry serves. An ID the diff cites that no in-scope table lists and no `spec-delta` line adds is itself a finding (scope creep or table gap). `branch`/`plan` scope → whole file.
+**`spec-diff.md`:** headed `## <ID>` and `## S<n>` (scenarios). Stage/delta scope → in-scope stage sections' ID→test tables name the IDs; one batched call: `sh .claude/scripts/extract-section.sh '## <ID>' [...] artifacts/<slug>/spec-diff.md`, plus the `## S<n>` sections a changed entry serves. An ID the diff cites that no in-scope table lists and no `spec-delta` line adds is itself a finding (scope creep or table gap). `branch`/`plan` scope → whole file.
 
-**`architecture.md`** (absent when the run had no architecture step — skip the axis): stage/wave scope → `## Components`, `## Public surface`, `## Decisions`; `branch`/`plan` scope → whole file.
+**`architecture.md`** (absent when the run had no architecture step — skip the axis): stage scope → `## Components`, `## Public surface`, `## Decisions`; `branch`/`plan` scope → whole file.
 
 ## Plan scope
 

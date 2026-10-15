@@ -46,7 +46,7 @@ Every decision, asked or not, is recorded in `plan.md` `## Shared` under `Decisi
 ```
 # <slug> — plan summary (rev N)
 
-Decide: <n> stages, <chain s0 → s1 → s2 | waves possible: w1 [s1,s2], w2 [s3]>. <why no waves, one line, when a chain>
+Decide: <n> stages, <s0 → s1 → s2 …>. <why this cut, one line>
 
 Spec since architecture: <+R9 −R3 ~E2 | unchanged> · fixed IDs <n>
 
@@ -71,13 +71,11 @@ Out of scope, raise separately:
 Open: <decision the user still owes, or none>
 ```
 
-Existing-code references inline at the step: the exact signature/pattern to match, quoted verbatim where that removes ambiguity, anchored on a name or a quoted unique string (`fn parse_frame`, the `case Timeout:` arm) — never a line number (stale before the reviewer reads it), never a separate refs section. **The plan is the implementer's only codebase knowledge** (every implementer is a fresh spawn, sequential runs included): a step that sends it back into the codebase is incomplete — expand now. Steps point to `## Shared` for a reference it holds (`3. use retry helper — see Shared`).
+Existing-code references inline at the step: the exact signature/pattern to match, quoted verbatim where that removes ambiguity, anchored on a name or a quoted unique string (`fn parse_frame`, the `case Timeout:` arm) — never a line number (stale before the reviewer reads it), never a separate refs section. **The plan is the implementer's only codebase knowledge** (the implementer is a fresh spawn): a step that sends it back into the codebase is incomplete — expand now. Steps point to `## Shared` for a reference it holds (`3. use retry helper — see Shared`).
 
-Dependency tree, must hold under parallel reading:
+Dependency tree — stages run one at a time in plan order, so the tree records what each stage consumes, for review and resume:
 - stage depends on every stage producing what it consumes (type, module, fixture, config key)
-- any shared file between two stages = dependency, even different functions
-- state resulting waves explicitly; "none, it's a chain" is valid
-- you do not choose parallelism or agent count — user's call at gate 2
+- plan order respects every `blocked-by`
 
 ## Rules
 

@@ -33,11 +33,10 @@ Headings of `.claude/AGENTS.workflow.md`, one pull each (`AGENTS.md` `## Convent
 | Tracking issue — draft, file, changelog comments, rewrite at gate 4 | `### Tracking issue` |
 | Implement — every lane: spawn brief, draft PR | `#### Every stage` |
 | Implement — fast lane | `#### Fast lane` |
-| Implement — full lane, sequential mode | `#### Sequential`, `#### Per-stage review`, `#### Stage stop` |
-| Implement — full lane, parallel mode | `#### Parallel waves`, `#### Stage stop` |
+| Implement — full lane | `#### Full lane`, `#### Per-stage review`, `#### Stage stop` |
 | PR feedback — draft PR comments back into the run, before every approval stop once the draft exists | `### PR feedback` |
 | Spec changes — who edits the spec when, detail vs meaningful, split | `### Spec changes` |
 | Gate 3 — independent review | `### Gate 3 — review` |
-| Gate 4 — pull request | `### Gate 4 — pull request` |
-| After the human merges on GitHub — worktree and artifacts | `### After merge` |
+| Gate 4 — pull request, mark ready, CI | `### Gate 4 — pull request` |
+| Clean up — after the PR is ready and CI is green; the run's end | `### Clean up` |
 | Resume a dead run | `### Resume an interrupted run` |
