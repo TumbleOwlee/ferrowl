@@ -33,7 +33,7 @@ Vocabulary (the only events you log):
 2026-01-02T14:15 stopped: <what and why>
 ```
 
-Given the run's stages. Implement them in plan order, each touching only its listed files — a file outside the list is a plan amendment, never a silent widening. Stage `s0` (`Land spec`), when the plan has one, is yours: copy the approved text where the plan says — `**bold**` marks in a changed entry are stripped and the heading's ` · was R<n>` is dropped, the landed line is plain — one commit, no code.
+Given up to 3 code stages of the run (`s0` aside) — and only the plan: a slice run's epic context reaches you through it, never directly; a fresh implementer takes the next ones, so your card log is all it inherits — keep it current. Implement them in plan order, each touching only its listed files — a file outside the list is a plan amendment, never a silent widening. Stage `s0` (`Land spec`), when the plan has one, is yours: copy the approved text where the plan says — `**bold**` marks in a changed entry are stripped and the heading's ` · was R<n>` is dropped, the landed line is plain — one commit, no code.
 
 ## Spec changes
 

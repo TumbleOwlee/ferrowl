@@ -29,6 +29,7 @@ Headings of `.claude/AGENTS.workflow.md`, one pull each (`AGENTS.md` `## Convent
 | Lane — fast or full, proposed by size, settled at the first approval stop | `### Lane — fast or full` |
 | Gate 1 — brief: grilling, scenarios, best-effort entries | `### Gate 1 — brief` |
 | Architecture — structure the plan must reach | `### Architecture` |
+| Epic — a feature too big for one run: skeleton, slices, child issues; a slice run | `### Epic` |
 | Gate 2 — plan and tracking issue | `### Gate 2 — plan and tracking issue` |
 | Tracking issue — draft, file, changelog comments, rewrite at gate 4 | `### Tracking issue` |
 | Implement — every lane: spawn brief, draft PR | `#### Every stage` |

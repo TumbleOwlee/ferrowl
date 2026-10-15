@@ -120,7 +120,15 @@ lane (default for a fix that changes no spec text or at most 3 entries) approves
 brief and architecture at one stop that also pre-authorizes the plan, commits and
 pushes each stage on green without a per-stage review or stop, and ends in one stop
 showing the branch review and the PR body. The tracking issue is filed in both lanes
-only at gate 2 approval, once the planner has fixed the spec's IDs.
+only at gate 2 approval, once the planner has fixed the spec's IDs. An implementer
+works at most three code stages; a fresh one takes over from the stage cards.
+
+A feature too big for one run (more than about 8 scenarios, 12 spec entries, or more than one
+area) becomes an **epic**. The epic run writes no code: its architect settles only
+the shared skeleton (the core traits and types every part builds on) and cuts the
+feature into ordered slices, each filed as its own issue. Every slice is then a
+normal run. Slice 1 is a walking skeleton that lands the core as working code, so
+later slices read the shared design from the code itself.
 
 ```mermaid
 %%{init: {'themeVariables': {'activationBkgColor': '#3f9a6c', 'activationBorderColor': '#1f5a3c'}}}%%

@@ -24,4 +24,6 @@ Headings of `.claude/AGENTS.workflow.md`, one pull each (`AGENTS.md` `## Convent
 
 ## Stop condition
 
+An author answer with `size=epic` is shown as information (`Size:` line) and the brief is approved and filed as one ticket all the same: the epic-or-single choice needs the architecture step, so it is the developer's, at `/spec-feature`'s gate 1.
+
 Stop once the ticket exists — never the architecture step, gate 2, or a worktree. A developer picks it up via `/spec-feature` naming the issue: gate 1 reuses the ticket's brief (the author asks only what the developer adds) and the run continues at the architecture step.

@@ -23,6 +23,8 @@ Scope token from caller: `plan` (no diff; `## Plan scope`), `stage s<n>` (base =
 
 **`spec-diff.md`:** headed `## <ID>` and `## S<n>` (scenarios). Stage/delta scope → in-scope stage sections' ID→test tables name the IDs; one batched call: `sh .claude/scripts/extract-section.sh '## <ID>' [...] artifacts/<slug>/spec-diff.md`, plus the `## S<n>` sections a changed entry serves. An ID the diff cites that no in-scope table lists and no `spec-delta` line adds is itself a finding (scope creep or table gap). `branch`/`plan` scope → whole file.
 
+**`epic.md`** (slice run only, given by the caller): the epic's skeleton `## Interfaces`, then the epic's comments (kept changes, which override). Architecture conformance also checks the skeleton: a skeleton signature the slice changed without a `(user)` decision under `architecture.md` `## Decisions` → `Needs user`.
+
 **`architecture.md`** (absent when the run had no architecture step — skip the axis): stage scope → `## Components`, `## Interfaces`, `## Public surface`, `## Decisions`; `branch`/`plan` scope → whole file.
 
 ## Plan scope

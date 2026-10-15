@@ -17,7 +17,7 @@ End every turn with one status line, nothing else:
 
 ```
 status=question file=artifacts/<slug>/question.md count=<decisions>
-status=ready file=artifacts/<slug>/spec-diff.md count=<R + E entries>     # gate 1 brief
+status=ready file=artifacts/<slug>/spec-diff.md count=<R + E entries> [size=epic reason=<counts>]     # gate 1 brief
 status=no-diff file=artifacts/<slug>/spec-diff.md count=0                 # spec already covers the goal; file names the violated requirements
 status=ready file=artifacts/<slug>/<name>.md                              # issue-comment.md, split-issue.md, pr.md (after the gate 4 sync)
 status=reuse issue=<number> file=artifacts/<slug>/issue.md  |  status=new file=artifacts/<slug>/issue.md
@@ -27,7 +27,7 @@ status=reuse issue=<number> file=artifacts/<slug>/issue.md  |  status=new file=a
 
 Gate 1 is best effort: a shared understanding of what the feature does, not a finished spec. The architect and the planner refine every entry with the code in view, the implementer refines it again while building; detail anticipated now is detail rewritten later.
 
-Input: the user's goal, and `artifacts/<slug>/request.md` when the user named an issue — its user stories are the starting scenarios. `artifacts/<slug>/issue-spec.md` present too: the issue already carries an approved brief (a `/spec-request` ticket) — rebuild `spec-diff.md` from it (each scenario as `## S<n>`, each table row as its `## <ID>` section, `### Deferred` as `## Deferred`), then ask only what the developer's goal adds or the brief left open.
+Input: the user's goal, and `artifacts/<slug>/request.md` when the user named an issue — its user stories are the starting scenarios. `artifacts/<slug>/epic.md` present: the issue is one slice of an epic — stay inside the slice; the epic's other scenarios are out of scope, never asked. `artifacts/<slug>/issue-spec.md` present too: the issue already carries an approved brief (a `/spec-request` ticket) — rebuild `spec-diff.md` from it (each scenario as `## S<n>`, each table row as its `## <ID>` section, `### Deferred` as `## Deferred`), then ask only what the developer's goal adds or the brief left open.
 
 Hunt actively, every batch:
 - **scenarios** — each user story as one flow, then the missing ones: failure paths, cancel/abort, empty and limit inputs, restart/reconnect, concurrent use, interaction with the area's existing features; for a replacement, what happens to the old behavior, its config and saved sessions
@@ -37,6 +37,10 @@ Hunt actively, every batch:
 Ask only what changes scope (in/out), the user-visible flow, an edge-case outcome the user must choose, or a conflict with the existing spec. Never ask type, trait or function names, signatures, error variants, config-key spelling, module placement, test strategy, or anything only the code answers: list it under `## Deferred` with its owner and move on. A detail the user volunteers anyway is recorded `decided (user)` under its entry — it binds the architect and the planner.
 
 Stop asking once no scope, flow or conflict decision remains. After the second batch, propose stopping in the next `question.md`: every open point goes to `## Deferred` unless the user wants another round.
+
+**Slice IDs.** In a slice run, local IDs you add start at the slice number times 100 (`R301` in slice 3, from the issue's `**Part of epic**` line), never colliding with the epic's or another slice's.
+
+**Size.** A brief with more than about 8 scenarios, more than about 12 `R`/`E` entries, or entries in more than one area is too big for one run: add `size=epic reason=<the counts>` to the `ready` line — the user decides between an epic and a single run. Never for a slice (`epic.md` present). An epic's brief is complete for the whole feature but stays coarse: slicing it is the architect's.
 
 ## Questions
 
