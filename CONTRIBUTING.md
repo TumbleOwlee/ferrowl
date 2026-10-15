@@ -14,9 +14,7 @@ cargo build --release
 
 Run the app during development with `cargo run --release -- --demo` (starts a demo server) or see `--help` for all runtime options.
 
-Optionally install [lefthook](https://github.com/evilmartians/lefthook) and run
-`lefthook install` to get the pre-commit checks locally. The coverage gate also
-needs `cargo-llvm-cov`:
+Optionally install [lefthook](https://github.com/evilmartians/lefthook) and run `lefthook install` to get the pre-commit checks locally. The coverage gate also needs `cargo-llvm-cov`:
 
 ```sh
 cargo install cargo-llvm-cov --locked
@@ -24,24 +22,15 @@ cargo install cargo-llvm-cov --locked
 
 ## Project Layout
 
-The repository is a Cargo workspace building the `ferrowl` binary. See
-[`ARCHITECTURE.md`](./ARCHITECTURE.md) for the crate dependency graph and each
-crate's responsibility, and [`PRD.md`](./PRD.md) for the product framing.
+The repository is a Cargo workspace building the `ferrowl` binary. See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the crate dependency graph and each crate's responsibility, and [`PRD.md`](./PRD.md) for the product framing.
 
-Ferrowl is **spec-driven**: [`docs/specs/`](./docs/specs/) is the authoritative
-specification of what the software must do, split by capability area. The code is
-expected to conform to it. Before changing behavior, read the relevant area's
-`requirements.md` and `edge-cases.md`.
+Ferrowl is **spec-driven**: [`docs/specs/`](./docs/specs/) is the authoritative specification of what the software must do, split by capability area. The code is expected to conform to it. Before changing behavior, read the relevant area's `requirements.md` and `edge-cases.md`.
 
 ## Test-Driven Development
 
-Write the test first, watch it fail, then implement. A test written after the
-code it covers asserts what you built rather than what the specification
-requires — derive expected values from the authoritative source (protocol spec,
-upstream API), never from a debug print of your own implementation.
+Write the test first, watch it fail, then implement. A test written after the code it covers asserts what you built rather than what the specification requires — derive expected values from the authoritative source (protocol spec, upstream API), never from a debug print of your own implementation.
 
-Every new or changed requirement ships with at least one test whose doc comment
-cites the requirement ID, directly beside the test declaration:
+Every new or changed requirement ships with at least one test whose doc comment cites the requirement ID, directly beside the test declaration:
 
 ```rust
 #[test]
@@ -49,14 +38,9 @@ cites the requirement ID, directly beside the test declaration:
 fn ut_checksum_excludes_trailer() { /* … */ }
 ```
 
-A test may cite an edge-case ID (`MB-E-nnn`) in exactly the same position
-and form. A test whose assertions pin several rules lists every ID it pins,
-comma-separated (`/// MB-R-012, MB-R-157 — …`), and never an ID it does not
-assert; see `docs/specs/README.md` rule 8.
+A test may cite an edge-case ID (`MB-E-nnn`) in exactly the same position and form. A test whose assertions pin several rules lists every ID it pins, comma-separated (`/// MB-R-012, MB-R-157 — …`), and never an ID it does not assert; see `docs/specs/README.md` rule 8.
 
-Line coverage must stay at or above **80%**, enforced in CI. Coverage is a
-floor, not a goal — never pad it with tests that execute code without
-asserting on it.
+Line coverage must stay at or above **80%**, enforced in CI. Coverage is a floor, not a goal — never pad it with tests that execute code without asserting on it.
 
 ## Before Submitting
 
@@ -86,20 +70,9 @@ CI runs these as separate steps of the `check` pipeline — on every push **and 
 
 ## Agent Workflow
 
-Agents working in this repo follow the gated workflow in
-[`AGENTS.md`](./AGENTS.md) and [`.claude/AGENTS.workflow.md`](./.claude/AGENTS.workflow.md);
-human contributors are welcome to, but the checks above are the hard requirements.
-The diagram below is the map; the workflow file is the authority when they disagree.
+Agents working in this repo follow the gated workflow in [`AGENTS.md`](./AGENTS.md) and [`.claude/AGENTS.workflow.md`](./.claude/AGENTS.workflow.md); human contributors are welcome to, but the checks above are the hard requirements. The diagram below is the map; the workflow file is the authority when they disagree.
 
-How to read it: each lane is one participant. The user only ever talks to the
-orchestrator. The orchestrator spawns agents, relays one question at a time, moves
-task-board cards and runs SCM and tracker plumbing; it never reads or writes spec,
-code, plan or review content. Every agent writes its output to a file under
-`artifacts/<slug>/` (or into its worktree) and ends its turn with a one-line status;
-only file paths and status lines cross the lane into the orchestrator. An activation
-bar on a lane marks the span in which that agent exists; a bar that ends is an agent
-that is gone, and the next bar on the same lane is a fresh spawn with no memory of
-the previous one.
+How to read it: each lane is one participant. The user only ever talks to the orchestrator. The orchestrator spawns agents, relays one question at a time, moves task-board cards and runs SCM and tracker plumbing; it never reads or writes spec, code, plan or review content. Every agent writes its output to a file under `artifacts/<slug>/` (or into its worktree) and ends its turn with a one-line status; only file paths and status lines cross the lane into the orchestrator. An activation bar on a lane marks the span in which that agent exists; a bar that ends is an agent that is gone, and the next bar on the same lane is a fresh spawn with no memory of the previous one.
 
 Three interactions recur at every gate and are drawn as one arrow each:
 
@@ -108,27 +81,11 @@ Three interactions recur at every gate and are drawn as one arrow each:
 - **assembled text** — the issue body and the PR body are generated by scripts from the agents' files and the task board (`issue-body.sh`, `pr-body.sh`); no agent and no orchestrator writes them by hand. The issue body is the spec as filed, rewritten once more at gate 4 with the spec as merged; the draft PR body is the stage board, re-rendered on every card move. The run ends when the PR is marked ready: the human reviews and merges on GitHub.
 - **spec change** — the spec is drafted best effort and settles as the run learns. Before the spec lands, the architect and the planner edit it in place and ask the user only when a change contradicts a scenario or an earlier user decision. After it lands, the implementer edits `docs/specs/` in the stage commit and a fresh reviewer classifies each change: *detail* (fills a deferred point, sharpens wording) is listed, *meaningful* (contradicts a scenario, a user decision or the approved architecture, or changes what a user sees) goes to the user — keep, revert, or split into its own issue. A kept change after filing adds a short changelog comment to the issue.
 
-The entry point depends on the kind of change: a behavior change of any size starts
-at gate 1 (the brief); a non-behavior change (refactor, rename, test-only, docs,
-tooling) skips gate 1 and starts at the architecture step, which steps aside when no
-type, trait, module or public surface changes; a trivial edit (one file, no
-semantics) needs no gates, just a branch and a PR.
+The entry point depends on the kind of change: a behavior change of any size starts at gate 1 (the brief); a non-behavior change (refactor, rename, test-only, docs, tooling) skips gate 1 and starts at the architecture step, which steps aside when no type, trait, module or public surface changes; a trivial edit (one file, no semantics) needs no gates, just a branch and a PR.
 
-Every run also picks a **lane** at its first approval stop; the user chooses, and
-size sets the recommended default. The diagram draws the **full** lane. The **fast**
-lane (default for a fix that changes no spec text or at most 3 entries) approves
-brief and architecture at one stop that also pre-authorizes the plan, commits and
-pushes each stage on green without a per-stage review or stop, and ends in one stop
-showing the branch review and the PR body. The tracking issue is filed in both lanes
-only at gate 2 approval, once the planner has fixed the spec's IDs. An implementer
-works at most three code stages; a fresh one takes over from the stage cards.
+Every run also picks a **lane** at its first approval stop; the user chooses, and size sets the recommended default. The diagram draws the **full** lane. The **fast** lane (default for a fix that changes no spec text or at most 3 entries) approves brief and architecture at one stop that also pre-authorizes the plan, commits and pushes each stage on green without a per-stage review or stop, and ends in one stop showing the branch review and the PR body. The tracking issue is filed in both lanes only at gate 2 approval, once the planner has fixed the spec's IDs. An implementer works at most three code stages; a fresh one takes over from the stage cards.
 
-A feature too big for one run (more than about 8 scenarios, 12 spec entries, or more than one
-area) becomes an **epic**. The epic run writes no code: its architect settles only
-the shared skeleton (the core traits and types every part builds on) and cuts the
-feature into ordered slices, each filed as its own issue. Every slice is then a
-normal run. Slice 1 is a walking skeleton that lands the core as working code, so
-later slices read the shared design from the code itself.
+A feature too big for one run (more than about 8 scenarios, 12 spec entries, or more than one area) becomes an **epic**. The epic run writes no code: its architect settles only the shared skeleton (the core traits and types every part builds on) and cuts the feature into ordered slices, each filed as its own issue. Every slice is then a normal run. Slice 1 is a walking skeleton that lands the core as working code, so later slices read the shared design from the code itself.
 
 ```mermaid
 %%{init: {'themeVariables': {'activationBkgColor': '#3f9a6c', 'activationBorderColor': '#1f5a3c'}}}%%
@@ -290,10 +247,7 @@ sequenceDiagram
     end
 ```
 
-`.claude/tasks/` is the workflow's execution state: the directory a card sits in is
-its state (`open`, `inprogress`, `inreview`, `done`), so an interrupted session
-resumes instead of restarting. The directories are tracked, the cards inside are
-local and gitignored. Nothing there needs maintaining by hand.
+`.claude/tasks/` is the workflow's execution state: the directory a card sits in is its state (`open`, `inprogress`, `inreview`, `done`), so an interrupted session resumes instead of restarting. The directories are tracked, the cards inside are local and gitignored. Nothing there needs maintaining by hand.
 
 ## Reporting Issues
 
