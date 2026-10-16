@@ -17,7 +17,7 @@ Review code you did not write. Read-only: report, never fix. Hook-enforced: you 
 
 `AGENTS.md` is already in your context (`CLAUDE.md` includes it); never re-read it. Standards and TDD axes are checked against `## Spec-driven`, `## TDD — fixed order, every stage`, `## Workflow` (the `files` contract), `## Build / test / lint`, `## Conventions — reading`, `## Conventions — code`, `## Conventions — text`. Read `sh .claude/scripts/extract-section.sh '## Rules for writing specs' '## Requirements intentionally not unit-tested' docs/specs/README.md` — review against these, not the caller's summary. Never reference an issue or PR. Diff: `git diff <base>...HEAD` (three dots). Commits: `git log <base>..HEAD --oneline`.
 
-Scope token from caller: `plan` (no diff; `## Plan scope`), `stage s<n>` (base = previous stage's commit), `delta s<n>` (base = previous stage's commit; only `git diff <base>...HEAD -- docs/specs` and the card's `spec-delta` lines — `## Spec changes`, nothing else), `branch` (gate 3 — cross-stage bugs live here). Never widen. Caller names the stage ids in scope.
+Scope token from caller: `plan` (no diff; `## Plan scope`), `plan from s<n>` (a re-plan; `## Plan scope`, last paragraph), `stage s<n>` (base = previous stage's commit), `delta s<n>` (base = previous stage's commit; only `git diff <base>...HEAD -- docs/specs` and the card's `spec-delta` lines — `## Spec changes`, nothing else), `branch` (gate 3 — cross-stage bugs live here). Never widen. Caller names the stage ids in scope.
 
 **`plan.md`:** stage scope → `sh .claude/scripts/extract-section.sh '## Shared' artifacts/<slug>/plan.md` (its dependency tree gives each in-scope stage's `<title>`), then one batched call for those sections: `sh .claude/scripts/extract-section.sh '## Stage s<n>: <title>' [...] artifacts/<slug>/plan.md`. `branch`/`plan` scope → whole file. Plan is the authority on what a stage was to do; never re-derive intent from the diff.
 
@@ -41,6 +41,8 @@ Check `plan.md` against `spec-diff.md`, spec-fidelity axis only:
 - spec edits the planner made since the architecture stop are recorded (`Revisions:`, a `decided` line under each)
 - every stage's `files` list covers what its steps touch and matches `## Shared`
 - every stage title obeys `sh .claude/scripts/extract-section.sh '## Stage title' .claude/agents/spec-planner.md` and matches its heading and tree entry
+
+`plan from s<n>` — a re-plan after code landed: `diff artifacts/<slug>/plan.prev.md artifacts/<slug>/plan.md`. Any change to a section before `s<n>`, to `spec-diff.md` or a fixed ID is a blocker. Every rewritten stage gets the checks above that concern stages; every ID and scenario a replaced stage pinned is pinned by a rewritten stage or a committed one; a step that changes the spec names the entry it changes.
 
 ## Axes, reported separately
 
@@ -71,7 +73,7 @@ Resumed in the same scope with the `review.md` path and `follow-up`, after the a
 
 ## Output
 
-Append to `artifacts/<slug>/review.md` — append only, never rewrite earlier lines — under `## <scope> <date>`. One line per finding, **≤ 200 characters**: `<stage id> — path:line — severity — problem. fix: <fix>.` Severity ∈ {blocker, major, minor}. `<stage id>` from the plan (lets caller move the right card back to `inprogress/`); `—` if no single stage owns it. Group by axis; clean axis → one line saying so. A probe result worth keeping goes on its own indented line under the finding. A follow-up pass lists only what changed: resolved ids, still-open ids, new findings.
+Append to `artifacts/<slug>/review.md` — append only, never rewrite earlier lines — under `## <scope> <date>`. One line per finding, **≤ 200 characters**: `<stage id> — path:line — severity — problem. fix: <fix>.` Severity ∈ {blocker, major, minor}. `<stage id>` from the plan (lets caller move the right card back to `inprogress/`); `—` if no single stage owns it. Group by axis; clean axis → one line saying so. A probe result worth keeping goes on its own indented line under the finding. A follow-up pass lists only what changed: resolved ids, still-open ids, new findings. Something worth fixing outside the goal in code the diff does not touch (duplicated logic, a missing test elsewhere, a bug) is no finding: one `follow-up — <path> — <what> — <why it matters>` line, never on the verdict, never counted; outside-the-goal changes *in* the diff stay scope-creep findings.
 
 Then rewrite `artifacts/<slug>/review.verdict.md` whole (`>` or `tee`, never append) — the user's file, **≤ 25 lines / 2 KB** (`show-file.sh` refuses more). Current state only, no pass history (that is `review.md`). Findings anchor on `<crate> <file>` plus a function, test or arm name — never a line number. Blank line between blocks:
 
@@ -88,6 +90,7 @@ Architecture — clean | <n> findings above | n/a
 Standards — clean | <n> findings above
 TDD — clean | <n> findings above
 Docs — clean | <what is stale>
+Not checked — <what you could not verify, and why> | nothing
 
 Minors (<folded into s<n+1> | fixed before commit>)
 - <axis> — <crate> <file> `<name>`: <problem, ≤ 12 words>; <fix, ≤ 8 words>
@@ -99,7 +102,7 @@ Needs user
 - none
 ```
 
-Minors are information, never asked: `folded into s<n+1>` when a stage follows, `fixed before commit` when none does. Blockers and majors loop at most twice; a third pass lists what is still open under `Needs user`. Every `Needs user` item carries your recommendation. A clean pass still carries the axis lines — `Spec — 11 of 11 pinned` is the evidence. A `delta` scope verdict carries only `Verdict:`, `Spec changes`, `Needs user`.
+Minors are information, never asked: `folded into s<n+1>` when a stage follows, `fixed before commit` when none does. Blockers and majors loop at most twice; a third pass lists what is still open under `Needs user`. Every `Needs user` item carries your recommendation. A clean pass still carries the axis lines — `Spec — 11 of 11 pinned` is the evidence. `Not checked` is never omitted: a Verification step beyond unit tests (demo TUI, real CSMS, device) is one you cannot run — name it; `nothing` only when every claim was checked. A `delta` scope verdict carries only `Verdict:`, `Spec changes`, `Needs user`.
 
 Final message one line:
 

@@ -14,9 +14,10 @@
 #                      Confirm: every S/R/E of the sibling spec-diff.md that no slice or two slices claim
 #   plan.summary.md    Plan: (the Decide line) · Spec: (the Spec-since-architecture line) ·
 #                      Stops: (stages whose Stop column says yes) · Verification:
-#   review.verdict.md  Review: (the Verdict line) · Spec: · Spec changes: · Minors (…): · Needs user: — a block whose only item is `- none` is skipped
+#   review.verdict.md  Review: (the Verdict line) · Not checked: · Spec: · Spec changes: · Minors (…): · Needs user: — a block whose only item is `- none` is skipped
 #   issue.md           Issue: <title>
 #   split-issue.md     Split: <title>
+#   follow-up-<k>.md   Follow-up <k>: <title>
 #   pr.md              PR: <title>
 #   question.md        the whole file (it is written to be quoted)
 # then, once, over every file given: Confirm: with every `decided (chosen)`
@@ -83,12 +84,14 @@ for f in "$@"; do
         [ -n "$c" ] && confirm="$confirm$c$nl" ;;
     review.verdict.md)
         sed -n 's/^Verdict: /Review: /p' "$f"
+        sed -n 's/^Not checked — /Not checked: /p' "$f"
         sed -n 's/^Spec — /Spec: /p' "$f"
         sed -n 's/^Spec changes — none$//; s/^Spec changes — /Spec changes: /p' "$f"
         awk '/^Minors \(folded into / { on = 1; hdr = $0; next } on && /^- / { if ($0 == "- none") next; if (!p) { print hdr; p = 1 } print; next } on { on = 0 }' "$f"
         awk '/^Needs user/ { on = 1; next } on && /^(- |  - )/ { if ($0 == "- none") next; if (!p) { print "Needs user:"; p = 1 } print; next } on { on = 0 }' "$f" ;;
     issue.md) printf 'Issue: %s\n' "$(head -1 "$f" | sed 's/^# //')" ;;
     split-issue.md) printf 'Split: %s\n' "$(head -1 "$f" | sed 's/^# //')" ;;
+    follow-up-*.md) k=$(basename "$f" .md); printf 'Follow-up %s: %s\n' "${k#follow-up-}" "$(head -1 "$f" | sed 's/^# //')" ;;
     pr.md) printf 'PR: %s\n' "$(head -1 "$f" | sed 's/^# //')" ;;
     question.md) cat "$f" ;;
     esac

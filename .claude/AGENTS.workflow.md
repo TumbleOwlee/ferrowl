@@ -25,6 +25,7 @@ Gate 2 onward.
 - **One implementer at a time**, stages in plan order.
 - **The run ends when the PR is ready and CI is green** — then *Clean up* removes everything local. Merge happens outside the workflow.
 - **Every state change moves a task-board card.** State living only in conversation dies with the session.
+- **Every stop is logged** — before asking, the orchestrator appends `stop kind=<question|approval|stage|blocked>` to the parent card (`approval`: gate, architecture, epic, delta and re-plan stops). `metrics.sh` counts them at the end of the run. A workflow change that adds stops or agents names its expected effect on `metrics.log` in its PR.
 
 ### Lane — fast or full
 
@@ -47,7 +48,7 @@ Recommended full, user picks fast at the brief stop: the architecture stop is fa
 ### Verify before an approval stop
 
 By running, never by reading:
-- **Gauntlet** — `sh .claude/scripts/gauntlet.sh <worktree> .claude/tasks/artifacts/<slug>` in the agent's worktree: one status line in context, full output in `artifacts/<slug>/gauntlet.log`.
+- **Gauntlet** — `sh .claude/scripts/gauntlet.sh <worktree> .claude/tasks/artifacts/<slug>` in the agent's worktree: one status line in context, full output in `artifacts/<slug>/gauntlet.log`. The full set runs once per tree: a pass is cached by the worktree's tree, so the same tree again (committed, pushed) answers `gauntlet=pass … cached` at once. The implementer runs only fmt, clippy and its crates' tests; the full set is this one. `GAUNTLET_FORCE=1` reruns a cached tree.
 - **A fresh `spec-reviewer` per scope** — never the planner or implementer: one sharing the author's context reproduces its blind spots. A follow-up pass in the same scope (plan, a stage, a delta) **resumes that reviewer** (`SendMessage`) with the `review.md` path and `follow-up` (`spec-reviewer.md` `## Follow-up pass`). Fresh anyway when that reviewer is gone (a resumed session) and on every gate 3 `branch` pass — the last check before the PR gets fresh eyes. Plan scope: before resuming the planner with findings, the orchestrator snapshots `cp artifacts/<slug>/plan.md artifacts/<slug>/plan.prev.md`, so the follow-up diffs the revision itself instead of trusting the planner's account.
 - **Minors never wait for the user.** The verdict names where they go: `Minors (folded into s<n+1>)` when a stage follows, `Minors (fixed before commit)` when none does — a last stage, a branch review. Folded: the orchestrator logs each as `<ts> minor=<verdict line>` on the next stage's card and repeats them in the implementer's brief. Fixed before commit: the implementer is resumed with them at once, fixes, gauntlet, no re-review, then the stage's commit (fast lane: commit on green). Only `count>0` (blockers + majors) loops, and at most **two** fix-and-review rounds per scope: findings still open after the second round go to the user as `Needs user` items on the verdict.
 
@@ -58,6 +59,7 @@ Directory a card sits in **is** its state:
 ```
 .claude/tasks/
   open/  inprogress/  inreview/  done/   cards move between these
+  metrics.log          one line per finished run (metrics.sh), never cleaned up
   artifacts/<slug>/
     spec-diff.md       gate 1 brief, then the run's spec until s0 — local IDs until gate 2; synced from the branch at gate 4
     architecture.md    components, structure, interactions, public surface, code map — the plan's target
@@ -68,6 +70,7 @@ Directory a card sits in **is** its state:
     review.md          review findings + history, keyed by stage id, append-only
     review.verdict.md  open findings per stage, rewritten every pass, capped
     gauntlet.log       full build/test/lint output of the last gauntlet.sh run
+    gauntlet.pass      tree hash + coverage of the last passing tree, gauntlet.sh's cache
     question.md        an agent's batch of decisions for the user (*Relayed question*)
     slices.md          epic run: the ordered slices, each later its own issue (*Epic*)
     slice-<n>.md       epic run: slice n's assembled issue body
@@ -76,6 +79,7 @@ Directory a card sits in **is** its state:
     request.md         the request issue's original body, stored once (gate 1 or reuse)
     issue-comment.md   changelog comment of the latest user-approved spec change after filing
     split-issue.md     an issue split off (*Spec changes*)
+    follow-up-<k>.md   gate 4: an issue for something the run noticed outside its goal
     pr.md              gate 4 PR title + body (*Gate 4 — pull request*)
     pr-feedback.md     unresolved PR review threads (*PR feedback*)
 ```
@@ -102,7 +106,7 @@ branch: <type>/<slug>
 worktree: .claude/worktrees/<slug>
 ---
 2026-01-02T14:02 spawn agent=impl
-2026-01-02T14:12 gauntlet=pass
+2026-01-02T14:12 checks=pass crates=ferrowl-modbus
 ```
 
 Stage frontmatter `title` = the stage's display name, the text after `## Stage s<n>: ` in its `plan.md` heading.
@@ -135,7 +139,7 @@ status=<token> [file=<path>] [summary=<path>] [stage=s<n>] [issue=<n>] [reason=<
 | spec-author | `question` (`count=` decisions) · `ready` (`count=` `R`+`E` entries at gate 1; `size=epic reason=` when the brief is too big for one run) · `no-diff` (`count=0`) · `reuse` (`issue=`) · `new` — both with `file=` `issue.md` | `artifacts/<slug>/spec-diff.md`, `question.md`, `issue.md`, `issue-comment.md`, `split-issue.md`, `pr.md` | none — `prompt-lines.sh` quotes each file |
 | spec-architect | `question` (`count=` decisions) · `ready` (`count=` new + changed components; `slices=` path when it wrote an epic) · `no-arch` · `split` (`reason=`) · `behavior-change` (`reason=`, non-behavior run) | `artifacts/<slug>/architecture.md`, `question.md`, `slices.md` (epic); edits `spec-diff.md` | `artifacts/<slug>/architecture.summary.md` |
 | spec-planner | `question` (`count=` decisions) · `arch-gap` (`reason=`) · `split` (`reason=`) · `behavior-change` (`reason=`, non-behavior run) · `ready` (`count=` stages, `spec=` `spec-diff.md` revs it wrote) | `artifacts/<slug>/plan.md`, `question.md`; edits `spec-diff.md` | `artifacts/<slug>/plan.summary.md` |
-| spec-implementer | `inreview` · `committed` (both `delta=` spec changes) · `blocked` | stage card (`stage=`) | none — the card is the summary |
+| spec-implementer | `inreview` · `committed` (both `delta=` spec changes) · `question` (`count=` decisions) · `blocked` (`reason=`) | stage card (`stage=`), `question.md` | none — the card is the summary |
 | spec-reviewer | `clean` · `findings` (`count=` blockers+majors, `user=` `Needs user` items, `stage=` list) · `blocked` | `artifacts/<slug>/review.md` | `artifacts/<slug>/review.verdict.md` |
 
 `file` is lossless, for the next agent: as long as it must be. `summary` is for the user: decisions and open findings only, rewritten whole on every pass, capped at 25 lines / 2 KB (`show-file.sh` refuses a larger one and exits 3 — the agent trims it).
@@ -145,14 +149,14 @@ status=<token> [file=<path>] [summary=<path>] [stage=s<n>] [issue=<n>] [reason=<
 - Every approval of `spec-diff.md` logs `spec-rev=<N>` on the parent card (the rev `show-file.sh` named). A later stop showing it again runs `show-file.sh` with `PROMPT_SINCE_REV=<that N>`, so `Confirm:` carries only the `(chosen)` lines written since.
 - A status line naming a file the user must approve (`spec-diff.md`, `pr.md`, the `summary=` path — `architecture.summary.md`, `plan.summary.md`, `review.verdict.md` when it has a `Needs user` item): orchestrator runs `sh .claude/scripts/show-file.sh <path> [<path> ...]` before asking — every file of one approval stop in a single call; it opens each outside the context and prints, per file, one line naming how it was shown plus that file's quotable prompt lines (`prompt-lines.sh`), for the *Approval prompt*.
 
-Reviewer scope tokens: `plan` (gate 2), `stage s<n>`, `delta s<n>` (one stage's spec changes, *Spec changes*), `branch` (gate 3).
+Reviewer scope tokens: `plan` (gate 2), `plan from s<n>` (*Re-plan*), `stage s<n>`, `delta s<n>` (one stage's spec changes, *Spec changes*), `branch` (gate 3).
 
 ### Approval prompt
 
 Every approval stop is one message in this fixed shape, composed from `show-file.sh`'s quotable lines, the agents' status-line tokens and the stop's fixed lines from its section. A block absent from this stop is omitted; order is fixed. The user pulls one heading of the full file with `extract-section.sh` for the *why*.
 
 ```
-<Gate <n> | Architecture | Epic | Delta s<n>> · <slug> · <files shown, with rev> [· fast lane]
+<Gate <n> | Architecture | Epic | Delta s<n> | Re-plan from s<n>> · <slug> · <files shown, with rev> [· fast lane]
 Goal: <spec-diff.md's Goal line>
 Scenarios: <spec-diff.md's count and S-IDs>
 Entries: <spec-diff.md's counts and IDs>
@@ -170,11 +174,14 @@ Stops:
 - <stages the plan marks stop, with why>
 Issue: <new | reuse #<n>> — <issue.md's title>                                        ← new/reuse from the author's status line
 Split: <split-issue.md's title>
+Follow-ups:
+- <Follow-up <k>: title, one per follow-up-<k>.md>                                 ← all filed unless the answer narrows them
 Verification:
 - <plan.summary.md's lines>
 Confirm:
 - <prompt-lines.sh's single Confirm block over the shown files>                       ← or `Confirm: nothing flagged`
 Review: <verdict line>
+Not checked: <verdict's Not checked line>
 Spec: <n of m pinned …>
 Spec changes: <verdict's detail and need-you IDs>
 Minors (folded into <where>):
@@ -200,7 +207,7 @@ Question · <slug> · <gate or stage> · <agent> · <n> decisions
 Answer: <1: a · 2: b · …> · other <text>
 ```
 
-Answers go back to the **same** agent (`SendMessage`, never a respawn) in one message, numbered. A decision that depended on an answer arrives in the next `question.md`. A question without a real `Why you:` is sent back: the agent decides it and records `(chosen)`.
+Answers go back to the **same** agent (`SendMessage`, never a respawn) in one message, numbered. A decision marked `Assumes: <n> = <option>` is void when the user answered `<n>` otherwise; the agent asks it again in its next `question.md`, as it does a decision that depended on an answer and waited. A question without a real `Why you:` is sent back: the agent decides it and records `(chosen)`.
 
 ### Gate 1 — brief
 
@@ -244,7 +251,7 @@ A feature too big for one run: the author answered `size=epic`, or the architect
    1. File or rewrite the epic issue from `issue-body.sh <slug>` (*Tracking issue*); record `issue`.
    2. Per slice, in `slices.md` order: `sh .claude/scripts/issue-body.sh <slug> --slice <n> > artifacts/<slug>/slice-<n>.md`; an open issue already titled exactly as its line 1 (`gh issue list --state open --search "<title> in:title"`) is adopted, never filed twice — else `gh issue create` from it (title = line 1, body = the rest); then append the number to the parent card's `slices:` — a later slice's `Depends on` links it.
    3. Reassemble and edit the epic issue's body: its `## Slices` list now links every child.
-   4. *Clean up* — no worktree to remove; cards and artifacts go.
+   4. `sh .claude/scripts/metrics.sh <slug>`, then *Clean up* — no worktree to remove; cards and artifacts go.
    5. One notice line: `Epic · <slug> · #<e> · slices #a, #b, … filed · start with /spec-feature on #a`.
 
 The human closes the epic once its last slice merges.
@@ -334,7 +341,7 @@ Per stage:
 
 1. Green: card → `inreview`, `status=inreview stage=s<n>`. Orchestrator runs `gauntlet.sh` and the per-stage review below.
 2. Both clean → *Stage stop* rules decide: a rule fires → user approval stop; none fires → auto-continue (no stop). Either way the same implementer (resumed) commits, answers `status=committed`.
-3. Orchestrator pushes the worktree (push is never the implementer's), re-runs `gauntlet.sh` on the pushed sha, logs `gauntlet=pass sha=<sha>` on the parent card, card → `done`.
+3. Orchestrator pushes the worktree (push is never the implementer's), runs `gauntlet.sh` on the pushed sha (`cached` when the commit is the reviewed tree), logs `gauntlet=pass sha=<sha>` on the parent card, card → `done`.
 
 #### Per-stage review
 
@@ -367,6 +374,29 @@ Landed s2 · <slug> · review clean · gauntlet pass <cov> · pushed <sha> · sp
 **Stop:** the heading carries the rule's reason (`· stop: demo-TUI verification`); approving will commit s<n> · push, open or update the draft PR · spawn the next stage. Answer: `approve · change <what> · stop`.
 
 Log `auto=<rule-free>` or `stop=<rule n>` on the stage card. A user message while a stage is running is read before the next auto-continue; `stop` holds at the next green.
+
+#### Question and blocked stage
+
+Either lane.
+- `status=question` → *Relayed question*, headed with the stage id; the answers go to the same implementer.
+- `status=blocked` → one stop, the card stays where it is:
+
+```
+Blocked · <slug> · s<n> · <reason>
+Answer: answer <text> · re-plan · stop
+```
+
+- `answer` → relayed to the same implementer. `re-plan` → *Re-plan*, the reason verbatim. `stop` → the run halts; the board stays for *Resume an interrupted run*.
+- `re-plan: <why>` at any stage stop, or in reply to an auto-continue line → *Re-plan* with that reason.
+
+#### Re-plan
+
+Rewrites every stage without a commit on the branch, the current one included; a committed stage is never replanned.
+1. `from` = the lowest stage id whose card has no `commit=`. Log `replan from=s<n>` on the parent card, snapshot `cp artifacts/<slug>/plan.md artifacts/<slug>/plan.prev.md`. The current implementer is dropped, never resumed; its uncommitted work stays in the worktree.
+2. Fresh `spec-planner` (*Gate 2* input, plus `mode=replan from=s<n>`, the reason verbatim, the worktree path). `question`, `arch-gap` and `split` as at gate 2.
+3. `ready` → fresh `spec-reviewer`, scope `plan from s<n>`; rounds per *Verify before an approval stop*.
+4. **Stop**, either lane: `show-file.sh` on `plan.summary.md` (plus `review.verdict.md` with a `Needs user` item), *Approval prompt* headed `Re-plan · <slug> · from s<n>`. Approving will: replace the cards of `s<n>` onward · update the draft PR · spawn a fresh implementer at `s<n>`. Answer: `approve [stop: s4,s5] · switch lane · change <what> · stop`.
+5. On approval: append every card-to-replace's `spec-delta … added` lines to the parent card (`grep -h ' spec-delta .* added' <cards> >> <parent card>`, so their IDs stay retired), delete those cards, create the new ones as *Gate 2* step 4, log `replan=approved`, render the draft PR body, spawn the implementer (*Every stage*); its brief says the worktree holds the dropped implementer's uncommitted work.
 
 ### PR feedback
 
@@ -429,14 +459,14 @@ Before proposing a PR, whole-branch pass — cross-stage bugs, spec drift across
 
 - Gauntlet + gate 3 clean, *PR feedback* at `threads=0`.
 - **ID collisions** — another run may have landed the same fixed IDs meanwhile: `git -C <worktree> fetch -q origin main && sh .claude/scripts/id-collisions.sh <worktree>`. `ids=collide <IDs>` → resume the implementer to renumber them on the branch (spec, test citations, `spec-delta` log), gauntlet, push, check again.
-- `spec-author`, given the worktree path, syncs `spec-diff.md` from the branch's `docs/specs/` and writes `artifacts/<slug>/pr.md` in **full form** (content rules in its file; `.github/PULL_REQUEST_TEMPLATE.md` carries the same sections for human PRs). Orchestrator assembles both bodies:
+- `spec-author`, given the worktree path and the board root, syncs `spec-diff.md` from the branch's `docs/specs/`, writes `artifacts/<slug>/pr.md` in **full form** and one `follow-up-<k>.md` per thing the run noticed outside its goal (implementer cards' `follow-up` lines, `review.md`'s `follow-up — ` lines; answers `follow-ups=<n>`) (content rules in its file; `.github/PULL_REQUEST_TEMPLATE.md` carries the same sections for human PRs). Orchestrator assembles both bodies:
 
 ```sh
 sh .claude/scripts/issue-body.sh <slug> > artifacts/<slug>/issue-body.md
 sh .claude/scripts/pr-body.sh <slug> full > artifacts/<slug>/pr-full.md
 ```
 
-- **One stop**: `show-file.sh` on `pr.md` (fast lane: plus `review.verdict.md`, per *Agent hand-off*); approving will push · rewrite issue #<n>'s body with the merged spec · replace the draft's title and body · mark #<pr> ready · wait for CI · clean up. Answer: `approve · manual run first · change <what> · stop` — the user may want a manual run; don't pre-empt it. Approved → push, rewrite the issue body, replace the draft's title and body, mark ready, log `pr=ready`:
+- **One stop**: `show-file.sh` on `pr.md` and every `follow-up-<k>.md` (fast lane: plus `review.verdict.md`, per *Agent hand-off*); approving will push · rewrite issue #<n>'s body with the merged spec · replace the draft's title and body · mark #<pr> ready · file the <n> follow-up issues · wait for CI · clean up. Answer: `approve [follow-ups: 1,3 | none] · manual run first · change <what> · stop` — no list files every follow-up — the user may want a manual run; don't pre-empt it. Approved → push, rewrite the issue body, replace the draft's title and body, mark ready, log `pr=ready`:
 
 ```sh
 gh issue edit <n> --body-file <(tail -n +2 artifacts/<slug>/issue-body.md)
@@ -445,18 +475,19 @@ gh pr ready <pr>
 ```
 
 - No draft exists (run predates this rule, or resumed from a board that lacks `pr`): `gh pr create` with the same title and body file instead of `edit`+`ready`.
+- **Follow-ups**, right after `pr=ready`: each one the answer kept is filed as in *Tracking issue* (title = line 1, body = the rest) with `Found in #<issue>` appended as its last line; log `follow-ups=[<n>, …]` on the parent card. A dropped one is never filed.
 - **CI** — wait for the PR's checks, one status line in context:
 
 ```sh
 gh pr checks <pr> --watch > artifacts/<slug>/ci.log 2>&1; echo "ci=$?"
 ```
 
-  - `ci=0` → *Clean up*.
+  - `ci=0` → `sh .claude/scripts/metrics.sh <slug>`, then *Clean up*.
   - otherwise → `bash .claude/scripts/failed-workflow.sh <branch>`, never raw `gh run view`; implicated stage card → `inprogress/`, resume or spawn the implementer to fix, gauntlet, push, wait again. No stop unless a fix needs a user decision.
 
 ### Clean up
 
-The run's last step, right after CI is green — no approval stop: the issue and the PR hold everything that outlives the run. The human reviews and merges on GitHub, outside the workflow.
+The run's last step, right after CI is green and `metrics.sh` has run — no approval stop: the issue and the PR hold everything that outlives the run, `metrics.log` its cost. The human reviews and merges on GitHub, outside the workflow.
 
 ```sh
 sh .claude/scripts/run-cleanup.sh <slug>
@@ -484,5 +515,7 @@ Cards outside `open/`+`done/`, no agent running = session died mid-run. Resume t
 | PR `## Stages` | the PR body vs `pr-body.sh <slug> draft` | body behind the board: a move never rendered, `gh pr edit` with the fresh render |
 
 Report differences first. Agree → resume. Disagree → stop and report.
+
+A `replan from=` line with no later `replan=approved` on the parent card → the re-plan is pending: rerun *Re-plan* from step 2 with a fresh planner; `plan.prev.md` is already the snapshot.
 
 Clean reconcile → resume only no-approval work (respawn the implementer for approved stages, CI wait and *Clean up* after `pr=ready`); halt at the first gate needing the user. Recorded `gate1`/`arch`/`gate2` approvals stay valid — the fast lane's pre-authorization too: `arch` set, `lane: fast`, no `gate2` → plan, then gate 2's *On approval* without a stop. A resumed run spawns every agent fresh (the architect, the author and the planner re-read their files).

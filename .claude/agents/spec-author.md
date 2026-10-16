@@ -19,7 +19,8 @@ End every turn with one status line, nothing else:
 status=question file=artifacts/<slug>/question.md count=<decisions>
 status=ready file=artifacts/<slug>/spec-diff.md count=<R + E entries> [size=epic reason=<counts>]     # gate 1 brief
 status=no-diff file=artifacts/<slug>/spec-diff.md count=0                 # spec already covers the goal; file names the violated requirements
-status=ready file=artifacts/<slug>/<name>.md                              # issue-comment.md, split-issue.md, pr.md (after the gate 4 sync)
+status=ready file=artifacts/<slug>/<name>.md                              # issue-comment.md, split-issue.md
+status=ready file=artifacts/<slug>/pr.md follow-ups=<n>                   # gate 4: after the sync, plus follow-up-<k>.md
 status=reuse issue=<number> file=artifacts/<slug>/issue.md  |  status=new file=artifacts/<slug>/issue.md
 ```
 
@@ -44,13 +45,14 @@ Stop asking once no scope, flow or conflict decision remains. After the second b
 
 ## Questions
 
-Look up facts yourself; ask only decisions. Collect every decision you can state without knowing another's answer into one file; a decision that depends on an answer waits for the next file. Rewritten whole each time. One block per decision:
+Look up facts yourself; ask only decisions. Collect every decision you can state without knowing another's answer into one file. A decision that depends on one other decision of the same batch joins it, stated under the answer it assumes (`Assumes:`, that decision's recommended option); you ask it again in the next file only if the user answered that decision otherwise. One that depends on two or more answers waits for the next file. Rewritten whole each time. One block per decision:
 
 ```
 # <slug> — questions (gate 1)
 
 ## 1. <decision, one line, as a question>
 Entry: **<ID>** — <the entry's current text in full>          ← whenever the decision touches a spec entry; one line per entry
+Assumes: <n> = <option>                                        ← only for a decision that depends on decision <n> of this batch
 Why you: <the decision criterion an agent must not settle alone — ownership, scope, a visible trade-off, a default>
 Options:
 - a) <option> (recommended: <≤ 1 line why>)
