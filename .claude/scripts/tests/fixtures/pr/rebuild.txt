@@ -1,0 +1,36 @@
+#22 Reconnect dropped Modbus clients [OPEN]
+https://github.com/o/r/pull/22
+by someone
+
+Draft · lane full · spec rev 3 · gauntlet green at SHA1
+
+## Why
+A client tab reconnects on its own after the server drops the connection.
+
+## Scenarios
+The 1 scenario of #21: S1 Server restarts during polling
+
+## Stages
+- [x] Land spec (SHA0) <!-- s0 -->
+- [x] Retry with backoff (SHA1) <!-- s1 blocked-by s0 -->
+- [ ] Render reconnecting — next <!-- s2 blocked-by s1 -->
+  - beyond unit tests: demo TUI
+    - see "reconnecting" in the tab
+
+## Review here
+- on the branch: Land spec, Retry with backoff — inline comments on their files are answered before the next stop
+- later stages land after their review and the user's approval
+
+## Architecture
+1 new, 1 changed components in ferrowl-modbus; the backoff is owned by the client task
+
+| Component | Kind | Crate › module | Change | Role |
+|---|---|---|---|---|
+| `Backoff` | struct | ferrowl-modbus › client::reconnect | new | delay doubling from 1s to 30s |
+| `ClientState` | enum | ferrowl-modbus › client | changed | new `Reconnecting` variant |
+
+Public surface:
+- `ClientState::Reconnecting`
+
+Closes #21
+--- 0 comment(s) ---

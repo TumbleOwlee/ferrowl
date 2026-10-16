@@ -1,0 +1,20 @@
+#22 Reconnect dropped Modbus clients [OPEN]
+https://github.com/o/r/pull/22
+by someone
+
+Ready · lane full · spec rev 3 · gauntlet green at SHA1 · CI green
+
+## Why
+A client tab reconnects on its own after the server drops the connection.
+
+## Scenarios
+The 1 scenario of #21: S1 Server restarts during polling
+
+## Requirements
+- **MB-R-001** The client connects over TCP.
+
+## Review here
+- everything is on the branch
+
+Closes #21
+--- 0 comment(s) ---

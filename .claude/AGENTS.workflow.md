@@ -23,7 +23,7 @@ Gate 2 onward.
 - **The draft PR is the user's review surface** (*Every stage*; promoted at *Gate 4 — pull request*). Feedback re-enters the run only through *PR feedback*.
 - **One git worktree per run**, `.claude/worktrees/<slug>` — inside project dir (agent-reachable), gitignored. Created only once gate 2 is approved (first thing to touch disk); removed by *Clean up* at the end of gate 4.
 - **One implementer at a time**, stages in plan order.
-- **The run ends when the PR is ready and CI is green** — then *Clean up* removes everything local. Merge happens outside the workflow.
+- **The run ends when the PR is ready and CI is green** — then *Clean up* removes the worktree and local branch and archives the board. Merge happens outside the workflow.
 - **Every state change moves a task-board card.** State living only in conversation dies with the session.
 - **Every stop is logged** — before asking, the orchestrator logs `stop kind=<question|approval|stage|blocked|delta|replan>` to the parent card (`approval`: gate, architecture, epic, delta and re-plan stops). `metrics.sh` counts them at the end of the run. A workflow change that adds stops or agents names its expected effect on `metrics.log` in its PR.
 
@@ -60,6 +60,7 @@ Directory a card sits in **is** its state:
 .claude/tasks/
   open/  inprogress/  inreview/  done/   cards move between these
   metrics.log          one line per finished run (metrics.sh), never cleaned up
+  archive/<slug>/      cards/ + artifacts/ of a finished run (run-cleanup.sh), never cleaned up
   artifacts/<slug>/
     spec-diff.md       gate 1 brief, then the run's spec until s0 — local IDs until gate 2; synced from the branch at gate 4
     architecture.md    components, structure, interactions, public surface, code map — the plan's target
@@ -120,7 +121,7 @@ Parent frontmatter: `kind: epic|slice` (absent on a plain run), `epic` (slice ru
 | Card | `open` | `inprogress` | `inreview` | `done` |
 |---|---|---|---|---|
 | stage | created from plan | agent took it | green; under review (fast lane: already committed) | committed, pushed and orchestrator-verified; full lane also reviewed and approved or auto-continued |
-| parent | gate 1, architecture or gate 2 pending | implementing | gate 3/4, until *Clean up* deletes it | — never: the run ends in *Clean up* |
+| parent | gate 1, architecture or gate 2 pending | implementing | gate 3/4, until *Clean up* archives it | — never: the run ends in *Clean up* |
 
 Rules:
 - **No agent writes its own `done`** — the orchestrator's move (table above).
@@ -406,7 +407,7 @@ Answer: answer <text> · re-plan · stop
 #### Re-plan
 
 Rewrites every stage without a commit on the branch, the current one included; a committed stage is never replanned.
-1. `from` = the lowest stage id whose card has no `commit=`. Log `replan from=s<n>` on the parent card, snapshot `cp artifacts/<slug>/plan.md artifacts/<slug>/plan.prev.md`. The current implementer is dropped, never resumed; its uncommitted work stays in the worktree.
+1. `from` = the lowest stage id whose card has no `commit=`. Log `replan from=s<n>` on the parent card, snapshot `cp artifacts/<slug>/plan.md artifacts/<slug>/plan.prev.md` (no `plan.md`, a rebuilt board → no snapshot). The current implementer is dropped, never resumed; its uncommitted work stays in the worktree.
 2. Fresh `spec-planner` (*Gate 2* input, plus `mode=replan from=s<n>`, the reason verbatim, the worktree path). `question`, `arch-gap` and `split` as at gate 2.
 3. `ready` → fresh `spec-reviewer`, scope `plan from s<n>`; rounds per *Verify before an approval stop*.
 4. **Stop**, either lane: `show-file.sh` on `plan.summary.md` (plus `architecture.summary.md` when its rev moved since the `arch` approval — an arch-gap during the re-plan — and `spec-diff.md` when its rev moved, both with `PROMPT_SINCE_REV`; `review.verdict.md` with a `Needs user` item), *Approval prompt* headed `Re-plan · <slug> · from s<n>`. Approving will: replace the cards of `s<n>` onward · update the draft PR · spawn a fresh implementer at `s<n>`. Answer: `approve [stop: s4,s5] · switch lane · change <what> · stop`.
@@ -505,9 +506,13 @@ The run's last step, right after CI is green and `metrics.sh` has run — no app
 sh .claude/scripts/run-cleanup.sh <slug>
 ```
 
-It refuses (exit 1, one line) while the worktree has uncommitted changes or commits its upstream lacks; else it removes the worktree, deletes the local branch (the pushed one stays for the PR), every card of the run and `artifacts/<slug>/`, and prints `cleanup=done`. One notice line: `Done · <slug> · PR #<pr> ready · CI green · cleaned up`.
+It refuses (exit 1, one line) while the worktree has uncommitted changes or commits its upstream lacks; else it removes the worktree, deletes the local branch (the pushed one stays for the PR) and moves every card and `artifacts/<slug>/` into `.claude/tasks/archive/<slug>/` (never pruned; a second run of the same slug gets a dated name), printing `cleanup=done archive=<path>`. One notice line: `Done · <slug> · PR #<pr> ready · CI green · cleaned up · archived`.
 
 ### Resume an interrupted run
+
+**Step 0.** `git -C <main checkout> pull --ff-only` before reading anything.
+
+**No card, PR exists** (the user names the issue and its draft PR): `sh .claude/scripts/run-rebuild.sh <issue> <pr>`. `rebuild=done … next=s<n>` → the reconcile table below, then *Re-plan* from `next=` with a fresh planner (`plan.md` is never rebuilt; `next=none` → *Gate 3*). `rebuild=refused reason=no-stages` → the PR is ready: CI check, then *Clean up*. No PR → gate 1 with "take issue #n". Any other refusal → report it.
 
 Cards outside `open/`+`done/`, no agent running = session died mid-run. Resume triggered by the user or `/spec-feature`, never automatic.
 

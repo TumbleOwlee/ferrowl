@@ -8,8 +8,11 @@
 # Refuses, changing nothing, while the worktree has uncommitted changes or
 # commits its upstream lacks — the PR would not carry them. Else removes the
 # worktree .claude/worktrees/<slug>, deletes its local branch (the pushed one
-# stays for the PR), every card of the run and .claude/tasks/artifacts/<slug>/.
-# Prints `cleanup=done` or `cleanup=refused reason=<…>` (exit 1).
+# stays for the PR), then moves every card of the run to
+# .claude/tasks/archive/<slug>/cards/ and artifacts/<slug>/ to
+# archive/<slug>/artifacts/ (an existing archive/<slug> becomes
+# archive/<slug>-<UTC yyyymmddThhmmssZ>); the archive is never pruned.
+# Prints `cleanup=done archive=<path | none>` or `cleanup=refused reason=<…>` (exit 1).
 [ $# -eq 1 ] || { echo "usage: $0 <slug>" >&2; exit 2; }
 slug=$1
 root=${CLAUDE_PROJECT_DIR:-.}
@@ -26,8 +29,23 @@ if [ -d "$wt" ]; then
     git -C "$root" worktree remove "$wt" || refuse "worktree-remove-failed"
     git -C "$root" branch -D "$branch" >/dev/null || refuse "branch-delete-failed"
 fi
-for d in open inprogress inreview done; do
-    rm -f "$board/$d/$slug.md" "$board/$d/$slug".s[0-9]*.md
-done
-rm -rf "${board:?}/artifacts/$slug"
-echo "cleanup=done"
+set -- "$board"/open/"$slug".md "$board"/open/"$slug".s[0-9]*.md "$board"/inprogress/"$slug".md "$board"/inprogress/"$slug".s[0-9]*.md \
+    "$board"/inreview/"$slug".md "$board"/inreview/"$slug".s[0-9]*.md "$board"/done/"$slug".md "$board"/done/"$slug".s[0-9]*.md
+have=
+for c in "$@"; do [ ! -e "$c" ] || have=1; done
+if [ -z "$have" ] && [ ! -d "$board/artifacts/$slug" ]; then echo "cleanup=done archive=none"; exit 0; fi
+mkdir -p "$board/archive" 2>/dev/null
+dest=$board/archive/$slug
+if ! mkdir "$dest" 2>/dev/null; then
+    [ -e "$dest" ] || refuse "archive-failed"
+    stamp=${CLEANUP_NOW:-$(date -u +%Y%m%dT%H%M%SZ)}; n=0
+    dest=$board/archive/$slug-$stamp
+    while ! mkdir "$dest" 2>/dev/null; do
+        [ -e "$dest" ] || refuse "archive-failed"
+        n=$((n + 1)); dest=$board/archive/$slug-$stamp-$n
+    done
+fi
+mkdir "$dest/cards" || refuse "archive-failed"
+for c in "$@"; do [ ! -e "$c" ] || mv "$c" "$dest/cards/"; done
+[ ! -d "$board/artifacts/$slug" ] || mv "$board/artifacts/$slug" "$dest/artifacts"
+echo "cleanup=done archive=$dest"

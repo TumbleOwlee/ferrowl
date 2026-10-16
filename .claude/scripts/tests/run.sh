@@ -311,12 +311,81 @@ printf 'target/\n' >> "$W/.gitignore"; g "$W" add .gitignore; g "$W" commit -q -
 mkdir -p "$W/target" && printf 'build\n' > "$W/target/out"
 out=$(cleanup)
 B=$tmp/r/.claude/tasks
-if [ "$out" = cleanup=done ] && [ ! -e "$W" ] && ! git -C "$tmp/r" rev-parse --verify -q feat/demo >/dev/null \
+if [ "$out" = "cleanup=done archive=$B/archive/demo" ] && [ ! -e "$W" ] && ! git -C "$tmp/r" rev-parse --verify -q feat/demo >/dev/null \
     && git -C "$tmp/remote.git" rev-parse --verify -q feat/demo >/dev/null \
     && [ ! -e "$B/artifacts/demo" ] && [ -z "$(ls "$B"/*/demo.md "$B"/*/demo.s*.md 2>/dev/null)" ] \
+    && [ -e "$B/archive/demo/cards/demo.md" ] && [ -e "$B/archive/demo/cards/demo.s0.md" ] && [ -e "$B/archive/demo/artifacts/issue.md" ] \
     && [ -e "$B/artifacts/nospec/issue.md" ] && [ -e "$B/inreview/nospec.md" ]; then ok cleanup-done
 else bad cleanup-done "$out"; fi
-out=$(cleanup); [ "$out" = cleanup=done ] && ok cleanup-idempotent || bad cleanup-idempotent "$out"
+out=$(cleanup); [ "$out" = "cleanup=done archive=none" ] && ok cleanup-idempotent || bad cleanup-idempotent "$out"
+mkdir -p "$B/artifacts/demo"; echo x > "$B/artifacts/demo/issue.md"; printf -- '---\nid: demo\n---\n' > "$B/inprogress/demo.md"
+out=$(cleanup)
+case $out in "cleanup=done archive=$B/archive/demo-"[0-9]*T[0-9]*Z) [ -e "${out#*archive=}/cards/demo.md" ] && ok cleanup-collision || bad cleanup-collision "$out" ;; *) bad cleanup-collision "$out" ;; esac
+leftover() { mkdir -p "$B/artifacts/demo"; printf -- '---\nid: demo\n---\n' > "$B/inprogress/demo.md"; }
+leftover; out2=$(CLEANUP_NOW=20260101T000000Z cleanup)
+leftover; out3=$(CLEANUP_NOW=20260101T000000Z cleanup)
+[ "$out2" = "cleanup=done archive=$B/archive/demo-20260101T000000Z" ] && [ "$out3" = "cleanup=done archive=$B/archive/demo-20260101T000000Z-1" ] \
+    && [ -e "$B/archive/demo-20260101T000000Z/cards/demo.md" ] && [ -e "$B/archive/demo-20260101T000000Z-1/cards/demo.md" ] && ok cleanup-same-second || bad cleanup-same-second "$out2 / $out3"
+if [ "$(id -u)" != 0 ]; then
+    leftover; chmod a-w "$B/archive"
+    out=$(CLEANUP_NOW=20260101T000001Z cleanup); chmod u+w "$B/archive"
+    [ "$out" = "cleanup=refused reason=archive-failed" ] && [ -e "$B/inprogress/demo.md" ] && ok cleanup-archive-unwritable || bad cleanup-archive-unwritable "$out"
+    rm -rf "$B/artifacts/demo" "$B/inprogress/demo.md"
+fi
+
+# --- run-rebuild.sh: a lost board rebuilt from a stubbed issue, a stubbed draft PR and the branch
+g "$tmp/r" checkout -q main
+mkdir -p "$tmp/r/docs/specs/modbus"
+printf '## Client\n\n**MB-R-001** — The client connects.\n' > "$tmp/r/docs/specs/modbus/requirements.md"
+g "$tmp/r" add docs; g "$tmp/r" commit -q -m spec; g "$tmp/r" push -q origin main 2>/dev/null
+git -C "$tmp/r" worktree add -q "$tmp/rbsrc" -b docs/rb main
+printf '## Client\n\n**MB-R-001** — The client connects over TCP.\n' > "$tmp/rbsrc/docs/specs/modbus/requirements.md"
+g "$tmp/rbsrc" commit -q -am change; SHA0=$(git -C "$tmp/rbsrc" rev-parse --short HEAD)
+printf '**MB-R-002** — The client polls.\n' >> "$tmp/rbsrc/docs/specs/modbus/requirements.md"
+printf '## Client\n\n| ID | Condition | Behavior |\n|---|---|---|\n| **MB-E-001** | Slow server | poll skipped |\n' > "$tmp/rbsrc/docs/specs/modbus/edge-cases.md"
+g "$tmp/rbsrc" add docs; g "$tmp/rbsrc" commit -q -am more; SHA1=$(git -C "$tmp/rbsrc" rev-parse --short HEAD)
+g "$tmp/rbsrc" push -q origin docs/rb 2>/dev/null
+git -C "$tmp/r" worktree remove --force "$tmp/rbsrc"; git -C "$tmp/r" branch -D docs/rb >/dev/null
+mkdir -p "$tmp/rb" "$tmp/bin"
+cp "$scripts/run-rebuild.sh" "$scripts/card-log.sh" "$scripts/card-field.sh" "$tmp/rb/"
+printf '#!/bin/sh\ncat "$ISSUE_FIXTURE"\n' > "$tmp/rb/issue-view.sh"
+printf '#!/bin/sh\nsed "s/SHA0/$SHA0/; s/SHA1/$SHA1/" "$PR_FIXTURE"\n' > "$tmp/rb/pr-view.sh"
+printf '#!/bin/sh\necho docs/rb\n' > "$tmp/bin/gh"; chmod +x "$tmp/bin/gh"
+RB=$tmp/r/.claude/tasks
+rb_clear() { rm -rf "$RB"/artifacts/rb "$RB"/*/rb.md "$RB"/*/rb.s[0-9]*.md; }
+rb_run() {
+    (cd "$tmp/r" && PATH=$tmp/bin:$PATH CLAUDE_PROJECT_DIR=$tmp/r ISSUE_FIXTURE=${RB_ISSUE:-$fx/issue/rebuild.txt} PR_FIXTURE=${RB_PR:-$fx/pr/${1:-rebuild}.txt} SHA0=$SHA0 SHA1=$SHA1 sh "$tmp/rb/run-rebuild.sh" 21 22)
+}
+rb_files() {
+    for f in inprogress/rb.md done/rb.s0.md done/rb.s1.md open/rb.s2.md artifacts/rb/issue.md artifacts/rb/spec-diff.md artifacts/rb/plan.summary.md artifacts/rb/architecture.summary.md artifacts/rb/architecture.md; do
+        echo "==> $f <=="; cat "$RB/$f"
+    done | sed -E "s/20[0-9]{2}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2})?/<today>/; s/$SHA0/SHA0/; s/$SHA1/SHA1/"
+}
+rb_clear
+golden run-rebuild-done rb_run
+golden run-rebuild-files rb_files
+git -C "$tmp/r" worktree list | grep -q '\.claude/worktrees/rb ' && ok run-rebuild-worktree || bad run-rebuild-worktree "the branch is checked out at .claude/worktrees/rb"
+golden run-rebuild-exists rb_run
+rb_clear
+golden run-rebuild-no-stages rb_run ready
+
+rb_clear
+sed 's/SHA0/deadbee/' "$fx/pr/rebuild.txt" > "$tmp/pr-badsha.txt"
+RB_PR=$tmp/pr-badsha.txt golden run-rebuild-sha rb_run
+[ -z "$(ls "$RB"/*/rb.md "$RB"/*/rb.s[0-9]*.md 2>/dev/null)" ] && [ ! -e "$RB/artifacts/rb" ] && ok run-rebuild-sha-writes-nothing || bad run-rebuild-sha-writes-nothing "a refused rebuild leaves the board alone"
+RB_ISSUE=$tmp/none.txt golden run-rebuild-no-issue rb_run
+mkdir -p "$RB/artifacts/rb"
+golden run-rebuild-exists-artifacts rb_run
+rb_clear
+rm -rf "$tmp/r/.claude/worktrees/rb"
+golden run-rebuild-stale rb_run
+[ -d "$tmp/r/.claude/worktrees/rb/docs" ] && ok run-rebuild-stale-worktree || bad run-rebuild-stale-worktree "a registered but missing worktree is re-added"
+
+rb_clear
+git -C "$tmp/r" worktree remove --force "$tmp/r/.claude/worktrees/rb"; : > "$tmp/r/.claude/worktrees/rb"
+golden run-rebuild-worktree-refused rb_run
+[ -z "$(ls "$RB"/*/rb.md "$RB"/*/rb.s[0-9]*.md 2>/dev/null)" ] && [ ! -e "$RB/artifacts/rb" ] && ok run-rebuild-worktree-writes-nothing || bad run-rebuild-worktree-writes-nothing "a refused worktree leaves the board alone"
+rm -f "$tmp/r/.claude/worktrees/rb"
 
 # --- id-collisions.sh: the branch and main both define the next free ID
 rm -rf "$tmp/ids"; git init -q -b main "$tmp/ids"; mkdir -p "$tmp/ids/docs/specs"
