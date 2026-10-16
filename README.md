@@ -177,6 +177,7 @@ When the relay ends on an upstream error (for example a lost upstream serial lin
 | `:wd \| :write-device [PATH]` | Save device configuration |
 | `:log <FILE>\|clear` | Set log output file for the active tab (`:log clear` clears the ring log) |
 | `:script` | Manage Lua scripts (create, edit, toggle, delete) |
+| `:module` | Edit read ranges (Modbus client/server) |
 | `:session` | Session scripts + sim interval |
 | `:reload` | Reload device configuration |
 | `:compact` | Toggle compact table mode |
@@ -207,7 +208,7 @@ When the relay ends on an upstream error (for example a lost upstream serial lin
 
 ## Impressions
 
-All screenshots below are generated automatically by [`scripts/screenshots.py`](./scripts/screenshots.py),
+All screenshots below are generated automatically by [`images/capture.py`](./images/capture.py),
 which drives `ferrowl --demo` headlessly in tmux, walks each view/dialog by keystroke, and renders the
 captured terminal content to PNG — run it after UI changes to refresh them.
 

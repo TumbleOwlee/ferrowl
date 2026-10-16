@@ -3,6 +3,7 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::layout::Rect;
 
+use crate::config::device::ReadRanges;
 use crate::dialog::close_confirm::CloseConfirmEvent;
 use crate::module::modbus::dialog::{
     EditInputDialog, EditSelectionDialog, EditedRegister, RegisterDialog,
@@ -19,6 +20,7 @@ pub(super) enum PendingAction {
     },
     Delete(String),
     ApplySetup(Box<SetupValues>),
+    SetReadRanges(ReadRanges),
 }
 
 /// Which pane kind the open register dialog currently shows: free-text inputs, or the

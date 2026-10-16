@@ -2511,6 +2511,16 @@ mod tests {
         ));
     }
 
+    #[tokio::test]
+    /// MB-R-290 — a monitor tab leaves `:module` unhandled, so the app logs UI-R-348's unknown-command warning.
+    async fn ut_module_command_unrecognized() {
+        let mut v = view();
+        assert!(matches!(
+            v.handle_command("module").await,
+            CommandResult::Unhandled
+        ));
+    }
+
     /// Every entry in `MONITOR_COMMAND_SPECS` routes through `handle_command` without panicking.
     #[tokio::test]
     async fn ut_every_monitor_command_spec_has_matching_handler() {

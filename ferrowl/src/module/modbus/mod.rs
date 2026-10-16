@@ -8,6 +8,7 @@
 pub mod config;
 pub mod dialog;
 pub mod registers;
+pub mod settings_dialog;
 pub mod setup;
 pub mod setup_dialog;
 pub mod table;

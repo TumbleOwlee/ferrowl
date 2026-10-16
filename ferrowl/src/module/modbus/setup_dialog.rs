@@ -24,7 +24,6 @@ use ratatui::{
     widgets::{Block, Clear, Widget as UiWidget},
 };
 
-use crate::config::device::ReadRanges;
 use crate::config::{ClientOrServer, DeviceConfig, Endpoint, Role};
 use crate::dialog::NonEmpty;
 use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmOutcome, route_close_confirm};
@@ -54,8 +53,6 @@ pub struct SetupValues {
     /// Auto-reconnect setting (MB-R-050–MB-R-055 client, MB-R-130–MB-R-134 server); always
     /// explicit after a dialog save.
     pub reconnect: Option<bool>,
-    /// Explicit per-function-code read ranges (client only), applied to the device config.
-    pub read_ranges: ReadRanges,
     /// The device config's `tls` setting (MB-R-104). `None` when the TLS section is hidden
     /// (RTU transport, MB-R-112) — a hidden section must never clobber a device config's
     /// existing setting. `Some(cfg)` means shown, with `cfg` both-`None` when the level is Off
@@ -142,14 +139,6 @@ pub struct SetupDialog {
     pub delay: Widget<InputFieldState, InputField<String>>,
     #[focus]
     pub interval: Widget<InputFieldState, InputField<String>>,
-    #[focus]
-    pub holding_ranges: Widget<InputFieldState, InputField<String>>,
-    #[focus]
-    pub input_ranges: Widget<InputFieldState, InputField<String>>,
-    #[focus]
-    pub coil_ranges: Widget<InputFieldState, InputField<String>>,
-    #[focus]
-    pub discrete_ranges: Widget<InputFieldState, InputField<String>>,
     pub error: Widget<String, Text>,
     pub keybinds: Widget<String, Text>,
     pub mode: DialogMode,
@@ -177,10 +166,9 @@ impl SetupDialog {
         role: ClientOrServer,
         endpoint: &Endpoint,
         timing: Timing,
-        ranges: &ReadRanges,
         tls: Option<&ModbusTlsConfig>,
     ) -> Self {
-        let mut dialog = Self::build(name, config_path, DialogMode::Edit, timing, ranges);
+        let mut dialog = Self::build(name, config_path, DialogMode::Edit, timing);
         dialog
             .role
             .state
@@ -264,16 +252,10 @@ impl SetupDialog {
     /// Create a new module (`:n`/`:new`), with an optional device-config path. `timing` prefills
     /// the timeout/delay/interval/reconnect inputs with the global app defaults.
     pub fn create(timing: Timing) -> Self {
-        Self::build("", "", DialogMode::New, timing, &ReadRanges::default())
+        Self::build("", "", DialogMode::New, timing)
     }
 
-    fn build(
-        name: &str,
-        config_path: &str,
-        mode: DialogMode,
-        timing: Timing,
-        ranges: &ReadRanges,
-    ) -> Self {
+    fn build(name: &str, config_path: &str, mode: DialogMode, timing: Timing) -> Self {
         let selection_style = SelectionStyle::default();
         let input_style = InputFieldStyle::default();
         let error_style = TextStyle {
@@ -370,15 +352,6 @@ impl SetupDialog {
                 vec![ReconnectChoice::On, ReconnectChoice::Off],
                 &selection_style,
             ))
-            .holding_ranges(input(
-                "Holding ranges",
-                "0-100,140-160",
-                &input_style,
-                false,
-            ))
-            .input_ranges(input("Input ranges", "0-9", &input_style, false))
-            .coil_ranges(input("Coil ranges", "0-31", &input_style, false))
-            .discrete_ranges(input("Discrete ranges", "0-31", &input_style, false))
             .error(Widget {
                 state: String::new(),
                 widget: TextBuilder::default()
@@ -419,17 +392,6 @@ impl SetupDialog {
             .state
             .set_selection(if timing.reconnect { 0 } else { 1 });
 
-        // Prefill explicit read ranges from the device config.
-        for (field, value) in [
-            (&mut dialog.holding_ranges, &ranges.holding),
-            (&mut dialog.input_ranges, &ranges.input),
-            (&mut dialog.coil_ranges, &ranges.coils),
-            (&mut dialog.discrete_ranges, &ranges.discrete),
-        ] {
-            if let Some(v) = value {
-                set_input(field, v);
-            }
-        }
         dialog
     }
 
@@ -664,23 +626,13 @@ impl SetupDialog {
                     .map_err(|_| format!("{label} must be a whole number of milliseconds."))
             }
         };
-        // Timing and explicit read ranges are shown and captured for all roles.
-        let opt = |s: &str| {
-            let t = s.trim();
-            (!t.is_empty()).then(|| t.to_string())
-        };
+        // Timing is shown and captured for all roles.
         let timeout_ms = parse_ms(self.timeout.state.input(), "Timeout")?;
         let delay_ms = parse_ms(self.delay.state.input(), "Delay")?;
         let interval_ms = parse_ms(self.interval.state.input(), "Interval")?;
         // Reconnect is shown for every role: it governs client redial (MB-R-050–055) and, since
         // the shared backoff driver, server bind/serial-open/mid-serve retry (MB-R-130–134).
         let reconnect = Some(self.reconnect.state.get_value() == ReconnectChoice::On);
-        let read_ranges = ReadRanges {
-            holding: opt(self.holding_ranges.state.input()),
-            input: opt(self.input_ranges.state.input()),
-            coils: opt(self.coil_ranges.state.input()),
-            discrete: opt(self.discrete_ranges.state.input()),
-        };
 
         // TLS is hidden entirely for RTU (MB-R-112) and Ascii (MB-R-121): report no value at
         // all, so a save on an RTU/Ascii instance never clobbers a device config's existing
@@ -753,7 +705,6 @@ impl SetupDialog {
             delay_ms,
             interval_ms,
             reconnect,
-            read_ranges,
             tls,
         })
     }
@@ -790,9 +741,9 @@ impl SetupDialog {
             + show_identity_row as u16
             + show_skip_verify_row as u16
             + show_peer_verify_row as u16;
-        // border(2) + inner margin(2) + name(3) + device(3) + select(3) + endpoint + timing(3) + ranges(6)
+        // border(2) + inner margin(2) + name(3) + device(3) + select(3) + endpoint + timing(3)
         // + error(4) + keybinds(1) + optional config-path row (New mode) + optional TLS rows.
-        let box_height = 27 + endpoint_rows * 3 + tls_rows * 3;
+        let box_height = 21 + endpoint_rows * 3 + tls_rows * 3;
 
         let [_, hcenter, _] = Layout::horizontal([
             Constraint::Min(1),
@@ -828,8 +779,6 @@ impl SetupDialog {
             Constraint::Length(3),                 // transport + role
             Constraint::Length(endpoint_rows * 3), // endpoint
             Constraint::Length(3),                 // timeout + delay + interval
-            Constraint::Length(3),                 // holding + input ranges
-            Constraint::Length(3),                 // coil + discrete ranges
         ];
         if show_self_signed_row {
             constraints.push(Constraint::Length(3)); // Self-Signed
@@ -947,11 +896,6 @@ impl SetupDialog {
         render_row!(self, rows[idx], buf; timeout, delay, interval);
         idx += 1;
 
-        render_row!(self, rows[idx], buf; holding_ranges, input_ranges);
-        idx += 1;
-        render_row!(self, rows[idx], buf; coil_ranges, discrete_ranges);
-        idx += 1;
-
         let error_area = rows[idx];
         idx += 1;
         if !self.error.state.is_empty() {
@@ -1011,6 +955,48 @@ mod tests {
             out.push('\n');
         }
         out
+    }
+
+    #[test]
+    /// MB-R-298 — the setup dialog has no read-range inputs, in create, edit and clone.
+    fn ut_setup_dialog_has_no_read_range_inputs() {
+        let timing = Timing {
+            timeout_ms: 1000,
+            delay_ms: 0,
+            interval_ms: 1000,
+            reconnect: true,
+        };
+        let edit = || {
+            SetupDialog::edit(
+                "m",
+                "",
+                ClientOrServer::Client,
+                &Endpoint::Tcp {
+                    ip: "127.0.0.1".into(),
+                    port: 502,
+                },
+                timing,
+                None,
+            )
+        };
+        for (label, mut dialog) in [
+            ("create", SetupDialog::create(timing)),
+            ("edit", edit()),
+            ("clone", edit().into_clone("x-2")),
+        ] {
+            let area = Rect::new(0, 0, 80, 40);
+            let mut buf = Buffer::empty(area);
+            dialog.render(area, &mut buf);
+            let text = buffer_text(&buf);
+            for title in [
+                "Holding ranges",
+                "Input ranges",
+                "Coil ranges",
+                "Discrete ranges",
+            ] {
+                assert!(!text.contains(title), "{label}: found {title}");
+            }
+        }
     }
 
     #[test]
@@ -1165,17 +1151,8 @@ mod tests {
         let area = Rect::new(0, 0, 100, 60);
 
         for (label, endpoint, tls) in [("serial", &serial, None), ("tcp+mtls", &tcp, Some(&tls))] {
-            let build = || {
-                SetupDialog::edit(
-                    "dev",
-                    "",
-                    ClientOrServer::Client,
-                    endpoint,
-                    timing,
-                    &ReadRanges::default(),
-                    tls,
-                )
-            };
+            let build =
+                || SetupDialog::edit("dev", "", ClientOrServer::Client, endpoint, timing, tls);
 
             let mut as_built = build();
             assert!(
@@ -1252,10 +1229,6 @@ mod tests {
             ("timeout", dialog.timeout.state.is_focused()),
             ("delay", dialog.delay.state.is_focused()),
             ("interval", dialog.interval.state.is_focused()),
-            ("holding_ranges", dialog.holding_ranges.state.is_focused()),
-            ("input_ranges", dialog.input_ranges.state.is_focused()),
-            ("coil_ranges", dialog.coil_ranges.state.is_focused()),
-            ("discrete_ranges", dialog.discrete_ranges.state.is_focused()),
             ("tls.self_signed", dialog.tls.self_signed.state.is_focused()),
             ("tls.cert_file", dialog.tls.cert_file.state.is_focused()),
             ("tls.key_file", dialog.tls.key_file.state.is_focused()),
@@ -1347,15 +1320,7 @@ mod tests {
             ip: "127.0.0.1".to_string(),
             port: 502,
         };
-        let dialog = SetupDialog::edit(
-            "dev",
-            "",
-            ClientOrServer::Client,
-            &endpoint,
-            timing,
-            &ReadRanges::default(),
-            None,
-        );
+        let dialog = SetupDialog::edit("dev", "", ClientOrServer::Client, &endpoint, timing, None);
         assert_eq!(dialog.reconnect.state.get_value(), ReconnectChoice::Off);
         let outcome = dialog.resolve().unwrap();
         assert_eq!(outcome.values.reconnect, Some(false));
@@ -1618,15 +1583,7 @@ mod tests {
             data_bits: None,
             stop_bits: None,
         };
-        let dialog = SetupDialog::edit(
-            "dev",
-            "",
-            ClientOrServer::Client,
-            &endpoint,
-            timing,
-            &ReadRanges::default(),
-            None,
-        );
+        let dialog = SetupDialog::edit("dev", "", ClientOrServer::Client, &endpoint, timing, None);
         assert_eq!(dialog.transport.state.get_value(), Transport::Ascii);
     }
 
@@ -1643,15 +1600,7 @@ mod tests {
             ip: "10.0.0.9".to_string(),
             port: 1502,
         };
-        let dialog = SetupDialog::edit(
-            "dev",
-            "",
-            ClientOrServer::Client,
-            &endpoint,
-            timing,
-            &ReadRanges::default(),
-            None,
-        );
+        let dialog = SetupDialog::edit("dev", "", ClientOrServer::Client, &endpoint, timing, None);
         assert_eq!(dialog.transport.state.get_value(), Transport::AsciiOverTcp);
     }
 
@@ -1769,7 +1718,6 @@ mod tests {
                 interval_ms: 0,
                 reconnect: true,
             },
-            &ReadRanges::default(),
             Some(&original),
         );
         dialog.tls_level.state.set_selection(TlsLevel::Off.index());
@@ -1803,7 +1751,6 @@ mod tests {
                 interval_ms: 0,
                 reconnect: true,
             },
-            &ReadRanges::default(),
             None,
         );
         dialog.tls_level.state.set_selection(TlsLevel::Tls.index());
@@ -2370,7 +2317,6 @@ mod tests {
             ClientOrServer::Client,
             &endpoint,
             default_timing(),
-            &ReadRanges::default(),
             None,
         );
         assert!(
@@ -2435,7 +2381,6 @@ mod tests {
             ClientOrServer::Client,
             &endpoint,
             default_timing(),
-            &ReadRanges::default(),
             None,
         );
         set_input(&mut dialog.name, "dev");
@@ -2471,16 +2416,8 @@ mod tests {
             ip: "10.0.0.5".to_string(),
             port: 1502,
         };
-        let dialog = SetupDialog::edit(
-            "pump",
-            "",
-            ClientOrServer::Server,
-            &endpoint,
-            timing,
-            &ReadRanges::default(),
-            None,
-        )
-        .into_clone("pump-2");
+        let dialog = SetupDialog::edit("pump", "", ClientOrServer::Server, &endpoint, timing, None)
+            .into_clone("pump-2");
         assert_eq!(dialog.name.state.input(), "pump-2");
         assert!(matches!(dialog.mode, DialogMode::New));
         assert_eq!(dialog.ip.state.input(), "10.0.0.5");
