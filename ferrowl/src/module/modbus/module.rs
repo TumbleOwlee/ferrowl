@@ -514,10 +514,7 @@ impl ModbusModule {
         self.rebuild_operations().await;
     }
 
-    #[allow(
-        dead_code,
-        reason = "no caller until the module settings dialog uses it"
-    )]
+    #[cfg(test)]
     pub fn read_ranges(&self) -> &ReadRanges {
         &self.read_ranges
     }

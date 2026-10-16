@@ -18,6 +18,7 @@ use crate::dialog::lua_help::ScriptContext;
 use crate::dialog::scripts::ScriptDialog;
 use crate::module::modbus::build::Timing;
 use crate::module::modbus::dialog::{EditInputDialog, EditSelectionDialog};
+use crate::module::modbus::settings_dialog::ModuleSettingsDialog;
 use crate::module::modbus::setup::ModbusSetupView;
 use crate::module::modbus::setup_dialog::SetupDialog;
 use crate::module::modbus::table::{Definition, TableView, cmp_definitions};
@@ -34,8 +35,8 @@ mod overlay;
 use overlay::{ModbusOverlay, PendingAction, RegisterDialogKind};
 
 /// The single modal overlay over the module view (mutually exclusive by construction). The
-/// derive supplies `is_active`/`close`/`take`/`route_keys`; only the setup dialog carries a
-/// common-key tag (`focus_cycle`) — its `Esc`/close-confirm handling lives inside the dialog
+/// derive supplies `is_active`/`close`/`take`/`route_keys`; only the setup and settings dialogs carry a
+/// common-key tag (`focus_cycle`) — their `Esc`/close-confirm handling lives inside the dialog
 /// itself, offered to it before `route_keys` runs (see `handle_events`). The register overlay
 /// (`ModbusOverlay`, itself a nested Edit/EditSelection/Add dispatch with its own close-confirm
 /// and sub-dialog precedence) and the scripts overlay route every key through their own bespoke
@@ -49,11 +50,14 @@ enum ModbusViewOverlay {
     /// Module re-setup dialog.
     #[overlay(focus_cycle)]
     Setup(Box<SetupDialog>),
+    /// Module settings dialog (read ranges).
+    #[overlay(focus_cycle)]
+    Settings(Box<ModuleSettingsDialog>),
     /// Lua scripts editor (routes every key through its own `handle_events`).
     Scripts(Box<ScriptDialog>),
 }
 
-ferrowl_ui::impl_overlay_keys!(SetupDialog);
+ferrowl_ui::impl_overlay_keys!(SetupDialog, ModuleSettingsDialog);
 
 pub struct ModbusModuleView {
     /// Set when `:reload` swaps in a fresh module, so `App` rebuilds the session registry.
@@ -465,6 +469,7 @@ impl ModuleView for ModbusModuleView {
         match &mut self.overlay {
             ModbusViewOverlay::Scripts(scripts) => scripts.render(full_area, frame.buffer_mut()),
             ModbusViewOverlay::Setup(setup) => setup.render(full_area, frame.buffer_mut()),
+            ModbusViewOverlay::Settings(settings) => settings.render(full_area, frame.buffer_mut()),
             ModbusViewOverlay::Register(overlay) => overlay.render(full_area, frame.buffer_mut()),
             ModbusViewOverlay::None => {}
         }
@@ -491,8 +496,16 @@ impl ModuleView for ModbusModuleView {
             }
             return EventResult::Consumed;
         }
+        if let ModbusViewOverlay::Settings(settings) = &mut self.overlay
+            && let EventResult::Consumed = settings.handle_events(modifiers, code)
+        {
+            if settings.take_close_request() {
+                self.overlay.close();
+            }
+            return EventResult::Consumed;
+        }
 
-        // Common keys: `Tab`/`BackTab` cycle focus on the setup dialog (`focus_cycle`). The
+        // Common keys: `Tab`/`BackTab` cycle focus on the setup and settings dialogs (`focus_cycle`). The
         // register/scripts overlays have no common tags — their close/focus handling is bespoke
         // (register: close-confirm precedes Esc; scripts: every key routes through its own
         // handler) — so `route_keys` always returns `Unhandled` for them.
@@ -507,6 +520,14 @@ impl ModuleView for ModbusModuleView {
                     && let Ok(resolved) = setup.resolve()
                 {
                     self.pending = Some(PendingAction::ApplySetup(Box::new(resolved.values)));
+                    self.overlay.close();
+                }
+            }
+            ModbusViewOverlay::Settings(settings) => {
+                if let (KeyModifiers::NONE, KeyCode::Enter) = (modifiers, code)
+                    && let Some(ranges) = settings.confirm()
+                {
+                    self.pending = Some(PendingAction::SetReadRanges(ranges));
                     self.overlay.close();
                 }
             }
@@ -760,6 +781,7 @@ impl ModuleView for ModbusModuleView {
                     } => self.apply_edit(edited, idx, original_name).await,
                     PendingAction::Delete(name) => self.delete_register_by_name(name).await,
                     PendingAction::ApplySetup(values) => self.apply_setup(*values).await,
+                    PendingAction::SetReadRanges(ranges) => self.apply_read_ranges(ranges).await,
                 }
             }
 
@@ -997,6 +1019,13 @@ impl ModuleView for ModbusModuleView {
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
             }
 
+            ModbusCmd::Module => {
+                self.overlay = ModbusViewOverlay::Settings(Box::new(ModuleSettingsDialog::new(
+                    &self.device.read_ranges,
+                )));
+                Box::pin(std::future::ready(CommandResult::Handled(None)))
+            }
+
             ModbusCmd::Compact => {
                 self.table.set_compact(!self.table.compact);
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
@@ -1178,6 +1207,7 @@ enum ModbusCmd {
     Edit,
     Add,
     Script,
+    Module,
     Compact,
     WriteDevice(Option<String>),
     Log(Option<String>),
@@ -1186,7 +1216,7 @@ enum ModbusCmd {
 }
 
 /// Single source for this view's commands: aliases, help row, and parse target per entry.
-static MODBUS_COMMAND_SPECS: [CommandSpec<ModbusCmd>; 12] = [
+static MODBUS_COMMAND_SPECS: [CommandSpec<ModbusCmd>; 13] = [
     CommandSpec {
         aliases: &["e", "edit"],
         descriptor: CommandDescriptor {
@@ -1274,6 +1304,14 @@ static MODBUS_COMMAND_SPECS: [CommandSpec<ModbusCmd>; 12] = [
             description: "manage lua scripts",
         },
         build: |_| ModbusCmd::Script,
+    },
+    CommandSpec {
+        aliases: &["module"],
+        descriptor: CommandDescriptor {
+            name: ":module",
+            description: "edit read ranges",
+        },
+        build: |_| ModbusCmd::Module,
     },
     CommandSpec {
         aliases: &["order"],
@@ -1378,7 +1416,7 @@ mod tests {
     use ferrowl_codec::{Access, Address, Kind, NumericPrimitive, RegisterBuilder, Value};
     use ferrowl_modbus::UnitId;
     use ferrowl_modbus::{Key, SlaveKey};
-    use ferrowl_store::{CellKind, Memory, Range};
+    use ferrowl_store::{CellKind, CellType, Memory, Range};
     use ferrowl_test_support::{reserve_tcp_port, reserve_temp_dir, wait_until, wait_until_async};
     use ferrowl_ui::EventResult;
     use ratatui::Frame;
@@ -2379,6 +2417,127 @@ mod tests {
         let spec = tcp_server_spec();
         let module = super::super::ModbusModule::new(&spec, &device);
         ModbusModuleView::new(module, spec, device)
+    }
+
+    fn type_text(view: &mut ModbusModuleView, text: &str) {
+        for c in text.chars() {
+            view.handle_events(KeyModifiers::NONE, KeyCode::Char(c));
+        }
+    }
+
+    #[tokio::test]
+    /// MB-R-288, MB-R-289 — `:module` opens the settings dialog prefilled from the device, on a server and a client tab.
+    async fn ut_module_command_opens_prefilled_settings() {
+        for role in [Role::Server, Role::Client] {
+            let mut device = empty_device();
+            device.read_ranges.holding = Some("0-10".into());
+            let spec = ModuleSpec {
+                role,
+                ..tcp_server_spec()
+            };
+            let module = super::super::ModbusModule::new(&spec, &device);
+            let mut view = ModbusModuleView::new(module, spec, device);
+            assert!(matches!(
+                view.handle_command("module").await,
+                CommandResult::Handled(None)
+            ));
+            let ModbusViewOverlay::Settings(d) = &view.overlay else {
+                panic!("expected Settings overlay");
+            };
+            assert_eq!(d.holding.state.input(), "0-10");
+        }
+    }
+
+    #[tokio::test]
+    /// MB-R-292, MB-R-301 — Enter on a malformed input keeps the dialog open and fills the error box.
+    async fn ut_module_enter_refused_while_malformed() {
+        let mut view = new_view();
+        view.handle_command("module").await;
+        type_text(&mut view, "9-1");
+        view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(view.is_overlay_active());
+        assert!(view.pending.is_none());
+        assert!(view.device.read_ranges.holding.is_none());
+        let ModbusViewOverlay::Settings(d) = &view.overlay else {
+            panic!("expected Settings overlay");
+        };
+        assert!(
+            d.error.state.contains("Holding ranges"),
+            "{}",
+            d.error.state
+        );
+        assert!(d.error.state.contains("'9-1'"), "{}", d.error.state);
+    }
+
+    #[tokio::test]
+    /// MB-R-293, MB-R-296 — confirming stores the ranges on the device and module and declares the gap cells.
+    async fn ut_module_confirm_sets_ranges_and_declares_gaps() {
+        let mut view = view_for(device_with_defs());
+        let key = Key {
+            id: SlaveKey {
+                slave_id: UnitId(1),
+                kind: Kind::HoldingRegister,
+            },
+        };
+        let readable = |view: &ModbusModuleView| {
+            view.module
+                .memory()
+                .read()
+                .readable(&key, &CellType::Register, &Range::new(2, 8))
+        };
+        assert!(readable(&view).is_err());
+        view.handle_command("module").await;
+        type_text(&mut view, "0-10");
+        view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(!view.is_overlay_active());
+        view.refresh().await;
+        assert_eq!(view.device.read_ranges.holding.as_deref(), Some("0-10"));
+        assert_eq!(view.module.read_ranges().holding.as_deref(), Some("0-10"));
+        assert!(readable(&view).is_ok());
+        view.module.stop().await.ok();
+    }
+
+    #[tokio::test]
+    /// MB-R-294 — leaving through the close-confirm popup keeps the ranges, even with an invalid input.
+    async fn ut_module_close_confirm_leaves_ranges() {
+        let mut device = empty_device();
+        device.read_ranges.holding = Some("0-10".into());
+        let mut view = view_for(device);
+        view.handle_command("module").await;
+        type_text(&mut view, "x");
+        view.handle_events(KeyModifiers::NONE, KeyCode::Esc);
+        assert!(view.is_overlay_active());
+        view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        assert!(!view.is_overlay_active());
+        assert!(view.pending.is_none());
+        view.refresh().await;
+        assert_eq!(view.device.read_ranges.holding.as_deref(), Some("0-10"));
+        assert_eq!(view.module.read_ranges().holding.as_deref(), Some("0-10"));
+        view.module.stop().await.ok();
+    }
+
+    #[tokio::test]
+    /// MB-R-297 — confirming writes no file; `:write-device` saves the confirmed ranges.
+    async fn ut_module_confirm_writes_no_file() {
+        let mut view = new_view();
+        let dir = reserve_temp_dir("ferrowl_modbus_settings");
+        let before = dir.join("before.toml");
+        let after = dir.join("after.toml");
+        let path = |p: &std::path::Path| p.to_str().expect("temp path is valid UTF-8").to_string();
+        view.handle_command(&format!("write-device {}", path(&before)))
+            .await;
+        let bytes = std::fs::read(&before).unwrap();
+        view.handle_command("module").await;
+        type_text(&mut view, "0-10");
+        view.handle_events(KeyModifiers::NONE, KeyCode::Enter);
+        view.refresh().await;
+        assert_eq!(std::fs::read(&before).unwrap(), bytes);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+        view.handle_command(&format!("write-device {}", path(&after)))
+            .await;
+        let saved = crate::config::load_device(&path(&after)).unwrap();
+        assert_eq!(saved.read_ranges.holding.as_deref(), Some("0-10"));
+        view.module.stop().await.ok();
     }
 
     #[test]

@@ -708,9 +708,9 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **MB-R-292** — `Enter` in the module settings dialog is refused while any input fails MB-R-291's check: the dialog stays open and the tab's `read_ranges` are unchanged.
 
-**MB-R-293** — Confirming a module settings dialog whose inputs all parse sets the tab's in-memory device-config `read_ranges` to the inputs' text, an empty input leaving its field unset.
+**MB-R-293** — Confirming a module settings dialog whose inputs all parse sets the tab's in-memory device-config `read_ranges` to the inputs' trimmed text, a blank input leaving its field unset.
 
-**MB-R-294** — `Esc` in the module settings dialog closes it whether or not an input fails MB-R-291's check, leaving the tab's `read_ranges` unchanged.
+**MB-R-294** — Closing the module settings dialog through its close-confirmation popup (UI-R-023) leaves the tab's `read_ranges` unchanged, whether or not an input fails MB-R-291's check.
 
 **MB-R-295** — A running client polls with the `read_ranges` confirmed through the module settings dialog (MB-R-293, MB-R-083) from its next poll cycle on, without reconnecting.
 
@@ -724,7 +724,7 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 **MB-R-300** — Confirming `:edit`'s Modbus setup dialog leaves the tab's `read_ranges` unchanged.
 
-**MB-R-301** — A refused `Enter` (MB-R-292) shows the dialog's error message box naming the first failing input's field and its malformed entry, as the add/edit register dialog shows its inline error (MB-R-224).
+**MB-R-301** — The module settings dialog's error message box tracks its inputs live: while any input fails MB-R-291's check it names the first failing input's field and its malformed entry, and it disappears once every input passes, as the add/edit register dialog shows its inline error (MB-R-224).
 
 ---
 

@@ -178,10 +178,6 @@ fn parse_entry(part: &str) -> Option<Range> {
 
 /// Strict counterpart of `parse_ranges`, used by interactive input (MB-R-291): the first
 /// malformed or reversed entry is an error; empty entries are ignored.
-#[allow(
-    dead_code,
-    reason = "no caller until the module settings dialog uses it"
-)]
 pub fn check_range_spec(spec: &str) -> Result<(), String> {
     for part in spec.split(',').map(str::trim).filter(|p| !p.is_empty()) {
         if parse_entry(part).is_none() {
@@ -811,6 +807,7 @@ mod tests {
     }
 
     #[test]
+    /// MB-R-291 — the strict range check accepts well-formed specs and names the first malformed or reversed entry.
     fn ut_check_range_spec_accepts_and_rejects() {
         for ok in ["", "5", "0-100,140-160", " 0 - 10 , 20 ", "0-5,,7", "0-5,"] {
             assert_eq!(super::check_range_spec(ok), Ok(()), "{ok:?}");

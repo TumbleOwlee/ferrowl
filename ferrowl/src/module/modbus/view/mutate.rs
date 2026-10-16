@@ -7,6 +7,7 @@ use ferrowl_store::Range;
 use ferrowl_ui::widgets::Header;
 
 use crate::app::Level;
+use crate::config::device::ReadRanges;
 use crate::module::modbus::dialog::EditedRegister;
 use crate::module::modbus::setup_dialog::SetupValues;
 use crate::module::modbus::table::{Definition, TableHeader, column_index};
@@ -18,6 +19,13 @@ use super::super::registers::{register_mem_binding, sync_register_def, write_com
 use super::{ModbusModuleView, PendingLifecycle};
 
 impl ModbusModuleView {
+    /// Adopts confirmed read ranges in the device config and the running module; memory only,
+    /// no file is written (MB-R-297).
+    pub(super) async fn apply_read_ranges(&mut self, ranges: ReadRanges) {
+        self.device.read_ranges = ranges.clone();
+        self.module.set_read_ranges(ranges).await;
+    }
+
     pub(super) fn apply_order(&mut self, col: &str, descending: bool) -> CommandResult {
         match column_index(col) {
             None => {
