@@ -1,0 +1,4 @@
+- MB-R-161 kept: retry forever — user
+- MB-E-031 kept: drop in-flight requests — user
+
+exit=0

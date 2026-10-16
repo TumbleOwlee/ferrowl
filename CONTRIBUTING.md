@@ -160,7 +160,7 @@ sequenceDiagram
     Orch->>Author: candidate issue numbers
     Author->>Git: read candidate issues
     Author-->>Orch: reuse or new, title and goal written
-    Orch->>Orch: assemble the issue body from goal, brief and architecture
+    Orch->>Orch: assemble the issue body from goal, requirements and scenarios, later only its status line is updated in place
     Orch->>User: approval stop: plan and issue body
     User->>Orch: approved
     Orch->>Git: create or rewrite the issue from the assembled body
@@ -244,7 +244,7 @@ sequenceDiagram
     Orch->>Orch: assemble the final issue and PR bodies
     Orch->>User: approval stop: PR body and follow-ups, approve or manual run first?
     User->>Orch: approved
-    Orch->>Git: push, rewrite the issue with the merged spec, replace the draft PR's title and body, mark ready, file the kept follow-ups
+    Orch->>Git: push, replace the draft PR's title and body, mark ready, file the kept follow-ups
     Orch->>Git: wait for CI, on red the implementer fixes, push, wait again
     Orch->>Orch: append the run's metrics line, then clean up: worktree, local branch, cards, artifact dir
     Note over User,Git: the run ends here, the human reviews and merges on GitHub, outside the workflow

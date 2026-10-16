@@ -1,0 +1,12 @@
+### Requirements
+| ID | Kind | Requirement |
+|---|---|---|
+| R1 | new | The allocator never offers more than the site limit in total. |
+
+### Other spec changes
+| File | Section | Change |
+|---|---|---|
+| ocpp/api-contract.md | Config keys | `site_limit_a` row (R1) |
+| ocpp/api-contract.md | Notes | units are amperes throughout |
+
+exit=0

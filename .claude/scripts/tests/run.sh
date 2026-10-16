@@ -62,6 +62,43 @@ golden issue-body-slice-2 env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh
 golden issue-body-slice-3 env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" lb --slice 3
 golden issue-body-slice-run env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" sl
 golden issue-body-slice-missing env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" lb --slice 9
+golden issue-body-mrc env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" mrc
+
+# --status rewrites only line 1 of a filed body
+printf '%s\n\n%s\n%s\n' '**Status** planned · **Lane** full' '## Goal' kept > "$tmp/live.md"
+printf '\n%s\n\n%s\n%s\n' '**Status** planned · **Lane** full' '## Goal' kept > "$tmp/live-blank.md"
+golden issue-body-status env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/live.md"
+golden issue-body-status-blank env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/live-blank.md"
+echo '2026-10-04T10:00 ci=0' >> "$P/.claude/tasks/inprogress/demo.md"
+golden issue-body-status-done env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/live.md"
+
+# the visible text names no stage or agent
+refuse() { # <replacement for the Today line> — a copy of demo without a card
+    P=$(project); A=$P/.claude/tasks/artifacts
+    cp -R "$A/demo" "$A/sref"
+    sed -i "s#Today the user restarts the tab by hand.#$1#" "$A/sref/issue.md"
+}
+refuse 'Today s3 restarts it.'
+golden issue-body-refused env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" sref
+refuse 'Today the spec-architect restarts it.'
+golden issue-body-refused-agent env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" sref
+refuse 'Today `s3` restarts it.'
+golden issue-body-refused-code env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" sref
+refuse 'Today `x` restarts s3. See `y`.'
+golden issue-body-refused-between env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" sref
+refuse 'Today `docs/s3.md` restarts it.'
+env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" sref >/dev/null 2>&1
+[ $? -eq 0 ] && ok issue-body-path-span-passes || bad issue-body-path-span-passes "a file name in a code span is not a stage ref"
+P=$(project)
+
+# --- spec-render.sh
+SD=$P/.claude/tasks/artifacts/demo/spec-diff.md
+for part in scenarios requirements entries changes deferred; do
+    golden spec-render-$part sh "$scripts/spec-render.sh" "$SD" $part
+done
+golden spec-render-entries-only sh "$scripts/spec-render.sh" "$P/.claude/tasks/artifacts/lb/spec-diff.md" entries --only "R1" --first 1
+golden spec-render-usage sh "$scripts/spec-render.sh"
+golden spec-render-missing sh "$scripts/spec-render.sh" "$P/nosuch.md" scenarios
 
 # --- pr-body.sh
 golden pr-body-draft env CLAUDE_PROJECT_DIR="$P" sh "$scripts/pr-body.sh" demo draft
@@ -95,6 +132,8 @@ golden issue-request-epic env ISSUE_FIXTURE="$fx/issue/slice.txt" sh "$tmp/ir/is
 golden issue-request-epic-none env ISSUE_FIXTURE="$fx/issue/plain.txt" sh "$tmp/ir/issue-request.sh" 7 --epic
 golden issue-request-slice-spec env ISSUE_FIXTURE="$fx/issue/slice.txt" sh "$tmp/ir/issue-request.sh" 71 --spec
 golden issue-request-spec-plain env ISSUE_FIXTURE="$fx/issue/plain.txt" sh "$tmp/ir/issue-request.sh" 7 --spec
+golden issue-request-new env ISSUE_FIXTURE="$fx/issue/new.txt" sh "$tmp/ir/issue-request.sh" 9
+golden issue-request-new-spec env ISSUE_FIXTURE="$fx/issue/new.txt" sh "$tmp/ir/issue-request.sh" 9 --spec
 
 # --- card-field.sh
 P=$(project)

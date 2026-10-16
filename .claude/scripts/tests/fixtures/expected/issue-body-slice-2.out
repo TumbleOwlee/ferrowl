@@ -1,29 +1,18 @@
 # Load balancing core: Batteries
 
+**Status** planned
 **Part of epic** #70 · **Slice** 2 of 3 · **Depends on** #71
 
 ## Goal
 A battery covers demand above the limit.
 
-## Spec (rev 1)
+## Requirements
+- **R2** A battery may discharge to cover demand above the site limit.
+- **E1** A device that stops reporting keeps its last allocation for 60 s.
 
-### Scenarios
+## Scenarios
 - **S2** — Battery discharges at peak
   - Given a battery and one EVSE under a 32 A limit
   - When the EVSE requests 40 A
   - Then the battery covers the 8 A above the limit
-
-### Requirements
-| ID | Kind | Requirement |
-|---|---|---|
-| R2 | new | A battery may discharge to cover demand above the site limit. |
-| E1 | new | A device that stops reporting keeps its last allocation for 60 s. |
-
-### Deferred
-- rounding of offered current
-
-## Architecture
-Adds: battery `Device` impl
-
-The skeleton every slice builds on is in epic #70, `## Architecture`.
 exit=0

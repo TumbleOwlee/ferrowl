@@ -1,0 +1,14 @@
+### Requirements
+| ID | Kind | Requirement |
+|---|---|---|
+| MB-R-161 | new | A TCP client whose connection drops without a user disconnect enters the reconnecting state. |
+| MB-R-042 | changed · dropped connection no longer ends in disconnected | A TCP client whose connection drops **enters the reconnecting state**. |
+| MB-E-031 | new | A request in flight when the connection drops is lost, not replayed. |
+| MB-E-007 | dropped | stated "no automatic reconnect"; MB-R-161 replaces it |
+
+### Other spec changes
+| File | Section | Change |
+|---|---|---|
+| modbus/api-contract.md | Client config keys | `reconnect` row, default `true` (MB-R-042) |
+
+exit=0

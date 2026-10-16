@@ -1,0 +1,7 @@
+## Requirements
+- **R1** A TCP client whose connection drops without a user disconnect enters the reconnecting state.
+- **MB-R-042** (changed) A TCP client whose connection drops **enters the reconnecting state**.
+- **E1** A request in flight when the connection drops is lost, not replayed.
+- **MB-E-007** (dropped) stated "no automatic reconnect"; R1 replaces it
+
+exit=0

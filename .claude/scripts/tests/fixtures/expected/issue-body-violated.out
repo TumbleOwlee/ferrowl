@@ -1,18 +1,13 @@
 # Fix register wrap
 
-**Spec** none · **Violated** 1 entries (rev 1)
+**Status** planned
 
 ## Goal
 Register 65535 reads correctly.
 Today it wraps to 0.
 
-## Spec (rev 1)
+## Requirements
+No spec change: the code violates the requirements below.
 
-No spec change: the code violates the entries below.
-
-### Requirements
-| ID | Kind | Requirement |
-|---|---|---|
-| MB-R-010 | violated | Addresses span 0 to 65535 inclusive. |
-
+- **MB-R-010** Addresses span 0 to 65535 inclusive.
 exit=0
