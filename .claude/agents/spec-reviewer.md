@@ -90,6 +90,7 @@ Architecture — clean | <n> findings above | n/a
 Standards — clean | <n> findings above
 TDD — clean | <n> findings above
 Docs — clean | <what is stale>
+Not checked — <what you could not verify, and why> | nothing
 
 Minors (<folded into s<n+1> | fixed before commit>)
 - <axis> — <crate> <file> `<name>`: <problem, ≤ 12 words>; <fix, ≤ 8 words>
@@ -101,7 +102,7 @@ Needs user
 - none
 ```
 
-Minors are information, never asked: `folded into s<n+1>` when a stage follows, `fixed before commit` when none does. Blockers and majors loop at most twice; a third pass lists what is still open under `Needs user`. Every `Needs user` item carries your recommendation. A clean pass still carries the axis lines — `Spec — 11 of 11 pinned` is the evidence. A `delta` scope verdict carries only `Verdict:`, `Spec changes`, `Needs user`.
+Minors are information, never asked: `folded into s<n+1>` when a stage follows, `fixed before commit` when none does. Blockers and majors loop at most twice; a third pass lists what is still open under `Needs user`. Every `Needs user` item carries your recommendation. A clean pass still carries the axis lines — `Spec — 11 of 11 pinned` is the evidence. `Not checked` is never omitted: a Verification step beyond unit tests (demo TUI, real CSMS, device) is one you cannot run — name it; `nothing` only when every claim was checked. A `delta` scope verdict carries only `Verdict:`, `Spec changes`, `Needs user`.
 
 Final message one line:
 

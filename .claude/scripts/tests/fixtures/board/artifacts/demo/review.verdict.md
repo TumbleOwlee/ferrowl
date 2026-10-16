@@ -8,6 +8,7 @@ Architecture — clean
 Standards — clean
 TDD — clean
 Docs — clean
+Not checked — s2 demo TUI run: needs a terminal
 
 Minors (folded into s2)
 - standards — ferrowl-modbus client_core.rs `next_delay`: comment restates the code; drop it

@@ -176,6 +176,7 @@ Verification:
 Confirm:
 - <prompt-lines.sh's single Confirm block over the shown files>                       ← or `Confirm: nothing flagged`
 Review: <verdict line>
+Not checked: <verdict's Not checked line>
 Spec: <n of m pinned …>
 Spec changes: <verdict's detail and need-you IDs>
 Minors (folded into <where>):

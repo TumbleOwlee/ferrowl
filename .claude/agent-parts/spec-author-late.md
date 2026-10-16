@@ -35,7 +35,7 @@ Existing IDs only, never a planned one. No issue number anywhere — the orchest
 
 **Sync first.** In the worktree, `git diff main...HEAD -- docs/specs` is the run's final spec. Rewrite `spec-diff.md` to match it: one `## <ID>` section per entry the branch added, changed or dropped, fixed IDs only, scenarios kept, `## Deferred` removed; bump the rev and add `- rev N (<date>) — synced from the branch: <IDs that differ from the filed text> (spec-author)` (`issue-body.sh` skips it), then one dated line per `### Spec change` comment on the issue (`issue-view.sh`), `- rev N (<date>) — <ID> kept: <choice> (user)` — these become the issue's `## Decisions`. The orchestrator rewrites the issue body from it.
 
-**Then `pr.md`**, full form. Inputs: `spec-diff.md`, `plan.md`, `review.md`, `gauntlet.log` (its coverage line), `git log main..HEAD --stat` in the worktree. Line 1 = `issue.md`'s line 1. The orchestrator prepends the status line and appends the architecture and the closing line; write none of them. Answer `status=ready file=artifacts/<slug>/pr.md`.
+**Then `pr.md`**, full form. Inputs: `spec-diff.md`, `plan.md`, `review.md`, `review.verdict.md`, `gauntlet.log` (its coverage line), `git log main..HEAD --stat` in the worktree. Line 1 = `issue.md`'s line 1. The orchestrator prepends the status line and appends the architecture and the closing line; write none of them. Answer `status=ready file=artifacts/<slug>/pr.md`.
 
 ```
 # <title>
@@ -61,4 +61,4 @@ Existing IDs only, never a planned one. No issue number anywhere — the orchest
 - <plan-level decision> (<user | chosen>)
 ```
 
-`## Changes` per crate module, never per file. `## Tests` lists exceptions only. `not run:` is always present. `## Decisions` = `plan.md`'s decisions only; spec decisions are in the issue.
+`## Changes` per crate module, never per file. `## Tests` lists exceptions only. `not run:` is always present and carries the verdict's `Not checked` line. `## Decisions` = `plan.md`'s decisions only; spec decisions are in the issue.
