@@ -8,4 +8,6 @@ Verification:
   - cannot be waived without asking
 Confirm:
 - one stage per crate — the UI change is reviewed apart
+- MB-R-161 — retry forever, no cap (chosen) — the user never wants a dead tab
+- MB-E-031 — drop the in-flight request (user) — a replayed write may apply twice
 exit=0

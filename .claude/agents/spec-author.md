@@ -34,6 +34,7 @@ Hunt actively, every batch:
 - **scenarios** — each user story as one flow, then the missing ones: failure paths, cancel/abort, empty and limit inputs, restart/reconnect, concurrent use, interaction with the area's existing features; for a replacement, what happens to the old behavior, its config and saved sessions
 - **conflicts** — existing entries the request contradicts or makes obsolete
 - **edge cases** — the ones whose outcome the user would notice
+- **related entries** — per entry, `sh .claude/scripts/related-ids.sh <noun> [<noun> …]` with the user-facing nouns it names (dialog, key, popup, command — not verbs, not `tab`/`value`); cite each hit in the entry or reconcile it in a `- decided` line; `related=none` needs nothing
 
 Ask only what changes scope (in/out), the user-visible flow, an edge-case outcome the user must choose, or a conflict with the existing spec. Never ask type, trait or function names, signatures, error variants, config-key spelling, module placement, test strategy, or anything only the code answers: list it under `## Deferred` with its owner and move on. A detail the user volunteers anyway is recorded `decided (user)` under its entry — it binds the architect and the planner.
 

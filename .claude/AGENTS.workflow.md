@@ -148,7 +148,7 @@ status=<token> [file=<path>] [summary=<path>] [stage=s<n>] [issue=<n>] [reason=<
 
 - `question` = a batch of decisions in `artifacts/<slug>/question.md` (*Relayed question*).
 - An agent returning more than the status line is told to move the rest into its file and answer again.
-- Every approval of `spec-diff.md` logs `spec-rev=<N>` on the parent card (the rev `show-file.sh` named). A later stop showing it again runs `show-file.sh` with `PROMPT_SINCE_REV=<that N>`, so `Confirm:` carries only the `(chosen)` lines written since.
+- Every approval of `spec-diff.md` logs `spec-rev=<N>` on the parent card (the rev `show-file.sh` named). A later stop showing it again runs `show-file.sh` with `PROMPT_SINCE_REV=<that N>`, so `Confirm:` carries only the `(chosen)` lines written since, and the `[spec <ID>]` decision lines of `plan.md`/`architecture.md` whose rev is later.
 - A status line naming a file the user must approve (`spec-diff.md`, `pr.md`, the `summary=` path — `architecture.summary.md`, `plan.summary.md`, `review.verdict.md` when it has a `Needs user` item): orchestrator runs `sh .claude/scripts/show-file.sh <path> [<path> ...]` before asking — every file of one approval stop in a single call; it opens each outside the context and prints, per file, one line naming how it was shown plus that file's quotable prompt lines (`prompt-lines.sh`), for the *Approval prompt*.
 
 Reviewer scope tokens: `plan` (gate 2), `plan from s<n>` (*Re-plan*), `stage s<n>`, `delta s<n>` (one stage's spec changes, *Spec changes*), `branch` (gate 3).
@@ -407,7 +407,7 @@ Rewrites every stage without a commit on the branch, the current one included; a
 1. `from` = the lowest stage id whose card has no `commit=`. Log `replan from=s<n>` on the parent card, snapshot `cp artifacts/<slug>/plan.md artifacts/<slug>/plan.prev.md`. The current implementer is dropped, never resumed; its uncommitted work stays in the worktree.
 2. Fresh `spec-planner` (*Gate 2* input, plus `mode=replan from=s<n>`, the reason verbatim, the worktree path). `question`, `arch-gap` and `split` as at gate 2.
 3. `ready` → fresh `spec-reviewer`, scope `plan from s<n>`; rounds per *Verify before an approval stop*.
-4. **Stop**, either lane: `show-file.sh` on `plan.summary.md` (plus `review.verdict.md` with a `Needs user` item), *Approval prompt* headed `Re-plan · <slug> · from s<n>`. Approving will: replace the cards of `s<n>` onward · update the draft PR · spawn a fresh implementer at `s<n>`. Answer: `approve [stop: s4,s5] · switch lane · change <what> · stop`.
+4. **Stop**, either lane: `show-file.sh` on `plan.summary.md` (plus `architecture.summary.md` when its rev moved since the `arch` approval — an arch-gap during the re-plan — and `spec-diff.md` when its rev moved, both with `PROMPT_SINCE_REV`; `review.verdict.md` with a `Needs user` item), *Approval prompt* headed `Re-plan · <slug> · from s<n>`. Approving will: replace the cards of `s<n>` onward · update the draft PR · spawn a fresh implementer at `s<n>`. Answer: `approve [stop: s4,s5] · switch lane · change <what> · stop`.
 5. On approval: append every card-to-replace's `spec-delta … added` lines to the parent card (`grep -h ' spec-delta .* added' <cards> >> <parent card>`, so their IDs stay retired), delete those cards, create the new ones as *Gate 2* step 4, log `replan=approved`, render the draft PR body, spawn the implementer (*Every stage*); its brief says the worktree holds the dropped implementer's uncommitted work.
 
 ### PR feedback

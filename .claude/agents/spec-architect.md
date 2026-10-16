@@ -50,9 +50,11 @@ Goal: <spec-diff.md's Goal line, or the goal verbatim>
 Shape: <one line>
 
 ## Components
-| Component | Kind | Crate › module | Change | Responsibility |
+| Component | Kind | Crate › module | Change | Role |
 |---|---|---|---|---|
-| `<Name>` | struct · trait · enum · module · fn | <crate> › <module> | new · changed · existing · removed | <≤ 10 words> |
+| `<Name>` | struct · trait · enum · module · fn | <crate> › <module> | new · changed · existing · removed | <≤ 10 words; longer when it names what a reviewer needs — key members, variants, signatures> |
+
+`pr-body.sh full` puts this table verbatim under the PR's `## Architecture`; the PR has no interfaces section, so a Role cell carries what a reviewer must know without the diff.
 
 ## Structure
 ```text
@@ -78,7 +80,9 @@ Shape: <one line>
 - ARCHITECTURE.md — <section to update | none>
 
 ## Decisions
-- <choice> (<user | chosen>) — <≤ 1 line why>
+- <choice> (<chosen | user>[, rev M]) [<design | process | spec <ID>>] — <≤ 1 line why>
+
+Tags as in `spec-planner.md`: `[spec <ID>]` fixes or changes observable behavior of that entry and carries `, rev M`; `[design]` is a structure or code choice; `[process]` is workflow. No stage id or agent name.
 
 ## Code map
 ### `<fn, type or quoted unique string>` — <crate> <file>

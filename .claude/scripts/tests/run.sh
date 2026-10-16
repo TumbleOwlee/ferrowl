@@ -69,6 +69,10 @@ printf '%s\n\n%s\n%s\n' '**Status** planned · **Lane** full' '## Goal' kept > "
 printf '\n%s\n\n%s\n%s\n' '**Status** planned · **Lane** full' '## Goal' kept > "$tmp/live-blank.md"
 golden issue-body-status env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/live.md"
 golden issue-body-status-blank env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/live-blank.md"
+printf '%s\n\n%s\n%s\n' '**Spec** rev 3' '## Goal' kept > "$tmp/live-spec.md"
+printf '%s\n\n%s\n%s\n' '**Part of epic** #40' '## Goal' kept > "$tmp/live-slice.md"
+golden issue-body-status-spec env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/live-spec.md"
+golden issue-body-status-slice env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/live-slice.md"
 echo '2026-10-04T10:00 ci=0' >> "$P/.claude/tasks/inprogress/demo.md"
 golden issue-body-status-done env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/live.md"
 
@@ -112,6 +116,7 @@ golden prompt-lines-spec-diff sh "$scripts/prompt-lines.sh" "$A/spec-diff.md"
 golden prompt-lines-since-rev env PROMPT_SINCE_REV=2 sh "$scripts/prompt-lines.sh" "$A/spec-diff.md"
 golden prompt-lines-architecture sh "$scripts/prompt-lines.sh" "$A/architecture.summary.md"
 golden prompt-lines-plan sh "$scripts/prompt-lines.sh" "$A/plan.summary.md"
+golden prompt-lines-plan-since-rev env PROMPT_SINCE_REV=3 sh "$scripts/prompt-lines.sh" "$A/plan.summary.md"
 golden prompt-lines-verdict sh "$scripts/prompt-lines.sh" "$A/review.verdict.md"
 golden prompt-lines-titles sh "$scripts/prompt-lines.sh" "$A/issue.md" "$A/split-issue.md" "$A/pr.md" "$A/follow-up-1.md"
 golden prompt-lines-question sh "$scripts/prompt-lines.sh" "$A/question.md"
@@ -134,6 +139,12 @@ golden issue-request-slice-spec env ISSUE_FIXTURE="$fx/issue/slice.txt" sh "$tmp
 golden issue-request-spec-plain env ISSUE_FIXTURE="$fx/issue/plain.txt" sh "$tmp/ir/issue-request.sh" 7 --spec
 golden issue-request-new env ISSUE_FIXTURE="$fx/issue/new.txt" sh "$tmp/ir/issue-request.sh" 9
 golden issue-request-new-spec env ISSUE_FIXTURE="$fx/issue/new.txt" sh "$tmp/ir/issue-request.sh" 9 --spec
+
+# --- related-ids.sh
+P=$(project); mkdir -p "$P/docs"; ln -s "$fx/specs" "$P/docs/specs"
+golden related-ids env CLAUDE_PROJECT_DIR="$P" sh "$scripts/related-ids.sh" polls slow
+golden related-ids-none env CLAUDE_PROJECT_DIR="$P" sh "$scripts/related-ids.sh" nosuchword
+golden related-ids-literal env CLAUDE_PROJECT_DIR="$P" sh "$scripts/related-ids.sh" "retr.ed"
 
 # --- card-field.sh
 P=$(project)

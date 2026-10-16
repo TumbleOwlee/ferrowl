@@ -1,7 +1,7 @@
 #!/bin/sh
 # Assemble the tracking issue's body from a run's artifacts: what the user
-# gets, never how it is built. Written once, at filing and when a split is
-# filed; afterwards only its status line (line 1) is rewritten.
+# gets, never how it is built. Written once, at filing; afterwards
+# only its status line (line 1) is rewritten, a filed split included.
 #
 #   sh .claude/scripts/issue-body.sh <slug> > <out>
 #

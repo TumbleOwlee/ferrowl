@@ -4,4 +4,5 @@ Surface:
 - `ClientError::Reconnecting`
 Confirm:
 - policy owned by the client task — RTU and TCP share it
+- MB-R-042 — reconnecting is its own state (chosen) — the tab must tell it from disconnected
 exit=0

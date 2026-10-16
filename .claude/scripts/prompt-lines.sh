@@ -26,12 +26,29 @@
 # PROMPT_SINCE_REV=<N> (the spec-diff.md rev the user last approved) keeps
 # only spec-diff.md's `decided (chosen, rev M)` lines with M > N; an untagged
 # `decided (chosen)` line is rev 1.
+# A `[spec <ID>]` decision line of the sibling architecture.md (`## Decisions`)
+# or plan.md (`## Shared` `Decisions:`), `- <choice> (<who>[, rev M]) [spec <ID>]
+# — <why>`, joins that Confirm: as `- <ID> — <choice> (<who>) — <why>`, unless
+# M <= PROMPT_SINCE_REV; design and process lines are never quoted.
 # Other files print nothing. Exit 1 on an unreadable file.
 [ $# -ge 1 ] || { echo "usage: $0 <path> [<path> ...]" >&2; exit 2; }
 rc=0
 confirm=
 nl='
 '
+# stdin: decision lines; prints the [spec <ID>] ones the user has not yet approved
+spec_decisions() {
+    awk -v since="${PROMPT_SINCE_REV:-0}" '
+        !match($0, /\) \[spec [A-Z0-9-]+\]/) { next }
+        {
+            head = substr($0, 1, RSTART - 1); id = substr($0, RSTART + 8, RLENGTH - 9)
+            rest = substr($0, RSTART + RLENGTH); sub(/^ — /, "", rest)
+            who = head; sub(/.* \(/, "", who); choice = head; sub(/ \([^(]*$/, "", choice); sub(/^- /, "", choice)
+            r = 0; if (match(who, /, rev [0-9]+$/)) { r = substr(who, RSTART + 6) + 0; sub(/, rev [0-9]+$/, "", who) }
+            if (r > 0 && r <= since + 0) next
+            print "- " id " — " choice " (" who ") — " rest
+        }'
+}
 for f in "$@"; do
     [ -r "$f" ] || { echo "prompt-lines: not readable: $f" >&2; rc=1; continue; }
     case $(basename "$f") in
@@ -56,6 +73,8 @@ for f in "$@"; do
         sed -n 's/^Interfaces: /Interfaces: /p' "$f"
         awk '/^Public surface:/ { on = 1; next } on && /^- / { if ($0 == "- none") next; if (!p) { print "Surface:"; p = 1 } print; next } on { on = 0 }' "$f"
         c=$(awk '/^Decisions taken \(confirm\):/ { on = 1; next } on && /^- / { print; next } on { on = 0 }' "$f")
+        [ -n "$c" ] && confirm="$confirm$c$nl"
+        c=$(awk '/^## Decisions$/ { on = 1; next } /^## / { on = 0 } on' "$(dirname -- "$f")/architecture.md" 2>/dev/null | spec_decisions)
         [ -n "$c" ] && confirm="$confirm$c$nl" ;;
     slices.md)
         awk '/^## Slice [0-9]+: / { if (t != "") print t; t = $0; sub(/^## Slice /, "- ", t); next }
@@ -81,6 +100,8 @@ for f in "$@"; do
         awk -F'|' '/^\| s[0-9]/ { sid = $2; st = $6; gsub(/^ +| +$/, "", sid); gsub(/^ +| +$/, "", st); if (st ~ /^yes/) { if (!p) { print "Stops:"; p = 1 } print "- " sid " — " st } }' "$f"
         awk '/^Verification beyond unit tests:/ { on = 1; next } on && /^(- |  - )/ { if ($0 == "- none") next; if (!p) { print "Verification:"; p = 1 } print; next } on { on = 0 }' "$f"
         c=$(awk '/^Decisions taken \(confirm\):/ { on = 1; next } on && /^- / { print; next } on { on = 0 }' "$f")
+        [ -n "$c" ] && confirm="$confirm$c$nl"
+        c=$(awk '/^## Shared$/ { sh = 1; next } /^## / { sh = 0 } sh && /^Decisions:/ { on = 1; next } on && /^- / { print; next } on { on = 0 }' "$(dirname -- "$f")/plan.md" 2>/dev/null | spec_decisions)
         [ -n "$c" ] && confirm="$confirm$c$nl" ;;
     review.verdict.md)
         sed -n 's/^Verdict: /Review: /p' "$f"
