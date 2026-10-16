@@ -202,7 +202,7 @@ Question · <slug> · <gate or stage> · <agent> · <n> decisions
 Answer: <1: a · 2: b · …> · other <text>
 ```
 
-Answers go back to the **same** agent (`SendMessage`, never a respawn) in one message, numbered. A decision that depended on an answer arrives in the next `question.md`. A question without a real `Why you:` is sent back: the agent decides it and records `(chosen)`.
+Answers go back to the **same** agent (`SendMessage`, never a respawn) in one message, numbered. A decision marked `Assumes: <n> = <option>` is void when the user answered `<n>` otherwise; the agent asks it again in its next `question.md`, as it does a decision that depended on an answer and waited. A question without a real `Why you:` is sent back: the agent decides it and records `(chosen)`.
 
 ### Gate 1 — brief
 
