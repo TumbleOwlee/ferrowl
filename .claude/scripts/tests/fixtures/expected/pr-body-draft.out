@@ -5,14 +5,31 @@ Draft · lane full · spec rev 5 · gauntlet green at bbb2222
 ## Why
 A client tab reconnects on its own after the server drops the connection.
 
+## Scenarios
+The 1 scenarios of #12: S1 Server restarts during polling
+
 ## Stages
-- [x] s0 — Land spec (aaa1111)
-- [ ] s1 — Retry with backoff in the client task — in review
-- [ ] s2 — Render reconnecting in the tab — blocked by s1
+- [x] Land spec (aaa1111) <!-- s0 -->
+- [ ] Retry with backoff in the client task — in review <!-- s1 blocked-by s0 -->
+- [ ] Render reconnecting in the tab — blocked <!-- s2 blocked-by s1 -->
+  - beyond unit tests: demo TUI
+    - stop the demo server, see "reconnecting", restart it, polling resumes
+    - cannot be waived without asking
 
 ## Review here
-- on the branch: s0 — inline comments on their files come back to the implementer before the next stop
+- on the branch: Land spec — inline comments on their files are answered before the next stop
 - later stages land after their review and the user's approval
+
+## Architecture
+1 new, 1 changed components in ferrowl-modbus; `ReconnectPolicy` owned by the client task
+
+| Component | Kind | Crate › module | Change | Role |
+|---|---|---|---|---|
+| `ReconnectPolicy` | struct | ferrowl-modbus › client::reconnect | new | backoff 1s to 30s, capped by `max_backoff` |
+| `ConnectedCell` | struct | ferrowl-modbus › client | changed | holds a three-state `ConnState` (`Connected`, `Reconnecting`, `Disconnected`) the tab renders |
+
+Public surface:
+- `ClientError::Reconnecting`
 
 Closes #12
 exit=0

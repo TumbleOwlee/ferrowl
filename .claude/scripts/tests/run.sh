@@ -107,6 +107,15 @@ golden spec-render-missing sh "$scripts/spec-render.sh" "$P/nosuch.md" scenarios
 # --- pr-body.sh
 golden pr-body-draft env CLAUDE_PROJECT_DIR="$P" sh "$scripts/pr-body.sh" demo draft
 golden pr-body-full env CLAUDE_PROJECT_DIR="$P" sh "$scripts/pr-body.sh" demo full
+golden pr-body-mrcpr env CLAUDE_PROJECT_DIR="$P" sh "$scripts/pr-body.sh" mrcpr full
+golden pr-body-mrcpr-draft env CLAUDE_PROJECT_DIR="$P" sh "$scripts/pr-body.sh" mrcpr draft
+cp -R "$P/.claude/tasks/artifacts/demo" "$P/.claude/tasks/artifacts/sref2"
+sed -i 's/retry with backoff/retry with backoff as in s2/' "$P/.claude/tasks/artifacts/sref2/pr.md"
+cp -R "$P/.claude/tasks/artifacts/demo" "$P/.claude/tasks/artifacts/vmulti"
+sed -i 's/^- s2 — demo TUI/- s1, s2 — demo TUI/' "$P/.claude/tasks/artifacts/vmulti/plan.summary.md"
+n=$(env CLAUDE_PROJECT_DIR="$P" sh "$scripts/pr-body.sh" vmulti draft 2>/dev/null | grep -c '^  - beyond unit tests: demo TUI$')
+[ "$n" = 2 ] && ok pr-body-verif-multi || bad pr-body-verif-multi "a verification line naming two stages shows under both, got $n"
+golden pr-body-refused env CLAUDE_PROJECT_DIR="$P" sh "$scripts/pr-body.sh" sref2 full
 mkdir -p "$P/.claude/tasks/inreview" && cp "$P/.claude/tasks/done/demo.s0.md" "$P/.claude/tasks/inreview/"
 golden pr-body-duplicate-card env CLAUDE_PROJECT_DIR="$P" sh "$scripts/pr-body.sh" demo draft
 
