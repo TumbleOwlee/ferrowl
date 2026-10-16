@@ -133,6 +133,14 @@ out=$(sh "$scripts/gauntlet.sh" "$tmp/g" "$G" 2>/dev/null)
 case $out in "gauntlet=fail step=fmt "*) ok gauntlet-untracked-misses-cache ;; *) bad gauntlet-untracked-misses-cache "$out" ;; esac
 [ "$(git -C "$tmp/g" status --porcelain)" = "?? b.txt" ] && ok gauntlet-index-untouched || bad gauntlet-index-untouched "the worktree's own index stays as it was"
 
+# --- metrics.sh
+P=$(project); D=$P/.claude/tasks
+printf '%s\n' '2026-10-03T08:50 stop kind=approval' '2026-10-03T09:30 stop kind=question' '2026-10-03T10:40 replan from=s2' '2026-10-03T10:50 stop kind=approval' >> "$D/inprogress/demo.md"
+echo '2026-10-03T10:05 test-red MB-R-161 it_backoff_caps' >> "$D/inreview/demo.s1.md"
+golden metrics env CLAUDE_PROJECT_DIR="$P" METRICS_NOW=2026-10-04T12:00 sh "$scripts/metrics.sh" demo
+[ "$(cat "$D/metrics.log")" = "$(sed -n 1p "$fx/expected/metrics.out")" ] && ok metrics-log || bad metrics-log "the printed line is appended to metrics.log"
+golden metrics-no-card env CLAUDE_PROJECT_DIR="$P" sh "$scripts/metrics.sh" nosuch
+
 # --- hook guards
 P=$(project); seq 1 100 > "$P/big.txt"; printf '# x\n' > "$P/notes.md"
 hook shell-cat-md hook-guard-shell.sh 'cat notes.md' deny

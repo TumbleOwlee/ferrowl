@@ -25,6 +25,7 @@ Gate 2 onward.
 - **One implementer at a time**, stages in plan order.
 - **The run ends when the PR is ready and CI is green** — then *Clean up* removes everything local. Merge happens outside the workflow.
 - **Every state change moves a task-board card.** State living only in conversation dies with the session.
+- **Every stop is logged** — before asking, the orchestrator appends `stop kind=<question|approval|stage|blocked>` to the parent card (`approval`: gate, architecture, epic, delta and re-plan stops). `metrics.sh` counts them at the end of the run. A workflow change that adds stops or agents names its expected effect on `metrics.log` in its PR.
 
 ### Lane — fast or full
 
@@ -58,6 +59,7 @@ Directory a card sits in **is** its state:
 ```
 .claude/tasks/
   open/  inprogress/  inreview/  done/   cards move between these
+  metrics.log          one line per finished run (metrics.sh), never cleaned up
   artifacts/<slug>/
     spec-diff.md       gate 1 brief, then the run's spec until s0 — local IDs until gate 2; synced from the branch at gate 4
     architecture.md    components, structure, interactions, public surface, code map — the plan's target
@@ -249,7 +251,7 @@ A feature too big for one run: the author answered `size=epic`, or the architect
    1. File or rewrite the epic issue from `issue-body.sh <slug>` (*Tracking issue*); record `issue`.
    2. Per slice, in `slices.md` order: `sh .claude/scripts/issue-body.sh <slug> --slice <n> > artifacts/<slug>/slice-<n>.md`; an open issue already titled exactly as its line 1 (`gh issue list --state open --search "<title> in:title"`) is adopted, never filed twice — else `gh issue create` from it (title = line 1, body = the rest); then append the number to the parent card's `slices:` — a later slice's `Depends on` links it.
    3. Reassemble and edit the epic issue's body: its `## Slices` list now links every child.
-   4. *Clean up* — no worktree to remove; cards and artifacts go.
+   4. `sh .claude/scripts/metrics.sh <slug>`, then *Clean up* — no worktree to remove; cards and artifacts go.
    5. One notice line: `Epic · <slug> · #<e> · slices #a, #b, … filed · start with /spec-feature on #a`.
 
 The human closes the epic once its last slice merges.
@@ -480,12 +482,12 @@ gh pr ready <pr>
 gh pr checks <pr> --watch > artifacts/<slug>/ci.log 2>&1; echo "ci=$?"
 ```
 
-  - `ci=0` → *Clean up*.
+  - `ci=0` → `sh .claude/scripts/metrics.sh <slug>`, then *Clean up*.
   - otherwise → `bash .claude/scripts/failed-workflow.sh <branch>`, never raw `gh run view`; implicated stage card → `inprogress/`, resume or spawn the implementer to fix, gauntlet, push, wait again. No stop unless a fix needs a user decision.
 
 ### Clean up
 
-The run's last step, right after CI is green — no approval stop: the issue and the PR hold everything that outlives the run. The human reviews and merges on GitHub, outside the workflow.
+The run's last step, right after CI is green and `metrics.sh` has run — no approval stop: the issue and the PR hold everything that outlives the run, `metrics.log` its cost. The human reviews and merges on GitHub, outside the workflow.
 
 ```sh
 sh .claude/scripts/run-cleanup.sh <slug>

@@ -174,7 +174,12 @@ sequenceDiagram
     loop every stage, in plan order
         Impl->>Git: in worktree: failing test, minimum pass, refactor (stage 0, if any = spec text)
         Note over Impl: may update the spec in the stage commit, logged per change
-        Impl-->>Orch: stage green, stage id, spec change count
+        opt a decision the plan and spec leave open, or the plan does not fit
+            Impl-->>Orch: question batch, or blocked with a reason
+            Orch->>User: questions, or answer, re-plan or stop
+            Note over Orch,Planner: re-plan: a fresh planner rewrites the stages not yet committed, reviewed, one approval stop, a fresh implementer
+        end
+        Impl-->>Orch: stage green (format, lint, its crates' tests), stage id, spec change count
         Orch->>Git: run the full check suite in the worktree
         Orch->>Reviewer: fresh review: stage
         activate Reviewer
@@ -204,7 +209,7 @@ sequenceDiagram
         Orch->>Impl: commit
         Impl->>Git: commit stage in worktree
         Impl-->>Orch: committed
-        Orch->>Git: push, re-run checks on the pushed commit
+        Orch->>Git: push, checks on the pushed commit (cached: it is the reviewed tree)
         opt first push of the branch
             Orch->>Git: open draft PR, body assembled from the stage board
             Note over Orch,Git: the body is re-rendered on every card move, the user reviews there, gate 4 marks it ready
@@ -233,15 +238,15 @@ sequenceDiagram
     rect rgba(47,111,78,0.10)
     Note over User,Git: Gate 4 - pull request
     Orch->>Author: resume: worktree, plan, review, check log
-    Note over Author: syncs the brief to the branch's spec, then writes the PR body
-    Author-->>Orch: ready, PR body written
+    Note over Author: syncs the brief to the branch's spec, then writes the PR body and one issue draft per out-of-scope follow-up
+    Author-->>Orch: ready, PR body and follow-ups written
     deactivate Author
     Orch->>Orch: assemble the final issue and PR bodies
-    Orch->>User: approval stop: PR body, approve or manual run first?
+    Orch->>User: approval stop: PR body and follow-ups, approve or manual run first?
     User->>Orch: approved
-    Orch->>Git: push, rewrite the issue with the merged spec, replace the draft PR's title and body, mark ready
+    Orch->>Git: push, rewrite the issue with the merged spec, replace the draft PR's title and body, mark ready, file the kept follow-ups
     Orch->>Git: wait for CI, on red the implementer fixes, push, wait again
-    Orch->>Orch: clean up: worktree, local branch, cards, artifact dir
+    Orch->>Orch: append the run's metrics line, then clean up: worktree, local branch, cards, artifact dir
     Note over User,Git: the run ends here, the human reviews and merges on GitHub, outside the workflow
     deactivate Orch
     end
