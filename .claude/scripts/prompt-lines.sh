@@ -17,6 +17,7 @@
 #   review.verdict.md  Review: (the Verdict line) · Not checked: · Spec: · Spec changes: · Minors (…): · Needs user: — a block whose only item is `- none` is skipped
 #   issue.md           Issue: <title>
 #   split-issue.md     Split: <title>
+#   follow-up-<k>.md   Follow-up <k>: <title>
 #   pr.md              PR: <title>
 #   question.md        the whole file (it is written to be quoted)
 # then, once, over every file given: Confirm: with every `decided (chosen)`
@@ -90,6 +91,7 @@ for f in "$@"; do
         awk '/^Needs user/ { on = 1; next } on && /^(- |  - )/ { if ($0 == "- none") next; if (!p) { print "Needs user:"; p = 1 } print; next } on { on = 0 }' "$f" ;;
     issue.md) printf 'Issue: %s\n' "$(head -1 "$f" | sed 's/^# //')" ;;
     split-issue.md) printf 'Split: %s\n' "$(head -1 "$f" | sed 's/^# //')" ;;
+    follow-up-*.md) k=$(basename "$f" .md); printf 'Follow-up %s: %s\n' "${k#follow-up-}" "$(head -1 "$f" | sed 's/^# //')" ;;
     pr.md) printf 'PR: %s\n' "$(head -1 "$f" | sed 's/^# //')" ;;
     question.md) cat "$f" ;;
     esac

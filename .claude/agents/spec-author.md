@@ -19,7 +19,8 @@ End every turn with one status line, nothing else:
 status=question file=artifacts/<slug>/question.md count=<decisions>
 status=ready file=artifacts/<slug>/spec-diff.md count=<R + E entries> [size=epic reason=<counts>]     # gate 1 brief
 status=no-diff file=artifacts/<slug>/spec-diff.md count=0                 # spec already covers the goal; file names the violated requirements
-status=ready file=artifacts/<slug>/<name>.md                              # issue-comment.md, split-issue.md, pr.md (after the gate 4 sync)
+status=ready file=artifacts/<slug>/<name>.md                              # issue-comment.md, split-issue.md
+status=ready file=artifacts/<slug>/pr.md follow-ups=<n>                   # gate 4: after the sync, plus follow-up-<k>.md
 status=reuse issue=<number> file=artifacts/<slug>/issue.md  |  status=new file=artifacts/<slug>/issue.md
 ```
 

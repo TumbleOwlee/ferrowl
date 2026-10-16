@@ -76,7 +76,7 @@ golden prompt-lines-since-rev env PROMPT_SINCE_REV=2 sh "$scripts/prompt-lines.s
 golden prompt-lines-architecture sh "$scripts/prompt-lines.sh" "$A/architecture.summary.md"
 golden prompt-lines-plan sh "$scripts/prompt-lines.sh" "$A/plan.summary.md"
 golden prompt-lines-verdict sh "$scripts/prompt-lines.sh" "$A/review.verdict.md"
-golden prompt-lines-titles sh "$scripts/prompt-lines.sh" "$A/issue.md" "$A/split-issue.md" "$A/pr.md"
+golden prompt-lines-titles sh "$scripts/prompt-lines.sh" "$A/issue.md" "$A/split-issue.md" "$A/pr.md" "$A/follow-up-1.md"
 golden prompt-lines-question sh "$scripts/prompt-lines.sh" "$A/question.md"
 golden prompt-lines-violated sh "$scripts/prompt-lines.sh" "$P/.claude/tasks/artifacts/violated/spec-diff.md"
 golden prompt-lines-slices sh "$scripts/prompt-lines.sh" "$P/.claude/tasks/artifacts/lb/slices.md"

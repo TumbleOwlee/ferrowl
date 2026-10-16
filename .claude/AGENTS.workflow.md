@@ -77,6 +77,7 @@ Directory a card sits in **is** its state:
     request.md         the request issue's original body, stored once (gate 1 or reuse)
     issue-comment.md   changelog comment of the latest user-approved spec change after filing
     split-issue.md     an issue split off (*Spec changes*)
+    follow-up-<k>.md   gate 4: an issue for something the run noticed outside its goal
     pr.md              gate 4 PR title + body (*Gate 4 — pull request*)
     pr-feedback.md     unresolved PR review threads (*PR feedback*)
 ```
@@ -171,6 +172,8 @@ Stops:
 - <stages the plan marks stop, with why>
 Issue: <new | reuse #<n>> — <issue.md's title>                                        ← new/reuse from the author's status line
 Split: <split-issue.md's title>
+Follow-ups:
+- <Follow-up <k>: title, one per follow-up-<k>.md>                                 ← all filed unless the answer narrows them
 Verification:
 - <plan.summary.md's lines>
 Confirm:
@@ -454,14 +457,14 @@ Before proposing a PR, whole-branch pass — cross-stage bugs, spec drift across
 
 - Gauntlet + gate 3 clean, *PR feedback* at `threads=0`.
 - **ID collisions** — another run may have landed the same fixed IDs meanwhile: `git -C <worktree> fetch -q origin main && sh .claude/scripts/id-collisions.sh <worktree>`. `ids=collide <IDs>` → resume the implementer to renumber them on the branch (spec, test citations, `spec-delta` log), gauntlet, push, check again.
-- `spec-author`, given the worktree path, syncs `spec-diff.md` from the branch's `docs/specs/` and writes `artifacts/<slug>/pr.md` in **full form** (content rules in its file; `.github/PULL_REQUEST_TEMPLATE.md` carries the same sections for human PRs). Orchestrator assembles both bodies:
+- `spec-author`, given the worktree path and the board root, syncs `spec-diff.md` from the branch's `docs/specs/`, writes `artifacts/<slug>/pr.md` in **full form** and one `follow-up-<k>.md` per thing the run noticed outside its goal (implementer cards' `follow-up` lines, `review.md`'s `follow-up — ` lines; answers `follow-ups=<n>`) (content rules in its file; `.github/PULL_REQUEST_TEMPLATE.md` carries the same sections for human PRs). Orchestrator assembles both bodies:
 
 ```sh
 sh .claude/scripts/issue-body.sh <slug> > artifacts/<slug>/issue-body.md
 sh .claude/scripts/pr-body.sh <slug> full > artifacts/<slug>/pr-full.md
 ```
 
-- **One stop**: `show-file.sh` on `pr.md` (fast lane: plus `review.verdict.md`, per *Agent hand-off*); approving will push · rewrite issue #<n>'s body with the merged spec · replace the draft's title and body · mark #<pr> ready · wait for CI · clean up. Answer: `approve · manual run first · change <what> · stop` — the user may want a manual run; don't pre-empt it. Approved → push, rewrite the issue body, replace the draft's title and body, mark ready, log `pr=ready`:
+- **One stop**: `show-file.sh` on `pr.md` and every `follow-up-<k>.md` (fast lane: plus `review.verdict.md`, per *Agent hand-off*); approving will push · rewrite issue #<n>'s body with the merged spec · replace the draft's title and body · mark #<pr> ready · file the <n> follow-up issues · wait for CI · clean up. Answer: `approve [follow-ups: 1,3 | none] · manual run first · change <what> · stop` — no list files every follow-up — the user may want a manual run; don't pre-empt it. Approved → push, rewrite the issue body, replace the draft's title and body, mark ready, log `pr=ready`:
 
 ```sh
 gh issue edit <n> --body-file <(tail -n +2 artifacts/<slug>/issue-body.md)
@@ -470,6 +473,7 @@ gh pr ready <pr>
 ```
 
 - No draft exists (run predates this rule, or resumed from a board that lacks `pr`): `gh pr create` with the same title and body file instead of `edit`+`ready`.
+- **Follow-ups**, right after `pr=ready`: each one the answer kept is filed as in *Tracking issue* (title = line 1, body = the rest) with `Found in #<issue>` appended as its last line; log `follow-ups=[<n>, …]` on the parent card. A dropped one is never filed.
 - **CI** — wait for the PR's checks, one status line in context:
 
 ```sh

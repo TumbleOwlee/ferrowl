@@ -31,6 +31,7 @@ Vocabulary (the only events you log):
 2026-01-02T14:13 commit=<sha>
 2026-01-02T14:14 feedback=<n>
 2026-01-02T14:15 stopped: <what and why>
+2026-01-02T14:16 follow-up <what> — <where> — <why it matters>
 ```
 
 Given up to 3 code stages of the run (`s0` aside) — and only the plan: a slice run's epic context reaches you through it, never directly; a fresh implementer takes the next ones from your card. Implement them in plan order, within the `files` contract (`AGENTS.md` `## Workflow`). Stage `s0` (`Land spec`), when the plan has one, is yours: copy the approved text where the plan says — `**bold**` marks in a changed entry are stripped and the heading's ` · was R<n>` is dropped, the landed line is plain — one commit, no code.
@@ -81,6 +82,7 @@ Leave uncommitted work where it is — never revert it: a re-plan starts from th
 - Push, open a PR, merge, reply on or resolve a PR thread — orchestrator's (`pr-feedback.sh reply` posts your reply blocks after the push).
 - Move your card to `done/` — orchestrator's, after push + independent verify.
 - Touch the parent card or a card of a stage you weren't given.
+- Fix something outside your stage's goal (duplicated logic, a missing test elsewhere, a bug in code your stage doesn't touch) — log it as `follow-up` instead.
 - Log a step you didn't run or a fake `commit=` sha.
 
 ## Hand-off
