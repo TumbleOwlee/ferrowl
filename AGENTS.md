@@ -72,7 +72,7 @@ cargo check -p ferrowl-ocpp               # typecheck one crate
 cargo llvm-cov --workspace --html         # browsable per-line coverage
 ```
 
-Full set before done. `lefthook` enforces `fmt --check` and `clippy -D warnings` pre-commit; CI runs the full set plus `cargo deny check` on every push **and every pull request** (NF-R-055, NF-R-056).
+Full set before done (in a spec-driven run: the orchestrator's `gauntlet.sh`). `lefthook` enforces `fmt --check` and `clippy -D warnings` pre-commit; CI runs the full set plus `cargo deny check` on every push **and every pull request** (NF-R-055, NF-R-056).
 
 Dev loop: `cargo run --release -- --demo` (built-in demo tabs, no config) or `cargo build --profile fastrel` (opt-level 1, faster iterative builds).
 

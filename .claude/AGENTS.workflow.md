@@ -47,7 +47,7 @@ Recommended full, user picks fast at the brief stop: the architecture stop is fa
 ### Verify before an approval stop
 
 By running, never by reading:
-- **Gauntlet** — `sh .claude/scripts/gauntlet.sh <worktree> .claude/tasks/artifacts/<slug>` in the agent's worktree: one status line in context, full output in `artifacts/<slug>/gauntlet.log`.
+- **Gauntlet** — `sh .claude/scripts/gauntlet.sh <worktree> .claude/tasks/artifacts/<slug>` in the agent's worktree: one status line in context, full output in `artifacts/<slug>/gauntlet.log`. The full set runs once per tree: a pass is cached by the worktree's tree, so the same tree again (committed, pushed) answers `gauntlet=pass … cached` at once. The implementer runs only fmt, clippy and its crates' tests; the full set is this one. `GAUNTLET_FORCE=1` reruns a cached tree.
 - **A fresh `spec-reviewer` per scope** — never the planner or implementer: one sharing the author's context reproduces its blind spots. A follow-up pass in the same scope (plan, a stage, a delta) **resumes that reviewer** (`SendMessage`) with the `review.md` path and `follow-up` (`spec-reviewer.md` `## Follow-up pass`). Fresh anyway when that reviewer is gone (a resumed session) and on every gate 3 `branch` pass — the last check before the PR gets fresh eyes. Plan scope: before resuming the planner with findings, the orchestrator snapshots `cp artifacts/<slug>/plan.md artifacts/<slug>/plan.prev.md`, so the follow-up diffs the revision itself instead of trusting the planner's account.
 - **Minors never wait for the user.** The verdict names where they go: `Minors (folded into s<n+1>)` when a stage follows, `Minors (fixed before commit)` when none does — a last stage, a branch review. Folded: the orchestrator logs each as `<ts> minor=<verdict line>` on the next stage's card and repeats them in the implementer's brief. Fixed before commit: the implementer is resumed with them at once, fixes, gauntlet, no re-review, then the stage's commit (fast lane: commit on green). Only `count>0` (blockers + majors) loops, and at most **two** fix-and-review rounds per scope: findings still open after the second round go to the user as `Needs user` items on the verdict.
 
@@ -68,6 +68,7 @@ Directory a card sits in **is** its state:
     review.md          review findings + history, keyed by stage id, append-only
     review.verdict.md  open findings per stage, rewritten every pass, capped
     gauntlet.log       full build/test/lint output of the last gauntlet.sh run
+    gauntlet.pass      tree hash + coverage of the last passing tree, gauntlet.sh's cache
     question.md        an agent's batch of decisions for the user (*Relayed question*)
     slices.md          epic run: the ordered slices, each later its own issue (*Epic*)
     slice-<n>.md       epic run: slice n's assembled issue body
@@ -102,7 +103,7 @@ branch: <type>/<slug>
 worktree: .claude/worktrees/<slug>
 ---
 2026-01-02T14:02 spawn agent=impl
-2026-01-02T14:12 gauntlet=pass
+2026-01-02T14:12 checks=pass crates=ferrowl-modbus
 ```
 
 Stage frontmatter `title` = the stage's display name, the text after `## Stage s<n>: ` in its `plan.md` heading.
@@ -334,7 +335,7 @@ Per stage:
 
 1. Green: card → `inreview`, `status=inreview stage=s<n>`. Orchestrator runs `gauntlet.sh` and the per-stage review below.
 2. Both clean → *Stage stop* rules decide: a rule fires → user approval stop; none fires → auto-continue (no stop). Either way the same implementer (resumed) commits, answers `status=committed`.
-3. Orchestrator pushes the worktree (push is never the implementer's), re-runs `gauntlet.sh` on the pushed sha, logs `gauntlet=pass sha=<sha>` on the parent card, card → `done`.
+3. Orchestrator pushes the worktree (push is never the implementer's), runs `gauntlet.sh` on the pushed sha (`cached` when the commit is the reviewed tree), logs `gauntlet=pass sha=<sha>` on the parent card, card → `done`.
 
 #### Per-stage review
 

@@ -27,7 +27,7 @@ Vocabulary (the only events you log):
 2026-01-02T14:05 test-red <ID> <test name>
 2026-01-02T14:09 green
 2026-01-02T14:10 spec-delta <ID> <added | changed | dropped> <≤ 8 words why>
-2026-01-02T14:12 gauntlet=pass cov=<n>%            | gauntlet=fail <one-line reason>
+2026-01-02T14:12 checks=pass crates=<crate,…>       | checks=fail <one-line reason>
 2026-01-02T14:13 commit=<sha>
 2026-01-02T14:14 feedback=<n>
 2026-01-02T14:15 stopped: <what and why>
@@ -46,17 +46,22 @@ A reviewer classifies every change; one that contradicts a scenario or a user de
 - Start: card `open`→`inprogress/`. Green: card →`inreview/`, end turn on `status=inreview stage=s<n> delta=<n>` (fast lane: `status=committed`, below).
 - Fast lane (brief says `lane=fast`): commit on green — no `status=inreview` — then end turn on `status=committed stage=s<n> delta=<n>`; resumed, take the next stage. Fixes (review findings, PR feedback, a red gauntlet) are committed on green the same way, answering `status=committed`. The orchestrator pushes and verifies between stages; a review comes once, over the whole branch.
 - Full lane: commit only once resumed with approval, then `status=committed stage=s<n> delta=<n>`. Stage messages cheap, squashed later.
-- Resumed with a `review.md` path: fix exactly its findings for your stage, re-run the gauntlet, then the lane's status above.
-- Resumed with the user's answer on a spec change (keep, revert, narrow for a split): apply exactly that, re-run the gauntlet, then the lane's status.
+- Resumed with a `review.md` path: fix exactly its findings for your stage, re-run the checks (`## Stage completion`), then the lane's status above.
+- Resumed with the user's answer on a spec change (keep, revert, narrow for a split): apply exactly that, re-run the checks (`## Stage completion`), then the lane's status.
 - Minors in your brief (the `minor=` log lines of your card) are folded into your next stage's work; when no stage follows (a last stage, a branch review) you are resumed with them and fix them before the commit — never skipped.
 
 ## PR feedback
 
-Resumed with a `pr-feedback.md` path: the user's inline PR comments, one `## thread` each — findings with the same authority as the approved plan's reviewer. Fix each thread that falls inside your stage's files, then fill that thread's `reply:` block and leave everything else in the file untouched. A reply is `reply: fixed` or `reply: declined` followed by indented `- ` lines (what changed, an example if any, the test; or the reason — a cited ID or plan step — and what the user can do); never a sha or stage, the orchestrator's push fills `Fixed in s<n> (<sha>)`. `declined` leaves the thread open for the user; log `feedback=<n>` on your card; re-run the gauntlet, then the lane's status (`## Stage flow`). A thread asking for behavior the spec doesn't cover is a spec change (`## Spec changes`): make it, reply `fixed`. A thread that is a question, or ambiguous → `status=blocked stage=s<n> reason=<thread id: the question>`, `reply:` stays empty.
+Resumed with a `pr-feedback.md` path: the user's inline PR comments, one `## thread` each — findings with the same authority as the approved plan's reviewer. Fix each thread that falls inside your stage's files, then fill that thread's `reply:` block and leave everything else in the file untouched. A reply is `reply: fixed` or `reply: declined` followed by indented `- ` lines (what changed, an example if any, the test; or the reason — a cited ID or plan step — and what the user can do); never a sha or stage, the orchestrator's push fills `Fixed in s<n> (<sha>)`. `declined` leaves the thread open for the user; log `feedback=<n>` on your card; re-run the checks (`## Stage completion`), then the lane's status (`## Stage flow`). A thread asking for behavior the spec doesn't cover is a spec change (`## Spec changes`): make it, reply `fixed`. A thread that is a question, or ambiguous → `status=blocked stage=s<n> reason=<thread id: the question>`, `reply:` stays empty.
 
 ## Stage completion
 
-Run the full gauntlet from `AGENTS.md`'s `## Build / test / lint`; log its `gauntlet=` line — never an excerpt, never a log.
+Before every `inreview` or `committed` answer, in the worktree:
+- `cargo fmt --check`
+- `cargo clippy --workspace -- -D warnings` — type-checks and lints every crate, so a dependent crate your change broke fails here
+- `cargo test -p <crate>` for every crate whose files you changed
+
+Log `checks=pass crates=<the tested crates>` or `checks=fail <one-line reason>` — never an excerpt, never a log. No coverage run, no workspace-wide test run: the orchestrator runs the full gauntlet of `AGENTS.md`'s `## Build / test / lint` on the tree you hand over and resumes you when it fails.
 
 ## Ask or stop — never improvise
 

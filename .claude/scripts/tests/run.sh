@@ -120,6 +120,19 @@ out=$(cd "$tmp" && CLAUDE_PROJECT_DIR="$P" sh "$scripts/gauntlet.sh" "$tmp/no-wo
 [ "$out" = "gauntlet=fail step=cd reason=no-worktree" ] && ok gauntlet-no-worktree || bad gauntlet-no-worktree "$out"
 [ -f "$P/.claude/tasks/artifacts/demo/gauntlet.log" ] && [ ! -e "$tmp/artifacts" ] && ok gauntlet-artifacts-shorthand || bad gauntlet-artifacts-shorthand "artifacts/<slug> resolves under the board"
 
+# gauntlet.sh pass cache: keyed by the worktree's tree, untracked files included
+rm -rf "$tmp/g"; git init -q -b main "$tmp/g"; echo a > "$tmp/g/a.txt"
+git -C "$tmp/g" add a.txt; git -C "$tmp/g" -c user.name=t -c user.email=t@t commit -qm a
+G=$P/.claude/tasks/artifacts/demo; echo "$(git -C "$tmp/g" rev-parse 'HEAD^{tree}') 81.2%" > "$G/gauntlet.pass"
+out=$(sh "$scripts/gauntlet.sh" "$tmp/g" "$G" 2>/dev/null)
+[ "$out" = "gauntlet=pass cov=81.2% sha=$(git -C "$tmp/g" rev-parse --short HEAD) cached" ] && ok gauntlet-cached || bad gauntlet-cached "$out"
+out=$(GAUNTLET_FORCE=1 sh "$scripts/gauntlet.sh" "$tmp/g" "$G" 2>/dev/null)
+case $out in "gauntlet=fail step=fmt "*) ok gauntlet-force ;; *) bad gauntlet-force "$out" ;; esac
+echo b > "$tmp/g/b.txt"
+out=$(sh "$scripts/gauntlet.sh" "$tmp/g" "$G" 2>/dev/null)
+case $out in "gauntlet=fail step=fmt "*) ok gauntlet-untracked-misses-cache ;; *) bad gauntlet-untracked-misses-cache "$out" ;; esac
+[ "$(git -C "$tmp/g" status --porcelain)" = "?? b.txt" ] && ok gauntlet-index-untouched || bad gauntlet-index-untouched "the worktree's own index stays as it was"
+
 # --- hook guards
 P=$(project); seq 1 100 > "$P/big.txt"; printf '# x\n' > "$P/notes.md"
 hook shell-cat-md hook-guard-shell.sh 'cat notes.md' deny
