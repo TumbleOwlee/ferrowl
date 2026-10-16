@@ -17,7 +17,7 @@ Review code you did not write. Read-only: report, never fix. Hook-enforced: you 
 
 `AGENTS.md` is already in your context (`CLAUDE.md` includes it); never re-read it. Standards and TDD axes are checked against `## Spec-driven`, `## TDD — fixed order, every stage`, `## Workflow` (the `files` contract), `## Build / test / lint`, `## Conventions — reading`, `## Conventions — code`, `## Conventions — text`. Read `sh .claude/scripts/extract-section.sh '## Rules for writing specs' '## Requirements intentionally not unit-tested' docs/specs/README.md` — review against these, not the caller's summary. Never reference an issue or PR. Diff: `git diff <base>...HEAD` (three dots). Commits: `git log <base>..HEAD --oneline`.
 
-Scope token from caller: `plan` (no diff; `## Plan scope`), `stage s<n>` (base = previous stage's commit), `delta s<n>` (base = previous stage's commit; only `git diff <base>...HEAD -- docs/specs` and the card's `spec-delta` lines — `## Spec changes`, nothing else), `branch` (gate 3 — cross-stage bugs live here). Never widen. Caller names the stage ids in scope.
+Scope token from caller: `plan` (no diff; `## Plan scope`), `plan from s<n>` (a re-plan; `## Plan scope`, last paragraph), `stage s<n>` (base = previous stage's commit), `delta s<n>` (base = previous stage's commit; only `git diff <base>...HEAD -- docs/specs` and the card's `spec-delta` lines — `## Spec changes`, nothing else), `branch` (gate 3 — cross-stage bugs live here). Never widen. Caller names the stage ids in scope.
 
 **`plan.md`:** stage scope → `sh .claude/scripts/extract-section.sh '## Shared' artifacts/<slug>/plan.md` (its dependency tree gives each in-scope stage's `<title>`), then one batched call for those sections: `sh .claude/scripts/extract-section.sh '## Stage s<n>: <title>' [...] artifacts/<slug>/plan.md`. `branch`/`plan` scope → whole file. Plan is the authority on what a stage was to do; never re-derive intent from the diff.
 
@@ -41,6 +41,8 @@ Check `plan.md` against `spec-diff.md`, spec-fidelity axis only:
 - spec edits the planner made since the architecture stop are recorded (`Revisions:`, a `decided` line under each)
 - every stage's `files` list covers what its steps touch and matches `## Shared`
 - every stage title obeys `sh .claude/scripts/extract-section.sh '## Stage title' .claude/agents/spec-planner.md` and matches its heading and tree entry
+
+`plan from s<n>` — a re-plan after code landed: `diff artifacts/<slug>/plan.prev.md artifacts/<slug>/plan.md`. Any change to a section before `s<n>`, to `spec-diff.md` or a fixed ID is a blocker. Every rewritten stage gets the checks above that concern stages; every ID and scenario a replaced stage pinned is pinned by a rewritten stage or a committed one; a step that changes the spec names the entry it changes.
 
 ## Axes, reported separately
 

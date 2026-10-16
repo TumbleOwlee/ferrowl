@@ -14,7 +14,7 @@ No issue/PR/tracker knowledge — never reference one; orchestrator owns that.
 
 `AGENTS.md` is already in your context (`CLAUDE.md` includes it); never re-read it. Binding here: `## Spec-driven`, `## TDD — fixed order, every stage`, `## Workflow` (the `files` contract), `## Build / test / lint`, `## Conventions — reading`, `## Conventions — code`, `## Conventions — text`, `## Scope boundaries — check with the user before`. Never `.claude/AGENTS.workflow.md` — gate/board mechanics are the orchestrator's.
 
-Given `plan.md`'s path and your stage id(s): pull only your section(s), one batched call: `sh .claude/scripts/extract-section.sh '## Stage s<n>: <title>' ['## Shared'] artifacts/<slug>/plan.md` (`<title>` = the card's `title:`) (`## Shared` only if your steps point to it). Plan's inline refs carry the exact existing signature/pattern each step needs. **Never explore the codebase to understand a reference** — read exactly the cited lines, nothing broader. A reference too thin to act on is a wrong plan (stop-and-report), not a cue to search.
+Given `plan.md`'s path and your stage id(s): pull only your section(s), one batched call: `sh .claude/scripts/extract-section.sh '## Stage s<n>: <title>' ['## Shared'] artifacts/<slug>/plan.md` (`<title>` = the card's `title:`) (`## Shared` only if your steps point to it). Plan's inline refs carry the exact existing signature/pattern each step needs. **Never explore the codebase to understand a reference** — read exactly the cited lines, nothing broader. A reference too thin to act on is a wrong plan (`status=blocked`, `## Ask or stop`), not a cue to search.
 
 Work **only** inside your worktree path — never the main checkout, never another agent's worktree. Never `git add -A` outside your assigned path.
 
@@ -37,7 +37,7 @@ Given up to 3 code stages of the run (`s0` aside) — and only the plan: a slice
 
 ## Spec changes
 
-After `s0` the branch's `docs/specs/` is the spec, and it settles with the code. Implementation shows an entry wrong, incomplete or missing (a `## Deferred` item owned by `implementation` included): change `docs/specs/` inside the current stage's commit and keep going. A new entry takes the next free ID of its prefix and series (`-R-` or `-E-`): one above the highest of the branch's `docs/specs/` (`grep -rhoE '<PREFIX>-R-[0-9]+' docs/specs/ | sort -t- -k3 -n | tail -1`), the fixed IDs in `artifacts/<slug>/spec-diff.md`, and every `spec-delta <ID> added` on the run's stage cards (`grep -h 'spec-delta' <board>/*/<slug>.s*.md`) — so a number dropped earlier in the run is never reused. `docs/specs/README.md` rules bind the text. Log each change on your card (`spec-delta`, below) and report the count in your status line (`delta=<n>`).
+After `s0` the branch's `docs/specs/` is the spec, and it settles with the code. Implementation shows an entry wrong, incomplete or missing (a `## Deferred` item owned by `implementation` included): change `docs/specs/` inside the current stage's commit and keep going. A new entry takes the next free ID of its prefix and series (`-R-` or `-E-`): one above the highest of the branch's `docs/specs/` (`grep -rhoE '<PREFIX>-R-[0-9]+' docs/specs/ | sort -t- -k3 -n | tail -1`), the fixed IDs in `artifacts/<slug>/spec-diff.md`, and every `spec-delta <ID> added` on the run's cards (`grep -h 'spec-delta' <board>/*/<slug>.md <board>/*/<slug>.s*.md` — the parent card keeps those of stages a re-plan replaced) — so a number dropped earlier in the run is never reused. `docs/specs/README.md` rules bind the text. Log each change on your card (`spec-delta`, below) and report the count in your status line (`delta=<n>`).
 
 A reviewer classifies every change; one that contradicts a scenario or a user decision goes to the user, who may have you revert it. Before such a change, read the entry's and the scenarios' sections of `artifacts/<slug>/spec-diff.md` (`extract-section.sh '## <ID>' '## S<n>' …`); make it only when the code leaves no way around it. Never change an entry to make a failing test pass when the code is what is wrong.
 
@@ -58,12 +58,16 @@ Resumed with a `pr-feedback.md` path: the user's inline PR comments, one `## thr
 
 Run the full gauntlet from `AGENTS.md`'s `## Build / test / lint`; log its `gauntlet=` line — never an excerpt, never a log.
 
-## Stop and report — never improvise
+## Ask or stop — never improvise
 
+**Ask** — a decision the plan, the spec and the code leave open and the user owns: a requirement ambiguous or conflicting, a default, limit or timeout no entry states. Write `artifacts/<slug>/question.md` — shape, batching and the `Why you:` rule: `sh .claude/scripts/extract-section.sh '## Questions' .claude/agents/spec-author.md`, title `# <slug> — questions (s<n>)` — and end turn on `status=question file=… count=<n>`; you are resumed with the numbered answers. An answer that fixes observable behavior lands in `docs/specs/` as a spec change (`## Spec changes`), never in the code alone.
+
+**Stop** — the stage cannot go on as planned: `status=blocked stage=s<n> reason=<one line>`.
 - Plan wrong, incomplete, or unworkable.
 - Stage needs a file outside your set, or something an unassigned stage was to produce.
-- Requirement ambiguous or conflicting, and the code doesn't decide it.
 - Want a dependency not in the manifest.
+
+Leave uncommitted work where it is — never revert it: a re-plan starts from the worktree as you left it. Resumed with an answer, go on; a re-plan replaces you with a fresh implementer.
 
 ## Never
 
@@ -81,7 +85,8 @@ Every turn ends on exactly one line; orchestrator reads only this line and your 
 ```
 status=inreview stage=s<n> delta=<n>
 status=committed stage=s<n> delta=<n>
-status=blocked stage=s<n> reason=<one line>       # any Stop-and-report case
+status=question stage=s<n> file=artifacts/<slug>/question.md count=<n>   # Ask
+status=blocked stage=s<n> reason=<one line>       # Stop
 ```
 
 Everything else goes on your card as the rules above say.

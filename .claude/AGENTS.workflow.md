@@ -135,7 +135,7 @@ status=<token> [file=<path>] [summary=<path>] [stage=s<n>] [issue=<n>] [reason=<
 | spec-author | `question` (`count=` decisions) · `ready` (`count=` `R`+`E` entries at gate 1; `size=epic reason=` when the brief is too big for one run) · `no-diff` (`count=0`) · `reuse` (`issue=`) · `new` — both with `file=` `issue.md` | `artifacts/<slug>/spec-diff.md`, `question.md`, `issue.md`, `issue-comment.md`, `split-issue.md`, `pr.md` | none — `prompt-lines.sh` quotes each file |
 | spec-architect | `question` (`count=` decisions) · `ready` (`count=` new + changed components; `slices=` path when it wrote an epic) · `no-arch` · `split` (`reason=`) · `behavior-change` (`reason=`, non-behavior run) | `artifacts/<slug>/architecture.md`, `question.md`, `slices.md` (epic); edits `spec-diff.md` | `artifacts/<slug>/architecture.summary.md` |
 | spec-planner | `question` (`count=` decisions) · `arch-gap` (`reason=`) · `split` (`reason=`) · `behavior-change` (`reason=`, non-behavior run) · `ready` (`count=` stages, `spec=` `spec-diff.md` revs it wrote) | `artifacts/<slug>/plan.md`, `question.md`; edits `spec-diff.md` | `artifacts/<slug>/plan.summary.md` |
-| spec-implementer | `inreview` · `committed` (both `delta=` spec changes) · `blocked` | stage card (`stage=`) | none — the card is the summary |
+| spec-implementer | `inreview` · `committed` (both `delta=` spec changes) · `question` (`count=` decisions) · `blocked` (`reason=`) | stage card (`stage=`), `question.md` | none — the card is the summary |
 | spec-reviewer | `clean` · `findings` (`count=` blockers+majors, `user=` `Needs user` items, `stage=` list) · `blocked` | `artifacts/<slug>/review.md` | `artifacts/<slug>/review.verdict.md` |
 
 `file` is lossless, for the next agent: as long as it must be. `summary` is for the user: decisions and open findings only, rewritten whole on every pass, capped at 25 lines / 2 KB (`show-file.sh` refuses a larger one and exits 3 — the agent trims it).
@@ -145,14 +145,14 @@ status=<token> [file=<path>] [summary=<path>] [stage=s<n>] [issue=<n>] [reason=<
 - Every approval of `spec-diff.md` logs `spec-rev=<N>` on the parent card (the rev `show-file.sh` named). A later stop showing it again runs `show-file.sh` with `PROMPT_SINCE_REV=<that N>`, so `Confirm:` carries only the `(chosen)` lines written since.
 - A status line naming a file the user must approve (`spec-diff.md`, `pr.md`, the `summary=` path — `architecture.summary.md`, `plan.summary.md`, `review.verdict.md` when it has a `Needs user` item): orchestrator runs `sh .claude/scripts/show-file.sh <path> [<path> ...]` before asking — every file of one approval stop in a single call; it opens each outside the context and prints, per file, one line naming how it was shown plus that file's quotable prompt lines (`prompt-lines.sh`), for the *Approval prompt*.
 
-Reviewer scope tokens: `plan` (gate 2), `stage s<n>`, `delta s<n>` (one stage's spec changes, *Spec changes*), `branch` (gate 3).
+Reviewer scope tokens: `plan` (gate 2), `plan from s<n>` (*Re-plan*), `stage s<n>`, `delta s<n>` (one stage's spec changes, *Spec changes*), `branch` (gate 3).
 
 ### Approval prompt
 
 Every approval stop is one message in this fixed shape, composed from `show-file.sh`'s quotable lines, the agents' status-line tokens and the stop's fixed lines from its section. A block absent from this stop is omitted; order is fixed. The user pulls one heading of the full file with `extract-section.sh` for the *why*.
 
 ```
-<Gate <n> | Architecture | Epic | Delta s<n>> · <slug> · <files shown, with rev> [· fast lane]
+<Gate <n> | Architecture | Epic | Delta s<n> | Re-plan from s<n>> · <slug> · <files shown, with rev> [· fast lane]
 Goal: <spec-diff.md's Goal line>
 Scenarios: <spec-diff.md's count and S-IDs>
 Entries: <spec-diff.md's counts and IDs>
@@ -368,6 +368,29 @@ Landed s2 · <slug> · review clean · gauntlet pass <cov> · pushed <sha> · sp
 
 Log `auto=<rule-free>` or `stop=<rule n>` on the stage card. A user message while a stage is running is read before the next auto-continue; `stop` holds at the next green.
 
+#### Question and blocked stage
+
+Either lane.
+- `status=question` → *Relayed question*, headed with the stage id; the answers go to the same implementer.
+- `status=blocked` → one stop, the card stays where it is:
+
+```
+Blocked · <slug> · s<n> · <reason>
+Answer: answer <text> · re-plan · stop
+```
+
+- `answer` → relayed to the same implementer. `re-plan` → *Re-plan*, the reason verbatim. `stop` → the run halts; the board stays for *Resume an interrupted run*.
+- `re-plan: <why>` at any stage stop, or in reply to an auto-continue line → *Re-plan* with that reason.
+
+#### Re-plan
+
+Rewrites every stage without a commit on the branch, the current one included; a committed stage is never replanned.
+1. `from` = the lowest stage id whose card has no `commit=`. Log `replan from=s<n>` on the parent card, snapshot `cp artifacts/<slug>/plan.md artifacts/<slug>/plan.prev.md`. The current implementer is dropped, never resumed; its uncommitted work stays in the worktree.
+2. Fresh `spec-planner` (*Gate 2* input, plus `mode=replan from=s<n>`, the reason verbatim, the worktree path). `question`, `arch-gap` and `split` as at gate 2.
+3. `ready` → fresh `spec-reviewer`, scope `plan from s<n>`; rounds per *Verify before an approval stop*.
+4. **Stop**, either lane: `show-file.sh` on `plan.summary.md` (plus `review.verdict.md` with a `Needs user` item), *Approval prompt* headed `Re-plan · <slug> · from s<n>`. Approving will: replace the cards of `s<n>` onward · update the draft PR · spawn a fresh implementer at `s<n>`. Answer: `approve [stop: s4,s5] · switch lane · change <what> · stop`.
+5. On approval: append every card-to-replace's `spec-delta … added` lines to the parent card (`grep -h ' spec-delta .* added' <cards> >> <parent card>`, so their IDs stay retired), delete those cards, create the new ones as *Gate 2* step 4, log `replan=approved`, render the draft PR body, spawn the implementer (*Every stage*); its brief says the worktree holds the dropped implementer's uncommitted work.
+
 ### PR feedback
 
 The user reviews on the draft PR, as inline comments on the diff. Once `pr` is on the parent card, **before every approval stop** (per-stage, gate 3, gate 4) and whenever the user says to check the PR:
@@ -484,5 +507,7 @@ Cards outside `open/`+`done/`, no agent running = session died mid-run. Resume t
 | PR `## Stages` | the PR body vs `pr-body.sh <slug> draft` | body behind the board: a move never rendered, `gh pr edit` with the fresh render |
 
 Report differences first. Agree → resume. Disagree → stop and report.
+
+A `replan from=` line with no later `replan=approved` on the parent card → the re-plan is pending: rerun *Re-plan* from step 2 with a fresh planner; `plan.prev.md` is already the snapshot.
 
 Clean reconcile → resume only no-approval work (respawn the implementer for approved stages, CI wait and *Clean up* after `pr=ready`); halt at the first gate needing the user. Recorded `gate1`/`arch`/`gate2` approvals stay valid — the fast lane's pre-authorization too: `arch` set, `lane: fast`, no `gate2` → plan, then gate 2's *On approval* without a stop. A resumed run spawns every agent fresh (the architect, the author and the planner re-read their files).
