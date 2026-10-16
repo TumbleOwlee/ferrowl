@@ -194,11 +194,49 @@ case $out in "gauntlet=fail step=fmt "*) ok gauntlet-untracked-misses-cache ;; *
 
 # --- metrics.sh
 P=$(project); D=$P/.claude/tasks
-printf '%s\n' '2026-10-03T08:50 stop kind=approval' '2026-10-03T09:30 stop kind=question' '2026-10-03T10:40 replan from=s2' '2026-10-03T10:50 stop kind=approval' >> "$D/inprogress/demo.md"
-echo '2026-10-03T10:05 test-red MB-R-161 it_backoff_caps' >> "$D/inreview/demo.s1.md"
+cl() { id=$1; shift; env CLAUDE_PROJECT_DIR="$P" CARD_LOG_NOW=$NOW sh "$scripts/card-log.sh" "$id" "$@"; }
+NOW=2026-10-03T08:50 cl demo stop kind=approval
+NOW=2026-10-03T09:30 cl demo stop kind=question
+NOW=2026-10-03T10:40 cl demo replan from=s2
+NOW=2026-10-03T10:50 cl demo stop kind=approval
+NOW=2026-10-03T10:05 cl demo.s1 test-red MB-R-161 -- it_backoff_caps
 golden metrics env CLAUDE_PROJECT_DIR="$P" METRICS_NOW=2026-10-04T12:00 sh "$scripts/metrics.sh" demo
 [ "$(cat "$D/metrics.log")" = "$(sed -n 1p "$fx/expected/metrics.out")" ] && ok metrics-log || bad metrics-log "the printed line is appended to metrics.log"
 golden metrics-no-card env CLAUDE_PROJECT_DIR="$P" sh "$scripts/metrics.sh" nosuch
+
+# --- card-log.sh
+P=$(project); D=$P/.claude/tasks
+cltail() { id=$1; f=$2; shift 2; env CLAUDE_PROJECT_DIR="$P" CARD_LOG_NOW=2026-10-05T09:00 sh "$scripts/card-log.sh" "$id" "$@" || return $?; tail -1 "$f"; }
+golden card-log-ok cltail demo.s1 "$D/inreview/demo.s1.md" spec-delta MB-R-161 changed origin=user 'quote=keep retrying' -- retry forever
+golden card-log-parent cltail demo "$D/inprogress/demo.md" stop kind=approval gate=plan
+golden card-log-test-red-noid cltail demo.s1 "$D/inreview/demo.s1.md" test-red -- ut_status_line
+sum=$(cksum "$D"/*/demo*.md)
+clrej() { env CLAUDE_PROJECT_DIR="$P" CARD_LOG_NOW=2026-10-05T09:00 sh "$scripts/card-log.sh" "$@"; }
+golden card-log-reject-event clrej demo.s1 frobnicate
+golden card-log-reject-key clrej demo.s1 green foo=1
+golden card-log-reject-scope clrej demo.s1 stop kind=question
+golden card-log-reject-value clrej demo.s1 checks=maybe
+golden card-log-reject-length clrej demo.s1 stopped -- "$(printf 'x%.0s' $(seq 1 160))"
+golden card-log-reject-stop-kind clrej demo stop gate=plan
+golden card-log-reject-event-quote clrej demo.s1 'commit=a"b'
+golden card-log-no-card clrej nosuch.s9 green
+cp "$D/inreview/demo.s1.md" "$D/open/demo.s1.md"
+golden card-log-dup-card clrej demo.s1 green
+rm "$D/open/demo.s1.md"
+[ "$sum" = "$(cksum "$D"/*/demo*.md)" ] && ok card-log-reject-unchanged || bad card-log-reject-unchanged "a rejected call must not touch a card"
+golden card-log-minor-moved cltail demo.s1 "$D/inreview/demo.s1.md" 'minor-moved=wording -> s3' -- the template
+golden card-log-files-add cltail demo.s1 "$D/inreview/demo.s1.md" 'files+=CONTRIBUTING.md, a.md' user=approved reason=review
+golden card-log-accept-160 cltail demo.s1 "$D/inreview/demo.s1.md" stopped -- "$(printf 'x%.0s' $(seq 1 135))"
+
+# --- card-log.sh vocabulary covers every event the docs name
+root=$(cd "$scripts/../.." && pwd)
+names=$({ grep -ohE '[Ll]ogs? (`[^`]+`)( or `[^`]+`)*' "$root/.claude/AGENTS.workflow.md" "$root"/.claude/agents/*.md | grep -oE '`[^`]+`'
+          grep -oE 'card-log\.sh <id> [^ ]+' "$root/.claude/agents/spec-implementer.md" | sed 's/.* /`/'; } \
+    | sed -E 's/^`//; s/[ `].*//; s/^([a-z][a-z+-]*=?).*/\1/' | grep -E '^[a-z]' | sort -u)
+vocab=$(sed -n '/^# vocab-begin/,/^# vocab-end/p' "$scripts/card-log.sh")
+missing=""
+for n in $names; do echo "$vocab" | awk -v n="$n" '$3 == n { f = 1 } END { exit !f }' || missing="$missing $n"; done
+[ -z "$missing" ] && ok card-log-vocab-complete || bad card-log-vocab-complete "missing:$missing"
 
 # --- hook guards
 P=$(project); seq 1 100 > "$P/big.txt"; printf '# x\n' > "$P/notes.md"
@@ -212,6 +250,16 @@ hook shell-git-diff-ref hook-guard-shell.sh 'git diff main...HEAD' deny
 hook shell-git-diff-stat hook-guard-shell.sh 'git diff --stat' allow
 hook shell-git-diff-path hook-guard-shell.sh 'git diff main -- src' allow
 hook shell-ls hook-guard-shell.sh 'ls -la' allow
+hook shell-append-card hook-guard-shell.sh 'echo x >> .claude/tasks/open/demo.s2.md' deny
+hook shell-tee-card hook-guard-shell.sh 'grep a b | tee -a /x/.claude/tasks/inprogress/demo.md' deny
+hook shell-heredoc-card hook-guard-shell.sh 'cat >> .claude/tasks/done/demo.s0.md <<EOF
+x
+EOF' deny
+hook shell-tee-append-long hook-guard-shell.sh 'echo x | tee --append .claude/tasks/open/a.s1.md' deny
+hook shell-tee-dashdash hook-guard-shell.sh 'echo x | tee -a -- .claude/tasks/open/a.s1.md' deny
+hook shell-append-other-done hook-guard-shell.sh 'echo x >> /tmp/done/notes.md' allow
+hook shell-append-artifact hook-guard-shell.sh 'echo x >> .claude/tasks/artifacts/demo/review.md' allow
+hook shell-card-log hook-guard-shell.sh 'sh .claude/scripts/card-log.sh demo green' allow
 hook ro-git-checkout hook-guard-readonly.sh 'git checkout src/x.rs' deny
 hook ro-git-diff hook-guard-readonly.sh 'git diff main...HEAD -- src' allow
 hook ro-git-grep hook-guard-readonly.sh 'git grep -n MB-R-161 main -- docs/specs' allow
@@ -249,6 +297,9 @@ hook shell-push-main hook-guard-shell.sh 'git push origin main' deny
 HOOK_CWD=$W
 hook shell-commit-on-branch hook-guard-shell.sh 'git commit -m x' allow
 unset HOOK_CWD
+
+(unset CLAUDE_PROJECT_DIR; cd "$W" && sh "$scripts/card-log.sh" demo.s1 green)
+tail -1 "$tmp/r/.claude/tasks/inreview/demo.s1.md" | grep -q ' green$' && ok card-log-worktree || bad card-log-worktree "a worktree finds the main checkout's board"
 
 cleanup() { CLAUDE_PROJECT_DIR="$tmp/r" sh "$scripts/run-cleanup.sh" demo; }
 printf 'y\n' > "$W/y.txt"

@@ -18,21 +18,24 @@ Given `plan.md`'s path and your stage id(s): pull only your section(s), one batc
 
 Work **only** inside your worktree path — never the main checkout, never another agent's worktree. Never `git add -A` outside your assigned path.
 
-Also given the **id of your own task card** and the board root (`<main checkout>/.claude/tasks/`, outside your worktree) — the one exception. The card's directory is its state and the orchestrator moves it between states while you run, so a path memorised once goes stale: before every write locate the card with `ls <board>/*/<id>.md` and append to the one file found; none or two → `status=blocked reason=card`, never create one. Keep it current: a new session reads it if this one dies. Append-only, one line per event, **≤ 160 characters**, tokens not prose; timestamp = `date -u +%FT%H:%M` (UTC, minute precision, no zone suffix — the same on every card so a resumed session can order events across cards):
+Also given the **id of your own task card**. Every card line goes through `sh <main checkout>/.claude/scripts/card-log.sh <id> …`: it locates the card wherever the orchestrator moved it, stamps UTC, validates the event against its vocabulary and keeps the line **≤ 160 characters**. `card-log=card` → `status=blocked stage=s<n> reason=card`; `card-log=reject` → fix the call, never write the card another way. Keep it current: a new session reads it if this one dies.
 
 Vocabulary (the only events you log):
 
 ```
-2026-01-02T14:02 spawn agent=impl
-2026-01-02T14:05 test-red <ID> <test name>
-2026-01-02T14:09 green
-2026-01-02T14:10 spec-delta <ID> <added | changed | dropped> <≤ 8 words why>
-2026-01-02T14:12 checks=pass crates=<crate,…>       | checks=fail <one-line reason>
-2026-01-02T14:13 commit=<sha>
-2026-01-02T14:14 feedback=<n>
-2026-01-02T14:15 stopped: <what and why>
-2026-01-02T14:16 follow-up <what> — <where> — <why it matters>
+card-log.sh <id> spawn agent=impl
+card-log.sh <id> test-red [<IDs>] -- <test name>: <failure seen>
+card-log.sh <id> green
+card-log.sh <id> spec-delta <ID> <added|changed|dropped> origin=<user|review|impl> [quote="<the user's words>"] -- <≤ 8 words why>
+card-log.sh <id> checks=pass crates=<crate,…>   |   checks=fail -- <one-line reason>
+card-log.sh <id> commit=<sha>
+card-log.sh <id> feedback=<n>
+card-log.sh <id> stopped -- <what and why>
+card-log.sh <id> follow-up -- <what> — <where> — <why it matters>
 ```
+
+- `origin=user` when the user asked (an answer, a PR comment; quote their words), `review` for a review finding, `impl` when you found it.
+- The `test-red` text names the test and the failure seen (`-- <test name>: <failure, ≤ 8 words>`), never only the test names.
 
 Given up to 3 code stages of the run (`s0` aside) — and only the plan: a slice run's epic context reaches you through it, never directly; a fresh implementer takes the next ones from your card. Implement them in plan order, within the `files` contract (`AGENTS.md` `## Workflow`). Stage `s0` (`Land spec`), when the plan has one, is yours: copy the approved text where the plan says — `**bold**` marks in a changed entry are stripped and the heading's ` · was R<n>` is dropped, the landed line is plain — one commit, no code.
 
@@ -45,8 +48,8 @@ A reviewer classifies every change; one that contradicts a scenario or a user de
 ## Stage flow
 
 - Start: card `open`→`inprogress/`. Green: card →`inreview/`, end turn on `status=inreview stage=s<n> delta=<n>` (fast lane: `status=committed`, below).
-- Fast lane (brief says `lane=fast`): commit on green — no `status=inreview` — then end turn on `status=committed stage=s<n> delta=<n>`; resumed, take the next stage. Fixes (review findings, PR feedback, a red gauntlet) are committed on green the same way, answering `status=committed`. The orchestrator pushes and verifies between stages; a review comes once, over the whole branch.
-- Full lane: commit only once resumed with approval, then `status=committed stage=s<n> delta=<n>`. Stage messages cheap, squashed later.
+- Fast lane (brief says `lane=fast`): commit on green — no `status=inreview` — then `sha=$(git log -1 --format=%h)`, `card-log.sh <id> commit=$sha`, end turn on `status=committed stage=s<n> sha=<sha> delta=<n>`; resumed, take the next stage. Fixes (review findings, PR feedback, a red gauntlet) are committed on green the same way, answering `status=committed`. The orchestrator pushes and verifies between stages; a review comes once, over the whole branch.
+- Full lane: commit only once resumed with approval, then `sha=$(git log -1 --format=%h)`, `card-log.sh <id> commit=$sha`, `status=committed stage=s<n> sha=<sha> delta=<n>`. Stage messages cheap, squashed later.
 - Resumed with a `review.md` path: fix exactly its findings for your stage, re-run the checks (`## Stage completion`), then the lane's status above.
 - Resumed with the user's answer on a spec change (keep, revert, narrow for a split): apply exactly that, re-run the checks (`## Stage completion`), then the lane's status.
 - Minors in your brief (the `minor=` log lines of your card) are folded into your next stage's work; when no stage follows (a last stage, a branch review) you are resumed with them and fix them before the commit — never skipped.
@@ -62,7 +65,7 @@ Before every `inreview` or `committed` answer, in the worktree:
 - `cargo clippy --workspace -- -D warnings` — type-checks and lints every crate, so a dependent crate your change broke fails here
 - `cargo test -p <crate>` for every crate whose files you changed
 
-Log `checks=pass crates=<the tested crates>` or `checks=fail <one-line reason>` — never an excerpt, never a log. No coverage run, no workspace-wide test run: the orchestrator runs the full gauntlet of `AGENTS.md`'s `## Build / test / lint` on the tree you hand over and resumes you when it fails.
+Log `checks=pass crates=<the tested crates>` or `checks=fail -- <one-line reason>` — never an excerpt, never a log. No coverage run, no workspace-wide test run: the orchestrator runs the full gauntlet of `AGENTS.md`'s `## Build / test / lint` on the tree you hand over and resumes you when it fails.
 
 ## Ask or stop — never improvise
 
@@ -91,7 +94,7 @@ Every turn ends on exactly one line; orchestrator reads only this line and your 
 
 ```
 status=inreview stage=s<n> delta=<n>
-status=committed stage=s<n> delta=<n>
+status=committed stage=s<n> sha=<sha> delta=<n>
 status=question stage=s<n> file=artifacts/<slug>/question.md count=<n>   # Ask
 status=blocked stage=s<n> reason=<one line>       # Stop
 ```

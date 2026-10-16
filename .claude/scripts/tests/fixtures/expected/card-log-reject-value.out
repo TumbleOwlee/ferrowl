@@ -1,0 +1,2 @@
+card-log=reject event=checks reason=value
+exit=2
