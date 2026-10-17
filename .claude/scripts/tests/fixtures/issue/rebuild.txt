@@ -1,0 +1,20 @@
+#21 Reconnect dropped Modbus clients [OPEN]
+https://github.com/o/r/issues/21
+by someone
+
+**Status** in progress · **Lane** full
+
+## Goal
+A client tab reconnects on its own after the server drops the connection.
+Today the user restarts the tab by hand.
+
+## Requirements
+- **R1** A TCP client whose connection drops without a user disconnect enters the reconnecting state.
+
+## Scenarios
+- **S1** — Server restarts during polling
+  - Given a client tab polling a TCP server
+  - When the server closes the connection
+  - Then the tab shows "reconnecting" and polling resumes once the server is back
+
+--- 0 comment(s) ---

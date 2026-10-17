@@ -28,12 +28,13 @@ status=reuse issue=<number> file=artifacts/<slug>/issue.md  |  status=new file=a
 
 Gate 1 is best effort: a shared understanding of what the feature does, not a finished spec. The architect and the planner refine every entry with the code in view, the implementer refines it again while building; detail anticipated now is detail rewritten later.
 
-Input: the user's goal, and `artifacts/<slug>/request.md` when the user named an issue — its user stories are the starting scenarios. `artifacts/<slug>/epic.md` present: the issue is one slice of an epic — stay inside the slice; the epic's other scenarios are out of scope, never asked. `artifacts/<slug>/issue-spec.md` present too: the issue already carries an approved brief (a `/spec-request` ticket) — rebuild `spec-diff.md` from it (each scenario as `## S<n>`, each table row as its `## <ID>` section, `### Deferred` as `## Deferred`), then ask only what the developer's goal adds or the brief left open.
+Input: the user's goal, and `artifacts/<slug>/request.md` when the user named an issue — its user stories are the starting scenarios. `artifacts/<slug>/epic.md` present: the issue is one slice of an epic — stay inside the slice; the epic's other scenarios are out of scope, never asked. `artifacts/<slug>/issue-spec.md` present too: the issue already carries an approved brief (a `/spec-request` ticket) — rebuild `spec-diff.md` from it (each `## Requirements` item `- **R1** text` as ``## R1 — new · <file> `## <heading>` ``, the heading yours, each `## Scenarios` item as `## S<n>`; or, from an old body, each table row as its `## <ID>` section and `### Deferred` as `## Deferred`), then ask only what the developer's goal adds or the brief left open.
 
 Hunt actively, every batch:
 - **scenarios** — each user story as one flow, then the missing ones: failure paths, cancel/abort, empty and limit inputs, restart/reconnect, concurrent use, interaction with the area's existing features; for a replacement, what happens to the old behavior, its config and saved sessions
 - **conflicts** — existing entries the request contradicts or makes obsolete
 - **edge cases** — the ones whose outcome the user would notice
+- **related entries** — per entry, `sh .claude/scripts/related-ids.sh <noun> [<noun> …]` with the user-facing nouns it names (dialog, key, popup, command — not verbs, not `tab`/`value`); cite each hit in the entry or reconcile it in a `- decided` line; `related=none` needs nothing
 
 Ask only what changes scope (in/out), the user-visible flow, an edge-case outcome the user must choose, or a conflict with the existing spec. Never ask type, trait or function names, signatures, error variants, config-key spelling, module placement, test strategy, or anything only the code answers: list it under `## Deferred` with its owner and move on. A detail the user volunteers anyway is recorded `decided (user)` under its entry — it binds the architect and the planner.
 
@@ -105,9 +106,9 @@ Change: <≤ 12 words, what moved>
 - **Local IDs** (`AGENTS.md` `## Spec-driven`): each series from 1. A changed, dropped or violated existing entry keeps its fixed ID.
 - **Scenarios** are the agreed anchors: one flow each, `Given`/`When`/`Then` one line each (`And` lines allowed). Later agents never contradict one without asking the user. They never land in `docs/specs/`; the issue carries them.
 - **Entries** state one observable rule each, best effort: coarser than landed spec is fine (`docs/specs/README.md` binds text once it lands). No public signatures, error variants or config-key spelling unless the user decided them — that is the architect's.
-- `Revisions:` only from rev 2 on, one line per revision, newest last; nothing else in the file says what an earlier revision looked like. A revision made while the issue is **filed** carries its date, `- rev 5 (2026-10-16) — <a>; <b> (<by>)`: `issue-body.sh` lists exactly these under `## Decisions`, `a` and `b` as sub-items.
+- `Revisions:` only from rev 2 on, one line per revision, newest last; nothing else in the file says what an earlier revision looked like. A revision made while the issue is **filed** carries its date, `- rev 5 (2026-10-16) — <a>; <b> (<by>)`: `spec-render.sh changes` renders those ending (user), (review) or (impl) into the PR's `## Spec changes since filing`; other authors' dated lines stay in `spec-diff.md`.
 - A decision goes under the entry it shapes, `(user)` when the user answered it, `(chosen)` when you settled it alone; every `(chosen)` is shown to the user for confirmation. From rev 2 on a `(chosen)` line carries the rev that wrote it, `- decided (chosen, rev 3): …`, so a later stop confirms only what is new. A decision no single entry owns goes under `## Summary` as the same sub-item.
-- `## Other spec changes`: three fields split by ` › ` (`issue-body.sh` makes them a File / Section / Change table row). A row or note that itself contains a backtick is wrapped in double backticks (`` ``…`` ``), never nested single ones — GitHub ends the span at the inner backtick.
+- `## Other spec changes`: three fields split by ` › ` (`spec-render.sh` makes them a File / Section / Change table row in the PR). A row or note that itself contains a backtick is wrapped in double backticks (`` ``…`` ``), never nested single ones — GitHub ends the span at the inner backtick.
 - `## Deferred`: every point you did not ask, with the agent that settles it. Later agents remove the items they resolve.
 - `no-diff`: the violated entries, each `## <ID> — violated · <file> `## <heading>`` with its current text; no `Change:`.
 - A change request after `ready` edits the same file.
@@ -117,7 +118,7 @@ Change: <≤ 12 words, what moved>
 
 Given candidate issues: read each (`issue-view.sh`, `## Conventions — GitHub`), write `issue.md`, then answer `reuse issue=<n> file=…` or `new file=…`. The issue the user named at gate 1 is already `request.md`.
 
-`issue.md` is only the title and the goal; `issue-body.sh` assembles the body from it, `spec-diff.md`, `architecture.summary.md` and the parent card:
+`issue.md` is the title, the goal and what is out of scope; `issue-body.sh` assembles the body from it, `spec-diff.md` and the parent card — status line, goal, requirements with local IDs, scenarios, out of scope. The issue never shows architecture or decisions (an epic: skeleton architecture and slices). No stage id or agent name in `issue.md`: `issue-body.sh` refuses it.
 
 ```
 # <title, plain language, no slug or ID>
@@ -125,7 +126,12 @@ Given candidate issues: read each (`issue-view.sh`, `## Conventions — GitHub`)
 ## Goal
 <what the user gets, one or two lines>
 <what it costs or looks like today, one line>
+
+## Out of scope
+- <item>
 ```
+
+`## Out of scope` is optional, one `- <item>` per line; omit it when there is none.
 
 Reuse: the orchestrator stores the original body as `artifacts/<slug>/request.md`; the assembled body folds it in. A reused body already assembled by this workflow keeps its stored request.
 
@@ -133,14 +139,15 @@ Reuse: the orchestrator stores the original body as `artifacts/<slug>/request.md
 
 The architect, the planner and the implementer change the spec themselves. You are resumed only for:
 
-- **A changelog entry** — a meaningful change the user kept while the issue is filed. Write `issue-comment.md`; the body is not rewritten until gate 4:
+- **A changelog entry** — written for every change kept while the issue is filed, detail ones too. Write `issue-comment.md`; the body is never rewritten:
 
 ```
-### Spec change — <IDs> (<spec-architect | spec-planner | spec-implementer>, <gate 2 | s3 | gate 3 | PR feedback>)
-- <ID> <added | changed | dropped> — <≤ 8 words>
-- found: <what was discovered, one line>
-- decided (user): <choice>
+### <Changed | Added | Dropped>: <issue ID> — <the scenario's title or the rule in plain words>[ (<issue IDs it rests on>)]
+- <what changes for the user, one line each>
+- why: <one line>[ — "<the user's words>" when the user asked for it]
 ```
+
+Issue IDs are the issue's local `R<n>`/`E<n>`/`S<n>` (the `· was R<n>` heading suffix maps a fixed ID back; an entry added after filing keeps its fixed ID). No agent names, no stage ids, no gate names.
 
 - **A split** — the brief carries the reason and the entry it narrows. Write `split-issue.md` (`## Split issue, gate 4`).
 

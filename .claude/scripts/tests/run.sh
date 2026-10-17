@@ -62,10 +62,60 @@ golden issue-body-slice-2 env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh
 golden issue-body-slice-3 env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" lb --slice 3
 golden issue-body-slice-run env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" sl
 golden issue-body-slice-missing env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" lb --slice 9
+golden issue-body-mrc env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" mrc
+
+# --status rewrites only line 1 of a filed body
+printf '%s\n\n%s\n%s\n' '**Status** planned · **Lane** full' '## Goal' kept > "$tmp/live.md"
+printf '\n%s\n\n%s\n%s\n' '**Status** planned · **Lane** full' '## Goal' kept > "$tmp/live-blank.md"
+golden issue-body-status env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/live.md"
+golden issue-body-status-blank env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/live-blank.md"
+printf '%s\n\n%s\n%s\n' '**Spec** rev 3' '## Goal' kept > "$tmp/live-spec.md"
+printf '%s\n\n%s\n%s\n' '**Part of epic** #40' '## Goal' kept > "$tmp/live-slice.md"
+golden issue-body-status-spec env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/live-spec.md"
+golden issue-body-status-slice env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/live-slice.md"
+echo '2026-10-04T10:00 ci=0' >> "$P/.claude/tasks/inprogress/demo.md"
+golden issue-body-status-done env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/live.md"
+
+# the visible text names no stage or agent
+refuse() { # <replacement for the Today line> — a copy of demo without a card
+    P=$(project); A=$P/.claude/tasks/artifacts
+    cp -R "$A/demo" "$A/sref"
+    sed -i "s#Today the user restarts the tab by hand.#$1#" "$A/sref/issue.md"
+}
+refuse 'Today s3 restarts it.'
+golden issue-body-refused env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" sref
+refuse 'Today the spec-architect restarts it.'
+golden issue-body-refused-agent env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" sref
+refuse 'Today `s3` restarts it.'
+golden issue-body-refused-code env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" sref
+refuse 'Today `x` restarts s3. See `y`.'
+golden issue-body-refused-between env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" sref
+refuse 'Today `docs/s3.md` restarts it.'
+env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" sref >/dev/null 2>&1
+[ $? -eq 0 ] && ok issue-body-path-span-passes || bad issue-body-path-span-passes "a file name in a code span is not a stage ref"
+P=$(project)
+
+# --- spec-render.sh
+SD=$P/.claude/tasks/artifacts/demo/spec-diff.md
+for part in scenarios requirements entries changes deferred; do
+    golden spec-render-$part sh "$scripts/spec-render.sh" "$SD" $part
+done
+golden spec-render-entries-only sh "$scripts/spec-render.sh" "$P/.claude/tasks/artifacts/lb/spec-diff.md" entries --only "R1" --first 1
+golden spec-render-usage sh "$scripts/spec-render.sh"
+golden spec-render-missing sh "$scripts/spec-render.sh" "$P/nosuch.md" scenarios
 
 # --- pr-body.sh
 golden pr-body-draft env CLAUDE_PROJECT_DIR="$P" sh "$scripts/pr-body.sh" demo draft
 golden pr-body-full env CLAUDE_PROJECT_DIR="$P" sh "$scripts/pr-body.sh" demo full
+golden pr-body-mrcpr env CLAUDE_PROJECT_DIR="$P" sh "$scripts/pr-body.sh" mrcpr full
+golden pr-body-mrcpr-draft env CLAUDE_PROJECT_DIR="$P" sh "$scripts/pr-body.sh" mrcpr draft
+cp -R "$P/.claude/tasks/artifacts/demo" "$P/.claude/tasks/artifacts/sref2"
+sed -i 's/retry with backoff/retry with backoff as in s2/' "$P/.claude/tasks/artifacts/sref2/pr.md"
+cp -R "$P/.claude/tasks/artifacts/demo" "$P/.claude/tasks/artifacts/vmulti"
+sed -i 's/^- s2 — demo TUI/- s1, s2 — demo TUI/' "$P/.claude/tasks/artifacts/vmulti/plan.summary.md"
+n=$(env CLAUDE_PROJECT_DIR="$P" sh "$scripts/pr-body.sh" vmulti draft 2>/dev/null | grep -c '^  - beyond unit tests: demo TUI$')
+[ "$n" = 2 ] && ok pr-body-verif-multi || bad pr-body-verif-multi "a verification line naming two stages shows under both, got $n"
+golden pr-body-refused env CLAUDE_PROJECT_DIR="$P" sh "$scripts/pr-body.sh" sref2 full
 mkdir -p "$P/.claude/tasks/inreview" && cp "$P/.claude/tasks/done/demo.s0.md" "$P/.claude/tasks/inreview/"
 golden pr-body-duplicate-card env CLAUDE_PROJECT_DIR="$P" sh "$scripts/pr-body.sh" demo draft
 
@@ -75,6 +125,7 @@ golden prompt-lines-spec-diff sh "$scripts/prompt-lines.sh" "$A/spec-diff.md"
 golden prompt-lines-since-rev env PROMPT_SINCE_REV=2 sh "$scripts/prompt-lines.sh" "$A/spec-diff.md"
 golden prompt-lines-architecture sh "$scripts/prompt-lines.sh" "$A/architecture.summary.md"
 golden prompt-lines-plan sh "$scripts/prompt-lines.sh" "$A/plan.summary.md"
+golden prompt-lines-plan-since-rev env PROMPT_SINCE_REV=3 sh "$scripts/prompt-lines.sh" "$A/plan.summary.md"
 golden prompt-lines-verdict sh "$scripts/prompt-lines.sh" "$A/review.verdict.md"
 golden prompt-lines-titles sh "$scripts/prompt-lines.sh" "$A/issue.md" "$A/split-issue.md" "$A/pr.md" "$A/follow-up-1.md"
 golden prompt-lines-question sh "$scripts/prompt-lines.sh" "$A/question.md"
@@ -95,6 +146,14 @@ golden issue-request-epic env ISSUE_FIXTURE="$fx/issue/slice.txt" sh "$tmp/ir/is
 golden issue-request-epic-none env ISSUE_FIXTURE="$fx/issue/plain.txt" sh "$tmp/ir/issue-request.sh" 7 --epic
 golden issue-request-slice-spec env ISSUE_FIXTURE="$fx/issue/slice.txt" sh "$tmp/ir/issue-request.sh" 71 --spec
 golden issue-request-spec-plain env ISSUE_FIXTURE="$fx/issue/plain.txt" sh "$tmp/ir/issue-request.sh" 7 --spec
+golden issue-request-new env ISSUE_FIXTURE="$fx/issue/new.txt" sh "$tmp/ir/issue-request.sh" 9
+golden issue-request-new-spec env ISSUE_FIXTURE="$fx/issue/new.txt" sh "$tmp/ir/issue-request.sh" 9 --spec
+
+# --- related-ids.sh
+P=$(project); mkdir -p "$P/docs"; ln -s "$fx/specs" "$P/docs/specs"
+golden related-ids env CLAUDE_PROJECT_DIR="$P" sh "$scripts/related-ids.sh" polls slow
+golden related-ids-none env CLAUDE_PROJECT_DIR="$P" sh "$scripts/related-ids.sh" nosuchword
+golden related-ids-literal env CLAUDE_PROJECT_DIR="$P" sh "$scripts/related-ids.sh" "retr.ed"
 
 # --- card-field.sh
 P=$(project)
@@ -104,6 +163,8 @@ golden card-field env CLAUDE_PROJECT_DIR="$P" sh -c 'for f in lane issue split l
 golden list-sections sh "$scripts/list-sections.sh" "$fx/md/doc.md"
 golden extract-section sh "$scripts/extract-section.sh" '## Alpha' '## Beta' "$fx/md/doc.md"
 golden extract-section-missing sh "$scripts/extract-section.sh" '## Gamma' "$fx/md/doc.md"
+golden extract-section-prefix sh "$scripts/extract-section.sh" --prefix '## Al' '## Beta' "$fx/md/doc.md"
+golden extract-section-prefix-missing sh "$scripts/extract-section.sh" --prefix '## Zz' "$fx/md/doc.md"
 golden extract-id sh -c 'cd "$1" && sh "$0" specs MB-R-002 MB-E-001' "$scripts/extract-id.sh" "$fx"
 
 # --- show-file.sh
@@ -119,6 +180,9 @@ P=$(project)
 out=$(cd "$tmp" && CLAUDE_PROJECT_DIR="$P" sh "$scripts/gauntlet.sh" "$tmp/no-worktree" artifacts/demo 2>/dev/null)
 [ "$out" = "gauntlet=fail step=cd reason=no-worktree" ] && ok gauntlet-no-worktree || bad gauntlet-no-worktree "$out"
 [ -f "$P/.claude/tasks/artifacts/demo/gauntlet.log" ] && [ ! -e "$tmp/artifacts" ] && ok gauntlet-artifacts-shorthand || bad gauntlet-artifacts-shorthand "artifacts/<slug> resolves under the board"
+rm -f "$P/.claude/tasks/artifacts/demo/gauntlet.log"
+(cd "$tmp" && CLAUDE_PROJECT_DIR="$P" sh "$scripts/gauntlet.sh" "$tmp/no-worktree" .claude/tasks/artifacts/demo >/dev/null 2>&1)
+[ -f "$P/.claude/tasks/artifacts/demo/gauntlet.log" ] && [ ! -e "$tmp/.claude" ] && ok gauntlet-tasks-relative || bad gauntlet-tasks-relative "a relative path resolves under the project root"
 
 # gauntlet.sh pass cache: keyed by the worktree's tree, untracked files included
 rm -rf "$tmp/g"; git init -q -b main "$tmp/g"; echo a > "$tmp/g/a.txt"
@@ -135,11 +199,54 @@ case $out in "gauntlet=fail step=fmt "*) ok gauntlet-untracked-misses-cache ;; *
 
 # --- metrics.sh
 P=$(project); D=$P/.claude/tasks
-printf '%s\n' '2026-10-03T08:50 stop kind=approval' '2026-10-03T09:30 stop kind=question' '2026-10-03T10:40 replan from=s2' '2026-10-03T10:50 stop kind=approval' >> "$D/inprogress/demo.md"
-echo '2026-10-03T10:05 test-red MB-R-161 it_backoff_caps' >> "$D/inreview/demo.s1.md"
+cl() { id=$1; shift; env CLAUDE_PROJECT_DIR="$P" CARD_LOG_NOW=$NOW sh "$scripts/card-log.sh" "$id" "$@"; }
+NOW=2026-10-03T08:50 cl demo stop kind=approval
+NOW=2026-10-03T09:30 cl demo stop kind=question
+NOW=2026-10-03T10:40 cl demo replan from=s2
+NOW=2026-10-03T10:50 cl demo stop kind=approval
+NOW=2026-10-03T10:05 cl demo.s1 test-red MB-R-161 -- it_backoff_caps
 golden metrics env CLAUDE_PROJECT_DIR="$P" METRICS_NOW=2026-10-04T12:00 sh "$scripts/metrics.sh" demo
 [ "$(cat "$D/metrics.log")" = "$(sed -n 1p "$fx/expected/metrics.out")" ] && ok metrics-log || bad metrics-log "the printed line is appended to metrics.log"
 golden metrics-no-card env CLAUDE_PROJECT_DIR="$P" sh "$scripts/metrics.sh" nosuch
+
+# --- card-log.sh
+P=$(project); D=$P/.claude/tasks
+cltail() { id=$1; f=$2; shift 2; env CLAUDE_PROJECT_DIR="$P" CARD_LOG_NOW=2026-10-05T09:00 sh "$scripts/card-log.sh" "$id" "$@" || return $?; tail -1 "$f"; }
+golden card-log-ok cltail demo.s1 "$D/inreview/demo.s1.md" spec-delta MB-R-161 changed origin=user 'quote=keep retrying' -- retry forever
+golden card-log-parent cltail demo "$D/inprogress/demo.md" stop kind=approval gate=plan
+golden card-log-test-red-noid cltail demo.s1 "$D/inreview/demo.s1.md" test-red -- ut_status_line
+sum=$(cksum "$D"/*/demo*.md)
+clrej() { env CLAUDE_PROJECT_DIR="$P" CARD_LOG_NOW=2026-10-05T09:00 sh "$scripts/card-log.sh" "$@"; }
+golden card-log-reject-event clrej demo.s1 frobnicate
+golden card-log-reject-key clrej demo.s1 green foo=1
+golden card-log-reject-scope clrej demo.s1 stop kind=question
+golden card-log-reject-value clrej demo.s1 checks=maybe
+golden card-log-reject-length clrej demo.s1 stopped -- "$(printf 'x%.0s' $(seq 1 160))"
+golden card-log-reject-stop-kind clrej demo stop gate=plan
+golden card-log-reject-stop-delta clrej demo stop kind=delta
+golden card-log-reject-stop-replan clrej demo stop kind=replan
+golden card-log-reject-event-quote clrej demo.s1 'commit=a"b'
+golden card-log-no-card clrej nosuch.s9 green
+cp "$D/inreview/demo.s1.md" "$D/open/demo.s1.md"
+golden card-log-dup-card clrej demo.s1 green
+rm "$D/open/demo.s1.md"
+[ "$sum" = "$(cksum "$D"/*/demo*.md)" ] && ok card-log-reject-unchanged || bad card-log-reject-unchanged "a rejected call must not touch a card"
+golden card-log-minor-moved cltail demo.s1 "$D/inreview/demo.s1.md" 'minor-moved=wording -> s3' -- the template
+golden card-log-files-add cltail demo.s1 "$D/inreview/demo.s1.md" 'files+=CONTRIBUTING.md, a.md' user=approved reason=review
+golden card-log-note cltail demo.s1 "$D/inreview/demo.s1.md" note -- renamed '"attr-a"' to attr-b
+golden card-log-note-parent cltail demo "$D/inprogress/demo.md" note -- plan amended after review
+golden card-log-note-empty clrej demo.s1 note
+golden card-log-accept-160 cltail demo.s1 "$D/inreview/demo.s1.md" stopped -- "$(printf 'x%.0s' $(seq 1 135))"
+
+# --- card-log.sh vocabulary covers every event the docs name
+root=$(cd "$scripts/../.." && pwd)
+names=$({ grep -ohE '[Ll]ogs? (`[^`]+`)( or `[^`]+`)*' "$root/.claude/AGENTS.workflow.md" "$root"/.claude/agents/*.md | grep -oE '`[^`]+`'
+          grep -oE 'card-log\.sh <id> [^ ]+' "$root/.claude/agents/spec-implementer.md" | sed 's/.* /`/'; } \
+    | sed -E 's/^`//; s/[ `].*//; s/^([a-z][a-z+-]*=?).*/\1/' | grep -E '^[a-z]' | sort -u)
+vocab=$(sed -n '/^# vocab-begin/,/^# vocab-end/p' "$scripts/card-log.sh")
+missing=""
+for n in $names; do echo "$vocab" | awk -v n="$n" '$3 == n { f = 1 } END { exit !f }' || missing="$missing $n"; done
+[ -z "$missing" ] && ok card-log-vocab-complete || bad card-log-vocab-complete "missing:$missing"
 
 # --- hook guards
 P=$(project); seq 1 100 > "$P/big.txt"; printf '# x\n' > "$P/notes.md"
@@ -153,6 +260,16 @@ hook shell-git-diff-ref hook-guard-shell.sh 'git diff main...HEAD' deny
 hook shell-git-diff-stat hook-guard-shell.sh 'git diff --stat' allow
 hook shell-git-diff-path hook-guard-shell.sh 'git diff main -- src' allow
 hook shell-ls hook-guard-shell.sh 'ls -la' allow
+hook shell-append-card hook-guard-shell.sh 'echo x >> .claude/tasks/open/demo.s2.md' deny
+hook shell-tee-card hook-guard-shell.sh 'grep a b | tee -a /x/.claude/tasks/inprogress/demo.md' deny
+hook shell-heredoc-card hook-guard-shell.sh 'cat >> .claude/tasks/done/demo.s0.md <<EOF
+x
+EOF' deny
+hook shell-tee-append-long hook-guard-shell.sh 'echo x | tee --append .claude/tasks/open/a.s1.md' deny
+hook shell-tee-dashdash hook-guard-shell.sh 'echo x | tee -a -- .claude/tasks/open/a.s1.md' deny
+hook shell-append-other-done hook-guard-shell.sh 'echo x >> /tmp/done/notes.md' allow
+hook shell-append-artifact hook-guard-shell.sh 'echo x >> .claude/tasks/artifacts/demo/review.md' allow
+hook shell-card-log hook-guard-shell.sh 'sh .claude/scripts/card-log.sh demo green' allow
 hook ro-git-checkout hook-guard-readonly.sh 'git checkout src/x.rs' deny
 hook ro-git-diff hook-guard-readonly.sh 'git diff main...HEAD -- src' allow
 hook ro-git-grep hook-guard-readonly.sh 'git grep -n MB-R-161 main -- docs/specs' allow
@@ -167,6 +284,38 @@ hook attr-trailer hook-guard-attribution.sh 'git commit -m "fix: x
 Co-Authored-By: Someone <a@b.c>"' deny
 hook attr-generated hook-guard-attribution.sh 'gh pr create --title t --body "Generated with a tool"' deny
 hook attr-clean hook-guard-attribution.sh 'git commit -m "fix: x"' allow
+hook attr-generated-line hook-guard-attribution.sh 'git commit -F - <<EOF
+fix: x
+
+🤖 Generated with a tool
+EOF' deny
+hook attr-trailer-option-quoted hook-guard-attribution.sh 'git commit --trailer "Co-Authored-By: X <a@b.c>" -m x' deny
+hook attr-trailer-option hook-guard-attribution.sh 'git commit --trailer Co-authored-by:X -m x' deny
+hook attr-trailer-eq hook-guard-attribution.sh 'git commit --trailer=Co-authored-by:X -m x' deny
+hook attr-list-footer hook-guard-attribution.sh 'git commit -F - <<EOF
+fix: x
+
+- 🤖 Generated with a tool
+EOF' deny
+hook attr-italic-footer hook-guard-attribution.sh 'git commit -F - <<EOF
+fix: x
+
+*Generated with a tool*
+EOF' deny
+hook attr-marker-after-emoji hook-guard-attribution.sh 'git commit -F - <<EOF
+fix: x
+
+🤖 *Generated with a tool*
+EOF' deny
+hook attr-trailer-eqsep hook-guard-attribution.sh 'git commit --trailer Co-authored-by=A -m x' deny
+hook attr-escaped-newline hook-guard-attribution.sh 'gh pr create --title t --body "x\n\nCo-authored-by: A"' deny
+hook attr-quote-footer hook-guard-attribution.sh 'git commit -F - <<EOF
+fix: x
+
+> Generated with a tool
+EOF' deny
+hook attr-regenerated hook-guard-attribution.sh 'git commit -m "docs: images regenerated with images/capture.py"' allow
+hook attr-mention hook-guard-attribution.sh 'git commit -m "fix: hook no longer matches generated with in prose"' allow
 
 # --- git-state guards and run-cleanup.sh, on a scratch repository with a bare remote
 g() { d=$1; shift; git -C "$d" -c user.name=t -c user.email=t@t -c commit.gpgsign=false "$@"; }
@@ -191,6 +340,9 @@ HOOK_CWD=$W
 hook shell-commit-on-branch hook-guard-shell.sh 'git commit -m x' allow
 unset HOOK_CWD
 
+(unset CLAUDE_PROJECT_DIR; cd "$W" && sh "$scripts/card-log.sh" demo.s1 green)
+tail -1 "$tmp/r/.claude/tasks/inreview/demo.s1.md" | grep -q ' green$' && ok card-log-worktree || bad card-log-worktree "a worktree finds the main checkout's board"
+
 cleanup() { CLAUDE_PROJECT_DIR="$tmp/r" sh "$scripts/run-cleanup.sh" demo; }
 printf 'y\n' > "$W/y.txt"
 out=$(cleanup); [ "$out" = "cleanup=refused reason=uncommitted-changes" ] && [ -d "$W" ] && ok cleanup-refuses-dirty || bad cleanup-refuses-dirty "$out"
@@ -201,12 +353,81 @@ printf 'target/\n' >> "$W/.gitignore"; g "$W" add .gitignore; g "$W" commit -q -
 mkdir -p "$W/target" && printf 'build\n' > "$W/target/out"
 out=$(cleanup)
 B=$tmp/r/.claude/tasks
-if [ "$out" = cleanup=done ] && [ ! -e "$W" ] && ! git -C "$tmp/r" rev-parse --verify -q feat/demo >/dev/null \
+if [ "$out" = "cleanup=done archive=$B/archive/demo" ] && [ ! -e "$W" ] && ! git -C "$tmp/r" rev-parse --verify -q feat/demo >/dev/null \
     && git -C "$tmp/remote.git" rev-parse --verify -q feat/demo >/dev/null \
     && [ ! -e "$B/artifacts/demo" ] && [ -z "$(ls "$B"/*/demo.md "$B"/*/demo.s*.md 2>/dev/null)" ] \
+    && [ -e "$B/archive/demo/cards/demo.md" ] && [ -e "$B/archive/demo/cards/demo.s0.md" ] && [ -e "$B/archive/demo/artifacts/issue.md" ] \
     && [ -e "$B/artifacts/nospec/issue.md" ] && [ -e "$B/inreview/nospec.md" ]; then ok cleanup-done
 else bad cleanup-done "$out"; fi
-out=$(cleanup); [ "$out" = cleanup=done ] && ok cleanup-idempotent || bad cleanup-idempotent "$out"
+out=$(cleanup); [ "$out" = "cleanup=done archive=none" ] && ok cleanup-idempotent || bad cleanup-idempotent "$out"
+mkdir -p "$B/artifacts/demo"; echo x > "$B/artifacts/demo/issue.md"; printf -- '---\nid: demo\n---\n' > "$B/inprogress/demo.md"
+out=$(cleanup)
+case $out in "cleanup=done archive=$B/archive/demo-"[0-9]*T[0-9]*Z) [ -e "${out#*archive=}/cards/demo.md" ] && ok cleanup-collision || bad cleanup-collision "$out" ;; *) bad cleanup-collision "$out" ;; esac
+leftover() { mkdir -p "$B/artifacts/demo"; printf -- '---\nid: demo\n---\n' > "$B/inprogress/demo.md"; }
+leftover; out2=$(CLEANUP_NOW=20260101T000000Z cleanup)
+leftover; out3=$(CLEANUP_NOW=20260101T000000Z cleanup)
+[ "$out2" = "cleanup=done archive=$B/archive/demo-20260101T000000Z" ] && [ "$out3" = "cleanup=done archive=$B/archive/demo-20260101T000000Z-1" ] \
+    && [ -e "$B/archive/demo-20260101T000000Z/cards/demo.md" ] && [ -e "$B/archive/demo-20260101T000000Z-1/cards/demo.md" ] && ok cleanup-same-second || bad cleanup-same-second "$out2 / $out3"
+if [ "$(id -u)" != 0 ]; then
+    leftover; chmod a-w "$B/archive"
+    out=$(CLEANUP_NOW=20260101T000001Z cleanup); chmod u+w "$B/archive"
+    [ "$out" = "cleanup=refused reason=archive-failed" ] && [ -e "$B/inprogress/demo.md" ] && ok cleanup-archive-unwritable || bad cleanup-archive-unwritable "$out"
+    rm -rf "$B/artifacts/demo" "$B/inprogress/demo.md"
+fi
+
+# --- run-rebuild.sh: a lost board rebuilt from a stubbed issue, a stubbed draft PR and the branch
+g "$tmp/r" checkout -q main
+mkdir -p "$tmp/r/docs/specs/modbus"
+printf '## Client\n\n**MB-R-001** — The client connects.\n' > "$tmp/r/docs/specs/modbus/requirements.md"
+g "$tmp/r" add docs; g "$tmp/r" commit -q -m spec; g "$tmp/r" push -q origin main 2>/dev/null
+git -C "$tmp/r" worktree add -q "$tmp/rbsrc" -b docs/rb main
+printf '## Client\n\n**MB-R-001** — The client connects over TCP.\n' > "$tmp/rbsrc/docs/specs/modbus/requirements.md"
+g "$tmp/rbsrc" commit -q -am change; SHA0=$(git -C "$tmp/rbsrc" rev-parse --short HEAD)
+printf '**MB-R-002** — The client polls.\n' >> "$tmp/rbsrc/docs/specs/modbus/requirements.md"
+printf '## Client\n\n| ID | Condition | Behavior |\n|---|---|---|\n| **MB-E-001** | Slow server | poll skipped |\n' > "$tmp/rbsrc/docs/specs/modbus/edge-cases.md"
+g "$tmp/rbsrc" add docs; g "$tmp/rbsrc" commit -q -am more; SHA1=$(git -C "$tmp/rbsrc" rev-parse --short HEAD)
+g "$tmp/rbsrc" push -q origin docs/rb 2>/dev/null
+git -C "$tmp/r" worktree remove --force "$tmp/rbsrc"; git -C "$tmp/r" branch -D docs/rb >/dev/null
+mkdir -p "$tmp/rb" "$tmp/bin"
+cp "$scripts/run-rebuild.sh" "$scripts/card-log.sh" "$scripts/card-field.sh" "$tmp/rb/"
+printf '#!/bin/sh\ncat "$ISSUE_FIXTURE"\n' > "$tmp/rb/issue-view.sh"
+printf '#!/bin/sh\nsed "s/SHA0/$SHA0/; s/SHA1/$SHA1/" "$PR_FIXTURE"\n' > "$tmp/rb/pr-view.sh"
+printf '#!/bin/sh\necho docs/rb\n' > "$tmp/bin/gh"; chmod +x "$tmp/bin/gh"
+RB=$tmp/r/.claude/tasks
+rb_clear() { rm -rf "$RB"/artifacts/rb "$RB"/*/rb.md "$RB"/*/rb.s[0-9]*.md; }
+rb_run() {
+    (cd "$tmp/r" && PATH=$tmp/bin:$PATH CLAUDE_PROJECT_DIR=$tmp/r ISSUE_FIXTURE=${RB_ISSUE:-$fx/issue/rebuild.txt} PR_FIXTURE=${RB_PR:-$fx/pr/${1:-rebuild}.txt} SHA0=$SHA0 SHA1=$SHA1 sh "$tmp/rb/run-rebuild.sh" 21 22)
+}
+rb_files() {
+    for f in inprogress/rb.md done/rb.s0.md done/rb.s1.md open/rb.s2.md artifacts/rb/issue.md artifacts/rb/spec-diff.md artifacts/rb/plan.summary.md artifacts/rb/architecture.summary.md artifacts/rb/architecture.md; do
+        echo "==> $f <=="; cat "$RB/$f"
+    done | sed -E "s/20[0-9]{2}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2})?/<today>/; s/$SHA0/SHA0/; s/$SHA1/SHA1/"
+}
+rb_clear
+golden run-rebuild-done rb_run
+golden run-rebuild-files rb_files
+git -C "$tmp/r" worktree list | grep -q '\.claude/worktrees/rb ' && ok run-rebuild-worktree || bad run-rebuild-worktree "the branch is checked out at .claude/worktrees/rb"
+golden run-rebuild-exists rb_run
+rb_clear
+golden run-rebuild-no-stages rb_run ready
+
+rb_clear
+sed 's/SHA0/deadbee/' "$fx/pr/rebuild.txt" > "$tmp/pr-badsha.txt"
+RB_PR=$tmp/pr-badsha.txt golden run-rebuild-sha rb_run
+[ -z "$(ls "$RB"/*/rb.md "$RB"/*/rb.s[0-9]*.md 2>/dev/null)" ] && [ ! -e "$RB/artifacts/rb" ] && ok run-rebuild-sha-writes-nothing || bad run-rebuild-sha-writes-nothing "a refused rebuild leaves the board alone"
+RB_ISSUE=$tmp/none.txt golden run-rebuild-no-issue rb_run
+mkdir -p "$RB/artifacts/rb"
+golden run-rebuild-exists-artifacts rb_run
+rb_clear
+rm -rf "$tmp/r/.claude/worktrees/rb"
+golden run-rebuild-stale rb_run
+[ -d "$tmp/r/.claude/worktrees/rb/docs" ] && ok run-rebuild-stale-worktree || bad run-rebuild-stale-worktree "a registered but missing worktree is re-added"
+
+rb_clear
+git -C "$tmp/r" worktree remove --force "$tmp/r/.claude/worktrees/rb"; : > "$tmp/r/.claude/worktrees/rb"
+golden run-rebuild-worktree-refused rb_run
+[ -z "$(ls "$RB"/*/rb.md "$RB"/*/rb.s[0-9]*.md 2>/dev/null)" ] && [ ! -e "$RB/artifacts/rb" ] && ok run-rebuild-worktree-writes-nothing || bad run-rebuild-worktree-writes-nothing "a refused worktree leaves the board alone"
+rm -f "$tmp/r/.claude/worktrees/rb"
 
 # --- id-collisions.sh: the branch and main both define the next free ID
 rm -rf "$tmp/ids"; git init -q -b main "$tmp/ids"; mkdir -p "$tmp/ids/docs/specs"

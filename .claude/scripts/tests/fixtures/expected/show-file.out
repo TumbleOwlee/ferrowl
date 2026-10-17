@@ -9,6 +9,8 @@ Verification:
   - cannot be waived without asking
 Confirm:
 - one stage per crate — the UI change is reviewed apart
+- MB-R-161 — retry forever, no cap (chosen) — the user never wants a dead tab
+- MB-E-031 — drop the in-flight request (user) — a replayed write may apply twice
 show-file: no viewer (SHOW_FILE_VIEWER=none): <P>/.claude/tasks/artifacts/demo/review.verdict.md (approval marker: <P>/.claude/tasks/artifacts/demo/approval)
 Review: findings — 0 must fix, 1 needs you
 Not checked: s2 demo TUI run: needs a terminal

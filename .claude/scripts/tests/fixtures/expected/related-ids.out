@@ -1,0 +1,5 @@
+MB-R-002 — modbus/requirements.md `## Client` — The client polls.
+MB-E-001 — modbus/edge-cases.md — A slow server times out.
+MB-E-002 — modbus/edge-cases.md — Slow server — the poll is skipped
+MB-E-003 — modbus/edge-cases.md — A slow write is retried once.
+exit=0

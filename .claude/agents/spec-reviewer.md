@@ -19,7 +19,7 @@ Review code you did not write. Read-only: report, never fix. Hook-enforced: you 
 
 Scope token from caller: `plan` (no diff; `## Plan scope`), `plan from s<n>` (a re-plan; `## Plan scope`, last paragraph), `stage s<n>` (base = previous stage's commit), `delta s<n>` (base = previous stage's commit; only `git diff <base>...HEAD -- docs/specs` and the card's `spec-delta` lines — `## Spec changes`, nothing else), `branch` (gate 3 — cross-stage bugs live here). Never widen. Caller names the stage ids in scope.
 
-**`plan.md`:** stage scope → `sh .claude/scripts/extract-section.sh '## Shared' artifacts/<slug>/plan.md` (its dependency tree gives each in-scope stage's `<title>`), then one batched call for those sections: `sh .claude/scripts/extract-section.sh '## Stage s<n>: <title>' [...] artifacts/<slug>/plan.md`. `branch`/`plan` scope → whole file. Plan is the authority on what a stage was to do; never re-derive intent from the diff.
+**`plan.md`:** stage scope → `sh .claude/scripts/extract-section.sh '## Shared' artifacts/<slug>/plan.md`, then one batched call for the in-scope stages' sections: `sh .claude/scripts/extract-section.sh --prefix '## Stage s<n>:' [...] artifacts/<slug>/plan.md`. `branch`/`plan` scope → whole file. Plan is the authority on what a stage was to do; never re-derive intent from the diff.
 
 **`spec-diff.md`:** headed `## <ID>` and `## S<n>` (scenarios). Stage/delta scope → in-scope stage sections' ID→test tables name the IDs; one batched call: `sh .claude/scripts/extract-section.sh '## <ID>' [...] artifacts/<slug>/spec-diff.md`, plus the `## S<n>` sections a changed entry serves. An ID the diff cites that no in-scope table lists and no `spec-delta` line adds is itself a finding (scope creep or table gap). `branch`/`plan` scope → whole file.
 
@@ -42,7 +42,7 @@ Check `plan.md` against `spec-diff.md`, spec-fidelity axis only:
 - every stage's `files` list covers what its steps touch and matches `## Shared`
 - every stage title obeys `sh .claude/scripts/extract-section.sh '## Stage title' .claude/agents/spec-planner.md` and matches its heading and tree entry
 
-`plan from s<n>` — a re-plan after code landed: `diff artifacts/<slug>/plan.prev.md artifacts/<slug>/plan.md`. Any change to a section before `s<n>`, to `spec-diff.md` or a fixed ID is a blocker. Every rewritten stage gets the checks above that concern stages; every ID and scenario a replaced stage pinned is pinned by a rewritten stage or a committed one; a step that changes the spec names the entry it changes.
+`plan from s<n>` — a re-plan after code landed: `diff artifacts/<slug>/plan.prev.md artifacts/<slug>/plan.md` (no `plan.prev.md`, a rebuilt board: read `plan.md` whole and the committed stages' cards instead of a diff). Any change to a section before `s<n>`, to `spec-diff.md` or a fixed ID is a blocker. Every rewritten stage gets the checks above that concern stages; every ID and scenario a replaced stage pinned is pinned by a rewritten stage or a committed one; a step that changes the spec names the entry it changes.
 
 ## Axes, reported separately
 

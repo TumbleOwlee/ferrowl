@@ -1,14 +1,18 @@
 # Load balancing core
 
-**Spec** rev 2
+**Status** in progress
 
 ## Goal
 A site limit is shared across chargers and batteries.
 Today every device draws its maximum.
 
-## Spec (rev 2)
+## Requirements
+- **R1** The allocator never offers more than the site limit in total.
+- **R2** A battery may discharge to cover demand above the site limit.
+- **R3** A group's members never exceed the group's cap in total.
+- **E1** A device that stops reporting keeps its last allocation for 60 s.
 
-### Scenarios
+## Scenarios
 - **S1** — Two EVSEs share a limit
   - Given a 32 A site limit and two charging EVSEs
   - When both request 32 A
@@ -21,26 +25,6 @@ Today every device draws its maximum.
   - Given a group capped at 20 A inside a 32 A site
   - When three EVSEs in the group charge
   - Then the group's EVSEs share 20 A
-
-### Requirements
-| ID | Kind | Requirement |
-|---|---|---|
-| R1 | new | The allocator never offers more than the site limit in total. |
-| R2 | new | A battery may discharge to cover demand above the site limit. |
-| R3 | new | A group's members never exceed the group's cap in total. |
-| E1 | new | A device that stops reporting keeps its last allocation for 60 s. |
-
-### Other spec changes
-| File | Section | Change |
-|---|---|---|
-| ocpp/api-contract.md | Config keys | `site_limit_a` row (R1) |
-| ocpp/api-contract.md | Config keys | `group.cap_a` row (R3) |
-| ocpp/api-contract.md | Config keys | `legacy_limit` row (R12) |
-| ocpp/api-contract.md | Notes | units are amperes throughout |
-
-### Deferred
-- rounding of offered current — implementation
-- master–slave setups — plan
 
 ## Architecture
 3 new components in ferrowl-ocpp; an `Allocator` over a tree of `Node`s
@@ -78,5 +62,4 @@ pub struct Allocator { root: Node }
 - [ ] **Slice 3: Nested groups** — not filed yet
   - Groups cap their members inside the site.
   - depends on: 1, 2
-
 exit=0

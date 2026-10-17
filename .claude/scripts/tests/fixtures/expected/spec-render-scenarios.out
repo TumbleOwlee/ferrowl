@@ -1,0 +1,7 @@
+## Scenarios
+- **S1** — Server restarts during polling
+  - Given a client tab polling a TCP server
+  - When the server closes the connection
+  - Then the tab shows "reconnecting" and polling resumes once the server is back
+
+exit=0

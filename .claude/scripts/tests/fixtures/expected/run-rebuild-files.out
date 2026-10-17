@@ -1,0 +1,100 @@
+==> inprogress/rb.md <==
+---
+id: rb
+branch: docs/rb
+lane: full
+issue: 21
+pr: 22
+gate1: <today>
+arch: <today>
+gate2: <today>
+artifacts: .claude/tasks/artifacts/rb
+---
+<today> rebuild reason=board-missing
+<today> pr=draft
+==> done/rb.s0.md <==
+---
+id: rb.s0
+parent: rb
+title: Land spec
+blocked-by: []
+files: []
+branch: docs/rb
+worktree: .claude/worktrees/rb
+---
+<today> commit=SHA0
+==> done/rb.s1.md <==
+---
+id: rb.s1
+parent: rb
+title: Retry with backoff
+blocked-by: [rb.s0]
+files: []
+branch: docs/rb
+worktree: .claude/worktrees/rb
+---
+<today> commit=SHA1
+==> open/rb.s2.md <==
+---
+id: rb.s2
+parent: rb
+title: Render reconnecting
+blocked-by: [rb.s1]
+files: []
+branch: docs/rb
+worktree: .claude/worktrees/rb
+---
+==> artifacts/rb/issue.md <==
+# Reconnect dropped Modbus clients
+
+## Goal
+A client tab reconnects on its own after the server drops the connection.
+Today the user restarts the tab by hand.
+==> artifacts/rb/spec-diff.md <==
+# rb — spec diff (rev 1)
+
+## Summary
+Goal: A client tab reconnects on its own after the server drops the connection.
+
+## S1 — Server restarts during polling
+Given a client tab polling a TCP server
+When the server closes the connection
+Then the tab shows "reconnecting" and polling resumes once the server is back
+
+## MB-E-001 — new · edge-cases `## Client`
+Slow server — poll skipped
+
+## MB-R-001 — changed · requirements `## Client`
+The client connects over TCP.
+
+## MB-R-002 — new · requirements `## Client`
+The client polls.
+==> artifacts/rb/plan.summary.md <==
+# rb — plan summary (rebuilt)
+
+| Stage | What | Pins | Files | Stop |
+|---|---|---|---|---|
+| s0 | Land spec | — | — | — |
+| s1 | Retry with backoff | — | — | — |
+| s2 | Render reconnecting | — | — | — |
+
+Verification beyond unit tests:
+- s2 — demo TUI
+  - see "reconnecting" in the tab
+==> artifacts/rb/architecture.summary.md <==
+# rb — architecture summary (rebuilt)
+
+Decide: 1 new, 1 changed components in ferrowl-modbus; the backoff is owned by the client task
+
+Public surface:
+- `ClientState::Reconnecting`
+==> artifacts/rb/architecture.md <==
+# rb — architecture (rebuilt)
+
+## Components
+
+| Component | Kind | Crate › module | Change | Role |
+|---|---|---|---|---|
+| `Backoff` | struct | ferrowl-modbus › client::reconnect | new | delay doubling from 1s to 30s |
+| `ClientState` | enum | ferrowl-modbus › client | changed | new `Reconnecting` variant |
+exit=0

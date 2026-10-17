@@ -1,0 +1,37 @@
+# Edit Modbus read ranges in their own module settings dialog
+
+Draft · lane full · spec rev 6 · gauntlet green at 40b290a
+
+## Why
+Modbus read ranges are edited in a separate module settings dialog (`:module`), so loading a module from a device-config file keeps that file's ranges.
+
+## Scenarios
+The 6 scenarios of #398: S1 Change read ranges on a running client · S2 A malformed range is refused · S3 Leaving the dialog without saving · S4 Loading a module keeps the device file's ranges · S5 Editing a module keeps its ranges · S6 No module settings on a monitor tab
+
+## Stages
+- [x] Land spec (c0ffee0) <!-- s0 -->
+- [x] Module settings dialog (c0ffee1) <!-- s1 blocked-by s0 -->
+- [x] Apply read ranges at runtime (c0ffee2) <!-- s2 blocked-by s1 -->
+- [x] Setup dialog without ranges (c0ffee3) <!-- s3 blocked-by s2 -->
+
+## Review here
+- on the branch: Land spec, Module settings dialog, Apply read ranges at runtime, Setup dialog without ranges — inline comments on their files are answered before the next stop
+- later stages land after their review and the user's approval
+
+## Architecture
+4 new, 3 changed components in ferrowl; new ModuleSettingsDialog opened by `:module`, confirm queued as a PendingAction and applied in refresh
+
+| Component | Kind | Crate › module | Change | Role |
+|---|---|---|---|---|
+| `ModuleSettingsDialog` | struct | ferrowl › module::modbus::settings_dialog | new | four `RangeSpec` inputs (holding, input, coils, discrete), live error box, close confirmation; `resolve` → `Result<ReadRanges, String>`, `confirm` → `Option<ReadRanges>` |
+| `RangeSpec` | struct | ferrowl › module::modbus::settings_dialog | new | `Validate` impl over `check_range_spec` for one range input |
+| `ModbusModuleView::apply_read_ranges` | fn | ferrowl › module::modbus::view::mutate | new | async, `&mut self`; writes one `ReadRanges` to the device config and the running module |
+| `ModbusViewOverlay` | enum | ferrowl › module::modbus::view | changed | new `Settings(Box<ModuleSettingsDialog>)` variant |
+| `PendingAction` | enum | ferrowl › module::modbus::view::overlay | changed | new `SetReadRanges(ReadRanges)` variant, applied in refresh |
+| `ModbusCmd` | enum | ferrowl › module::modbus::view | changed | new `Module` variant, 13 commands |
+
+Public surface:
+- `:module` command (Modbus client/server tabs)
+
+Closes #398
+exit=0

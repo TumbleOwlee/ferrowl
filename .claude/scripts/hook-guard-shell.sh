@@ -2,12 +2,14 @@
 # PreToolUse guard on the Bash tool: catches shell-output bypasses of
 # AGENTS.md's Conventions ("never read a whole file when only part is
 # needed" / "filter shell output before it lands in context") and denies
-# them instead of letting the dump land silently. Four shapes:
+# them instead of letting the dump land silently. Shapes:
 #   - unpiped `cat` of a markdown file, or of any file over LARGE_LINES lines
 #   - unpiped `git show`/`git diff` with no --stat and no pathspec
 #   - unpiped `find` with -type f/d and no -name/-path/-iname/-regex
 #   - raw `gh issue view` (AGENTS.md Conventions — reading: always issue-view.sh)
 #   - raw `gh pr view` (always pr-view.sh — same GraphQL projectCards bug)
+#   - append onto a task card (`>>` or `tee -a` into
+#     `.claude/tasks/{open,inprogress,inreview,done}/*.md`): card-log.sh validates
 #   - `git commit` while the checkout is on `main` (branch off main, never
 #     commit to it — the safety net for an agent that missed the worktree)
 #   - `git push` whose destination is `main`, explicit or (on bare `git
@@ -27,6 +29,11 @@ name=$(printf '%s' "$input" | jq -r '.tool_name // empty')
 cwd=$(printf '%s' "$input" | jq -r '.cwd // "."')
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty')
 [ -n "$cmd" ] || exit 0
+
+if printf '%s' "$cmd" | grep -qE '(>>|tee[[:space:]]+(-[a-z]*a[a-z]*|--append)([[:space:]]+--)?)[[:space:]]*["'"'"']?[^[:space:]"'"'"']*tasks/(open|inprogress|inreview|done)/[^[:space:]"'"'"'/]+\.md'; then
+  jq -n --arg reason "Raw append onto a task card bypasses its validation. Use: sh .claude/scripts/card-log.sh <card-id> <event> [k=v …] [-- <text>] (vocabulary in the script)." '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $reason}}'
+  exit 0
+fi
 
 case "$cmd" in
   *'|'*) exit 0 ;;   # already piped through a filter downstream
