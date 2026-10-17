@@ -87,6 +87,12 @@ $ card-move.sh rp.s3 inprogress
 $ card-log.sh rp.s3 green
 $ card-move.sh rp.s3 inreview
 impl: status=inreview stage=s3 delta=0
+$ next-step.sh rp branch status=clean file=.claude/tasks/artifacts/rp/review.md summary=.claude/tasks/artifacts/rp/review.verdict.md
+logged: review=clean
+next=stage-stop
+run: sh .claude/scripts/stage-stop.sh rp s3 threads=<n>
+do: run the stage stop decision with the PR thread count
+see: #### Stage stop
 $ stage-stop.sh rp s3
 auto
 $ card-log.sh rp.s3 commit=32d5a46
@@ -106,6 +112,11 @@ board:
   done/rp.s3.md
 
 ## gate 4 shows the branch verdict
+$ next-step.sh rp pr status=ready file=.claude/tasks/artifacts/rp/pr.md follow-ups=0
+next=stop
+run: sh .claude/scripts/prompt-render.sh gate4 rp
+do: show the gate 4 stop and wait for the user's approval
+see: ### Gate 4 — pull request
 $ prompt-render.sh gate4 rp pr=9
 Gate 4 · rp · pr.md, review.verdict.md
 PR: Read register 65535
@@ -120,7 +131,12 @@ Answer: approve · change <what> · re-plan: <why> · stop (hold, e.g. for a man
 ## end of run
 $ reconcile.sh rp
 reconcile=clean next=none
-$ card-log.sh rp ci=0
+$ next-step.sh rp ci ci=0
+logged: ci=0
+next=done
+run: sh .claude/scripts/run-cleanup.sh rp
+do: clean up the run
+see: ### Clean up
 $ metrics.sh rp
 rp start=2026-10-05T09:00 end=2026-10-05T18:00 first-red=- stages=4 stops=2 question=0 approval=1 stage=1 blocked=0 replans=0 overturned=0 reads=0 lane=full ci=0
 exit=0
