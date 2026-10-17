@@ -1,0 +1,8 @@
+Question · demo · s2 · spec-implementer · 1 decision
+## 1. s2 is blocked: the parse_frame reference names no signature
+Options:
+- a) answer: <text> — relayed to the implementer
+- b) re-plan — a fresh planner rewrites the stages not yet committed
+- c) stop — the run halts, the board stays for a resume
+Answer: <1: a <text> | b | c>
+exit=0

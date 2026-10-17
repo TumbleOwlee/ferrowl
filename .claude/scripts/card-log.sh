@@ -20,6 +20,7 @@
 # stage  stopped        -                 -        -                     required
 # stage  follow-up      -                 -        -                     required
 # both   note           -                 -        -                     required
+# both   moved=         open|inprogress|inreview|done -  -              no
 # stage  minor=         any               -        -                     yes
 # stage  minor-moved=   any               -        -                     yes
 # stage  files+=        any               -        user,reason           no
@@ -27,6 +28,7 @@
 # stage  stop=          any               -        -                     no
 # parent stop           -                 -        kind,gate,agent,count no
 # parent spec-rev=      any               -        -                     no
+# parent arch-rev=      any               -        -                     no
 # parent spec-keep=     any               -        -                     no
 # parent pr=            draft|ready       -        -                     no
 # parent gauntlet=      pass|fail         -        cov,sha,step,reason   no

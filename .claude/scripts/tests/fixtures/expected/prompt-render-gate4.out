@@ -1,0 +1,12 @@
+Gate 4 · demo · pr.md, follow-up-1.md
+PR: Reconnect dropped Modbus clients
+Follow-ups:
+- 1: Share the backoff helper with the RTU client
+Approving will:
+- push, replace the draft's title and body, mark #34 ready
+- file the 1 follow-up issues
+- wait for CI, clean up
+Options:
+1. follow-ups: <numbers | none> — file only these (default: all)
+Answer: approve [<n>[: <value>] …] · change <what> · stop (hold, e.g. for a manual run first)
+exit=0

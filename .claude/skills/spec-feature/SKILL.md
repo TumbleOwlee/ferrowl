@@ -25,7 +25,7 @@ Headings of `.claude/AGENTS.workflow.md`, one pull each (`AGENTS.md` `## Convent
 | Task board — cards: files, frontmatter, log lines, states | `#### Cards` |
 | Artifacts directory — every file of `artifacts/<slug>/` | `#### Artifacts` |
 | Agent hand-off (status lines, file paths) | `### Agent hand-off` |
-| Approval prompt — the fixed shape of every stop, built from `show-file.sh`'s lines | `### Approval prompt` |
+| Approval prompt — every stop rendered by `prompt-render.sh`, its two answer shapes | `### Approval prompt` |
 | Relayed question — an agent's batch of decisions | `### Relayed question` |
 | Lane — fast or full, proposed by size, settled at the first approval stop | `### Lane — fast or full` |
 | Gate 1 — brief: grilling, scenarios, best-effort entries | `### Gate 1 — brief` |

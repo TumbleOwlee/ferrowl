@@ -1,0 +1,7 @@
+Question · demo · delta s1 · spec-reviewer · 1 decision
+## 1. MB-R-161 now gives up after 1 hour of retries; keep it?
+Options:
+- a) revert to retry forever (recommended: S1 decided by the user)
+- b) keep the 1 hour limit
+Answer: <1: a · 2: b · …> · other <text> — keep, revert or split each change
+exit=0
