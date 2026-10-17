@@ -50,9 +50,8 @@ You talk to one agent, the orchestrator. It spawns the others (author, architect
 
 | Lane | Recommended for | Stops you see |
 |---|---|---|
-| light | at most one requirement or edge case changes | plan (with the brief) · PR |
-| fast | up to three entries, or a refactor touching up to three components | architecture (with the brief) · PR |
-| full | anything bigger | brief · architecture · plan · stages that need you · branch review · PR |
+| fast | up to three entries, or a refactor touching up to three components | architecture (with the brief) · PR; at most one entry: plan (with the brief) · PR |
+| full | anything bigger | brief · architecture · plan · stages that need you · PR (with the branch review) |
 
 A feature too big for one run (many scenarios, several areas) becomes an **epic**: one run that settles the shared core and files one issue per slice, each slice a run of its own. A non-behavior change (refactor, rename, tooling) starts at the architecture step; a typo needs no run at all, just a branch and a PR.
 
