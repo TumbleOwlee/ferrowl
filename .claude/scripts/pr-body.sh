@@ -8,17 +8,24 @@
 # Line 1 is `# <title>` (stripped for --title). Both forms end with
 # `Closes #<issue>` when the parent card carries `issue`.
 #
+# Both forms share, in order after their own opening, ## Scenarios (full:
+# ## Scenarios covered), ## Requirements (with the Issue column), ## Spec
+# changes since filing, ## Architecture (the Decide line, the component table
+# of architecture.md, the public surface; no interfaces) and ## Decisions
+# (design choices and the chosen spec decisions not already under the spec
+# changes).
+#
 # draft:  status line (lane, spec rev, last green sha), ## Why, ## Scenarios,
 #         ## Stages (a stage's verification beyond unit tests as indented
-#         sub-items under its line), ## Review here, ## Architecture as in the
-#         full form. Stage ids live only in HTML comments on the stage lines,
-#         `<!-- s1 blocked-by s0 -->`.
+#         sub-items under its line), ## Review here, then the shared sections.
+#         Stage ids live only in HTML comments on the stage lines,
+#         `<!-- s1 blocked-by s0 -->`. Its spec changes are the cards'
+#         spec-delta lines whose `**<ID>**` the committed branch diff
+#         (`git diff main...<branch> -- docs/specs`) touches; the section is
+#         omitted when the card has no `branch` or git fails.
 # full:   status line (spec rev, stages, entries, coverage, review, splits),
-#         pr.md from line 2 on, ## Scenarios covered, ## Requirements (with
-#         the Issue column), ## Spec changes since filing, ## Architecture (the
-#         Decide line, the component table of architecture.md, the public
-#         surface; no interfaces), ## Decisions (design choices and the chosen
-#         spec decisions not already under the spec changes).
+#         pr.md from line 2 on, then the shared sections; its spec changes
+#         come from the Revisions lines of the synced spec-diff.md.
 #
 # Exit 3 with `body=refused stage-ref=<token>` when the visible text names a
 # stage (`s3`) or an agent. HTML comments, fenced blocks, code spans holding
@@ -72,6 +79,88 @@ architecture() {
     fi
     surface=$(awk '/^Public surface:/ { on = 1; next } on && /^- / { if ($0 == "- none") next; print; next } on { on = 0 }' "$a/architecture.summary.md")
     [ -n "$surface" ] && printf 'Public surface:\n%s\n' "$surface"
+}
+
+requirements() {
+    [ -f "$a/spec-diff.md" ] || return 0
+    req=$(sr entries --issue-ids "$board" | trim)
+    [ -n "$req" ] && printf '%s\n\n' "$req"
+}
+
+# $1: the change lines; sets chg_ids (call directly, never inside $(…))
+spec_changes() {
+    chg_ids=
+    [ -n "$1" ] && [ -f "$a/spec-diff.md" ] || return 0
+    chg_ids=$(printf '%s\n' "$1" | sed -n 's/^- \([A-Z][A-Z]-[RE]-[0-9][0-9]*\) .*/\1/p' | tr '\n' ' ')
+    printf '## Spec changes since filing\n'
+    {
+        awk '/^## / && match($0, / · was [RE][0-9]+$/) { v = substr($0, RSTART); sub(/.* was /, "", v); print "M " $2 " " v }' "$a/spec-diff.md"
+        cat "$board"/*/"$slug".md "$board"/*/"$slug".s*.md 2>/dev/null | sed -n 's/.* spec-delta \([^ ]*\) .*quote="\([^"]*\)".*/Q \1 \2/p'
+        printf '%s\n' "$1" | sed 's/^/L /'
+    } | awk '
+        $1 == "M" { m[$2] = $3; next }
+        $1 == "Q" { q = $0; sub(/^Q [^ ]+ /, "", q); qt[$2] = q; next }
+        $1 == "L" {
+            line = substr($0, 3)
+            if (match(line, /^- [A-Z][A-Z]-[RE]-[0-9]+/)) {
+                id = substr(line, 3, RLENGTH - 2)
+                if (id in m) line = substr(line, 1, RLENGTH) " (" m[id] ")" substr(line, RLENGTH + 1)
+                if ((id in qt) && match(line, / — user$/)) line = substr(line, 1, RSTART - 1) " — user: \"" qt[id] "\""
+            }
+            print line
+        }'
+    echo
+}
+
+# spec-delta lines of the cards for the IDs the committed branch diff touches,
+# last line per ID, in the shape `sr changes` prints
+live_changes() {
+    br=$(field branch); [ -n "$br" ] || return 0
+    d=$(git -C "$root" diff "main...$br" -- docs/specs 2>/dev/null) || return 0
+    touched=$(printf '%s\n' "$d" | grep '^[+-]' | grep -v '^+++\|^---' | grep -o '\*\*[A-Z][A-Z]-[RE]-[0-9]*\*\*' | tr -d '*' | sort -u | tr '\n' ' ')
+    [ -n "$touched" ] || return 0
+    cat "$board"/*/"$slug".md "$board"/*/"$slug".s*.md 2>/dev/null | awk '$2 == "spec-delta"' | sort -s -k1,1 | awk -v touched=" $touched" '
+        index(touched, " " $3 " ") == 0 { next }
+        {
+            id = $3; kind = $4
+            rest = $0; sub(/^[^ ]+ spec-delta [^ ]+ [^ ]+/, "", rest)
+            origin = ""
+            while (match(rest, /^ +(origin|quote)=/)) {
+                field = substr(rest, 1, RLENGTH); sub(/^ +/, "", field)
+                rest = substr(rest, RLENGTH + 1)
+                if (substr(rest, 1, 1) == "\"") {
+                    rest = substr(rest, 2); i = index(rest, "\"")
+                    val = substr(rest, 1, i - 1); rest = substr(rest, i + 1)
+                } else {
+                    i = index(rest, " "); if (i == 0) i = length(rest) + 1
+                    val = substr(rest, 1, i - 1); rest = substr(rest, i)
+                }
+                if (field == "origin=") origin = val
+            }
+            sub(/^ +/, "", rest)
+            n++; if (id in seq) delete byseq[seq[id]]
+            seq[id] = n; byseq[n] = "- " id " " kind ": " rest " — " origin
+        }
+        END { for (i = 1; i <= n; i++) if (i in byseq) print byseq[i] }'
+}
+
+# $1: chg_ids
+decisions() {
+    dec=$({
+        [ -f "$a/architecture.md" ] && awk '/^## Decisions$/ { on = 1; next } /^## / { on = 0 } on && /^- /' "$a/architecture.md"
+        [ -f "$a/plan.md" ] && awk '/^## Shared$/ { sh = 1; next } /^## / { sh = 0 } sh && /^Decisions:/ { on = 1; next } on && /^- / { print; next } on { on = 0 }' "$a/plan.md"
+    } | awk -v ids=" $1" '
+        !match($0, / \((chosen|user)(, rev [0-9]+)?\) \[(design|process|spec [A-Z0-9-]+)\]( — .*)?$/) { next }
+        {
+            choice = substr($0, 3, RSTART - 3); meta = substr($0, RSTART + 2)
+            who = meta; sub(/[,)].*/, "", who)
+            tag = meta; sub(/^[^[]*\[/, "", tag); sub(/\].*/, "", tag)
+            if (tag == "design") r = choice " (" who ")"
+            else if (tag ~ /^spec / && who == "chosen") { if (index(ids, " " substr(tag, 6) " ")) next; r = choice " (" who ")" }
+            else next
+            if (!(r in seen)) { seen[r] = 1; print "- " r }
+        }')
+    [ -n "$dec" ] && printf '## Decisions\n%s\n\n' "$dec"
 }
 
 draft() {
@@ -135,7 +224,10 @@ draft() {
     else echo "- later stages land after their review and the user's approval"; fi
     echo
 
-    architecture
+    requirements
+    spec_changes "$(live_changes)"
+    if [ -f "$a/architecture.summary.md" ]; then architecture; echo; fi
+    decisions "$chg_ids"
 }
 
 full() {
@@ -159,54 +251,15 @@ full() {
     echo
     printf '%s\n\n' "$line"
     tail -n +2 "$a/pr.md" | sed '1{/^$/d;}'
-
-    ids=
-    if [ -f "$a/spec-diff.md" ]; then
-        if [ -n "$scenarios" ]; then
-            printf '\n## Scenarios covered\nAll %s scenarios of %s: %s\n' "${scenarios%%	*}" "$ref" "${scenarios#*	}"
-        fi
-        req=$(sr entries --issue-ids "$board" | trim)
-        [ -n "$req" ] && printf '\n%s\n' "$req"
-        chg=$(sr changes | trim)
-        if [ -n "$chg" ]; then
-            ids=$(printf '%s\n' "$chg" | sed -n 's/^- \([A-Z][A-Z]-[RE]-[0-9][0-9]*\) .*/\1/p' | tr '\n' ' ')
-            printf '\n## Spec changes since filing\n'
-            {
-                awk '/^## / && match($0, / · was [RE][0-9]+$/) { v = substr($0, RSTART); sub(/.* was /, "", v); print "M " $2 " " v }' "$a/spec-diff.md"
-                cat "$board"/*/"$slug".md "$board"/*/"$slug".s*.md 2>/dev/null | sed -n 's/.* spec-delta \([^ ]*\) .*quote="\([^"]*\)".*/Q \1 \2/p'
-                printf '%s\n' "$chg" | sed 's/^/L /'
-            } | awk '
-                $1 == "M" { m[$2] = $3; next }
-                $1 == "Q" { q = $0; sub(/^Q [^ ]+ /, "", q); qt[$2] = q; next }
-                $1 == "L" {
-                    line = substr($0, 3)
-                    if (match(line, /^- [A-Z][A-Z]-[RE]-[0-9]+/)) {
-                        id = substr(line, 3, RLENGTH - 2)
-                        if (id in m) line = substr(line, 1, RLENGTH) " (" m[id] ")" substr(line, RLENGTH + 1)
-                        if ((id in qt) && match(line, / — user$/)) line = substr(line, 1, RSTART - 1) " — user: \"" qt[id] "\""
-                    }
-                    print line
-                }'
-        fi
+    echo
+    chg_ids=
+    if [ -f "$a/spec-diff.md" ] && [ -n "$scenarios" ]; then
+        printf '## Scenarios covered\nAll %s scenarios of %s: %s\n\n' "${scenarios%%	*}" "$ref" "${scenarios#*	}"
     fi
-
-    if [ -f "$a/architecture.summary.md" ]; then echo; architecture; fi
-
-    dec=$({
-        [ -f "$a/architecture.md" ] && awk '/^## Decisions$/ { on = 1; next } /^## / { on = 0 } on && /^- /' "$a/architecture.md"
-        [ -f "$a/plan.md" ] && awk '/^## Shared$/ { sh = 1; next } /^## / { sh = 0 } sh && /^Decisions:/ { on = 1; next } on && /^- / { print; next } on { on = 0 }' "$a/plan.md"
-    } | awk -v ids=" $ids" '
-        !match($0, / \((chosen|user)(, rev [0-9]+)?\) \[(design|process|spec [A-Z0-9-]+)\]( — .*)?$/) { next }
-        {
-            choice = substr($0, 3, RSTART - 3); meta = substr($0, RSTART + 2)
-            who = meta; sub(/[,)].*/, "", who)
-            tag = meta; sub(/^[^[]*\[/, "", tag); sub(/\].*/, "", tag)
-            if (tag == "design") r = choice " (" who ")"
-            else if (tag ~ /^spec / && who == "chosen") { if (index(ids, " " substr(tag, 6) " ")) next; r = choice " (" who ")" }
-            else next
-            if (!(r in seen)) { seen[r] = 1; print "- " r }
-        }')
-    [ -n "$dec" ] && printf '\n## Decisions\n%s\n' "$dec"
+    requirements
+    if [ -f "$a/spec-diff.md" ]; then spec_changes "$(sr changes | trim)"; fi
+    if [ -f "$a/architecture.summary.md" ]; then architecture; echo; fi
+    decisions "$chg_ids"
 }
 
 if [ "$form" = draft ]; then
@@ -220,7 +273,7 @@ fi
 out=$(mktemp); trap 'rm -f "$out"' EXIT INT TERM
 {
     if [ "$form" = draft ]; then draft; else full; fi
-    [ -n "$issue" ] && printf '\nCloses #%s\n' "$issue"
+    [ -n "$issue" ] && printf 'Closes #%s\n' "$issue"
 } | trim > "$out"
 [ -s "$out" ] || exit 1
 
