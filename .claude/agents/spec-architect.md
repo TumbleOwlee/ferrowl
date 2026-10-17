@@ -54,7 +54,7 @@ Shape: <one line>
 |---|---|---|---|---|
 | `<Name>` | struct · trait · enum · module · fn | <crate> › <module> | new · changed · existing · removed | <≤ 10 words; longer when it names what a reviewer needs — key members, variants, signatures> |
 
-`pr-body.sh full` puts this table verbatim under the PR's `## Architecture`; the PR has no interfaces section, so a Role cell carries what a reviewer must know without the diff.
+Both `pr-body.sh` forms, the draft re-rendered on every card move and the gate 4 full body, put this table verbatim under the PR's `## Architecture`; the PR has no interfaces section, so a Role cell carries what a reviewer must know without the diff.
 
 ## Structure
 ```text

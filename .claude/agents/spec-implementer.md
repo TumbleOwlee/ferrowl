@@ -37,6 +37,7 @@ card-log.sh <id> note -- <text>
 
 - `origin=user` when the user asked (an answer, a PR comment; quote their words), `review` for a review finding, `impl` when you found it.
 - `note -- <text>` records anything else worth a later reader (a renamed test, a correction); never misuse `test-red` for it.
+- The `spec-delta` why names no stage id (`s3`) and no agent: the draft PR renders it and its stage-ref scan refuses the body otherwise; the decision line under `## Ask or stop` carries the same ban.
 - The `test-red` text names the test and the failure seen (`-- <test name>: <failure, ≤ 8 words>`), never only the test names.
 
 Given up to 3 code stages of the run (`s0` aside) — and only the plan: a slice run's epic context reaches you through it, never directly; a fresh implementer takes the next ones from your card. Implement them in plan order, within the `files` contract (`AGENTS.md` `## Workflow`). Stage `s0` (`Land spec`), when the plan has one, is yours: copy the approved text where the plan says — `**bold**` marks in a changed entry are stripped and the heading's ` · was R<n>` is dropped, the landed line is plain — one commit, no code.
@@ -71,7 +72,7 @@ Log `checks=pass crates=<the tested crates>` or `checks=fail -- <one-line reason
 
 ## Ask or stop — never improvise
 
-**Ask** — a decision the plan, the spec and the code leave open and the user owns: a requirement ambiguous or conflicting, a default, limit or timeout no entry states. Write `artifacts/<slug>/question.md` — shape, batching and the `Why you:` rule: `sh .claude/scripts/extract-section.sh '## Questions' .claude/agents/spec-author.md`, title `# <slug> — questions (s<n>)` — and end turn on `status=question file=… count=<n>`; you are resumed with the numbered answers. An answer that fixes observable behavior lands in `docs/specs/` as a spec change (`## Spec changes`), never in the code alone.
+**Ask** — a decision the plan, the spec and the code leave open and the user owns: a requirement ambiguous or conflicting, a default, limit or timeout no entry states. Write `artifacts/<slug>/question.md` — shape, batching and the `Why you:` rule: `sh .claude/scripts/extract-section.sh '## Questions' .claude/agents/spec-author.md`, title `# <slug> — questions (s<n>)` — and end turn on `status=question file=… count=<n>`; you are resumed with the numbered answers. An answer that fixes observable behavior lands in `docs/specs/` as a spec change (`## Spec changes`), never in the code alone. An answer that fixes a structure or code choice a PR reader needs, and no observable behavior, is appended as one line under `plan.md` `## Shared` `Decisions:`: `- <choice> (user) [design] — <≤ 1 line why>`; no stage id or agent name in it.
 
 **Stop** — the stage cannot go on as planned: `status=blocked stage=s<n> reason=<one line>`.
 - Plan wrong, incomplete, or unworkable.

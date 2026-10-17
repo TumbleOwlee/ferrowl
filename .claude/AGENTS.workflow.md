@@ -211,7 +211,7 @@ Question · <slug> · <gate or stage> · <agent> · <n> decisions
 Answer: <1: a · 2: b · …> · other <text>
 ```
 
-Answers go back to the **same** agent (`SendMessage`, never a respawn) in one message, numbered. A decision marked `Assumes: <n> = <option>` is void when the user answered `<n>` otherwise; the agent asks it again in its next `question.md`, as it does a decision that depended on an answer and waited. A question without a real `Why you:` is sent back: the agent decides it and records `(chosen)`.
+Answers go back to the **same** agent (`SendMessage`, never a respawn) in one message, numbered. An implementer's answered design-grade decision is appended by the implementer to `plan.md` `## Shared` `Decisions:` as `(user) [design]`; a behavioral answer lands as a spec change with its `spec-delta`; the next card move's draft render shows either. A decision marked `Assumes: <n> = <option>` is void when the user answered `<n>` otherwise; the agent asks it again in its next `question.md`, as it does a decision that depended on an answer and waited. A question without a real `Why you:` is sent back: the agent decides it and records `(chosen)`.
 
 ### Gate 1 — brief
 
@@ -331,7 +331,9 @@ The PR link is never added by hand: the PR's `Closes #<n>` line makes GitHub cro
 - A fresh `spec-implementer`, spawned with worktree path, plan path, its stage cards and `lane=fast|full`; it reads its own rules (`.claude/agents/spec-implementer.md`, `AGENTS.md`).
 - **At most 3 code stages per implementer** (`s0` does not count). The next stage gets a fresh one, which starts from its cards and plan sections, never from its predecessor's context. Fixes for an earlier stage (gate 3 findings, PR feedback, a red gauntlet) go to the current implementer, briefed with that stage's card.
 - Not done until the plan's Verification method has run and its outcome is reported. Waiving it requires asking.
-- **The draft PR body is the board, rendered** by `pr-body.sh <slug> draft` — regenerated and pushed with `gh pr edit <pr> --body-file <(tail -n +2 artifacts/<slug>/pr-draft.md)` on **every card move** once the PR exists, with a plain `## Architecture` section and each stage's verification as sub-items under its line; stage ids only in HTML comments.
+- **The draft PR body is the board, rendered** by `pr-body.sh <slug> draft` — regenerated and pushed with `gh pr edit <pr> --body-file <(tail -n +2 artifacts/<slug>/pr-draft.md)` on **every card move** once the PR exists. It is the living PR: status line, `## Why`, `## Scenarios`, `## Stages` (each stage's verification as sub-items under its line, stage ids only in HTML comments), `## Review here`, then the sections the gate 4 body shares: `## Requirements`, `## Spec changes since filing`, `## Architecture` (the current `architecture.md` rev) and `## Decisions` (`architecture.md` and `plan.md` `## Shared` `Decisions:`, implementer lines included).
+- `## Spec changes since filing` in the draft = the cards' `spec-delta` lines whose `**<ID>**` the committed `git diff main...<branch> -- docs/specs` touches, last line per ID; omitted without a `branch` or when git fails. IDs added after filing show only under spec changes until gate 4.
+- `pr-body.sh <slug> draft` exit 3 (`body=refused stage-ref=<token>`): the token sits in a card's `spec-delta` why or a `Decisions:` line; resume the agent that wrote it to re-log the `spec-delta` (last line per ID wins) or reword its line; never edit the body by hand; the PR keeps its previous body until then.
 - **The first push opens the draft PR** from that file; orchestrator records `pr` on the parent card, logs `pr=draft`. Every later push updates it; the user reviews there (*PR feedback*).
 
 ```sh
@@ -481,6 +483,8 @@ Before proposing a PR, whole-branch pass — cross-stage bugs, spec drift across
 sh .claude/scripts/pr-body.sh <slug> full > artifacts/<slug>/pr-full.md   # exit 3 (body=refused stage-ref=…): resume spec-author to reword pr.md
 ```
 
+- The full body is the draft minus `## Stages` and `## Review here`, with its own status line, the `pr.md` prose in place of `## Why` and `## Scenarios covered` in place of `## Scenarios`; its spec changes come from the synced `spec-diff.md` Revisions lines, so the tick boxes and board state drop out and the remaining sections keep their order.
+
 - **One stop**: `show-file.sh` on `pr.md` and every `follow-up-<k>.md` (fast lane: plus `review.verdict.md`, per *Agent hand-off*); approving will push · replace the draft's title and body · mark #<pr> ready · file the <n> follow-up issues · wait for CI · clean up. Answer: `approve [follow-ups: 1,3 | none] · manual run first · change <what> · stop` — no list files every follow-up — the user may want a manual run; don't pre-empt it. Approved → push, replace the draft's title and body, mark ready, log `pr=ready`:
 
 ```sh
@@ -531,7 +535,7 @@ Cards outside `open/`+`done/`, no agent running = session died mid-run. Resume t
 | `pr=<n>` | `pr-feedback.sh fetch <n> …` — its status line's `state=`/`draft=` | `pr=ready` logged, or closed/merged: the run is over — CI check, then *Clean up*; missing: draft never opened, the next push opens it |
 | `gauntlet=pass` | `gauntlet.sh` at that sha | card overstated state |
 | stage `done` | `git branch --contains <commit>` includes the feature branch | never landed; downstream plans a lie |
-| PR `## Stages` | the PR body vs `pr-body.sh <slug> draft` | body behind the board: a move never rendered, `gh pr edit` with the fresh render |
+| PR body | the PR body vs `pr-body.sh <slug> draft` | body behind the board or the branch: a move or a stage commit never rendered, `gh pr edit` with the fresh render |
 
 Report differences first. Agree → resume. Disagree → stop and report.
 
