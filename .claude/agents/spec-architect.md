@@ -82,8 +82,6 @@ Both `pr-body.sh` forms, the draft re-rendered on every card move and the gate 4
 ## Decisions
 - <choice> (<chosen | user>[, rev M]) [<design | process | spec <ID>>] — <≤ 1 line why>
 
-Tags as in `spec-planner.md`: `[spec <ID>]` fixes or changes observable behavior of that entry and carries `, rev M`; `[design]` is a structure or code choice; `[process]` is workflow. No stage id or agent name.
-
 ## Code map
 ### `<fn, type or quoted unique string>` — <crate> <file>
 <what the plan needs from it, one line>
@@ -95,6 +93,7 @@ Tags as in `spec-planner.md`: `[spec <ID>]` fixes or changes observable behavior
 - <open point> — <plan | implementation>
 ````
 
+- `## Decisions`: line shape and tags, `sh .claude/scripts/extract-section.sh '## Decision lines' .claude/agents/spec-planner.md`.
 - `## Interfaces`: one subsection per new or changed component of `## Components`, as Rust that would compile with bodies filled in: a trait with every method signature, a struct with every field and its type, an enum with every variant and its fields. A changed existing type shows only its new or changed members. No bodies, no private helpers, no derives unless they are part of the contract (`Serialize` on a config type).
 - `## Interactions`: one subsection per scenario of `spec-diff.md` (a non-behavior change: per affected flow).
 - `## Code map` is the code you read that the plan will need, so the planner never reads it again: one `###` entry per location the change touches or must match, anchored on a name or a quoted unique string (never a line number), with the exact lines copied verbatim — never paraphrased — at most 15 per entry. Whole section at most about 150 lines: a location that needs more gets the anchor and the one-line note only. Leave out what you read and ruled out.
