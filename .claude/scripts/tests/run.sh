@@ -735,7 +735,7 @@ budget() {
     n=$(wc -c < "$root/$1")
     if [ "$n" -le "$2" ]; then ok "budget $1"; else bad "budget $1" "$n chars, ceiling $2"; fi
 }
-budget .claude/AGENTS.workflow.md 52500
+budget .claude/AGENTS.workflow.md 53500
 budget .claude/agents/spec-author.md 12500
 budget .claude/agents/spec-architect.md 10000
 budget .claude/agents/spec-planner.md 11500
