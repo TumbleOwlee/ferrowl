@@ -1,0 +1,29 @@
+$ next-step.sh ns pr status=ready file=.claude/tasks/artifacts/ns/pr.md follow-ups=1
+next=stop
+run: sh .claude/scripts/prompt-render.sh gate4 ns
+do: show the gate 4 stop and wait for the user's approval
+see: ### Gate 4 — pull request
+exit=0
+$ next-step.sh ns pr status=question file=.claude/tasks/artifacts/ns/question.md count=1
+next=relay
+do: relay the question file to the user and resume the agent with the answers
+see: ### Relayed question
+exit=0
+$ next-step.sh ns ci ci=1
+logged: ci=1
+next=fix
+run: bash .claude/scripts/failed-workflow.sh feat/ns
+do: read the failed workflow and fix it
+see: ### Gate 4 — pull request
+exit=0
+$ next-step.sh ns ci ci=0
+logged: ci=0
+next=done
+run: sh .claude/scripts/run-cleanup.sh ns
+do: clean up the run
+see: ### Clean up
+exit=0
+log:
+2026-10-05T09:00 ci=1
+2026-10-05T09:00 ci=0
+exit=0

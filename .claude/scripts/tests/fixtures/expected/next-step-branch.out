@@ -1,0 +1,64 @@
+$ next-step.sh ns branch status=findings file=.claude/tasks/artifacts/ns/review.md summary=.claude/tasks/artifacts/ns/review.verdict.md count=2 user=0 stage=[s2]
+logged: review=2-open scope=branch
+next=fix
+do: resume the implementer on the findings, then the gauntlet and the same reviewer's follow-up
+see: #### Per-stage review
+exit=0
+$ next-step.sh ns branch status=clean file=.claude/tasks/artifacts/ns/review.md summary=.claude/tasks/artifacts/ns/review.verdict.md count=0 user=0 stage=[s2]
+logged: review=2-resolved
+next=stage-stop
+run: sh .claude/scripts/stage-stop.sh ns s2 threads=<n>
+do: run the stage stop decision with the PR thread count
+see: #### Stage stop
+exit=0
+log:
+2026-10-05T09:00 review=2-open scope=branch
+2026-10-05T09:00 review=2-resolved
+$ next-step.sh ns branch status=findings file=.claude/tasks/artifacts/ns/review.md summary=.claude/tasks/artifacts/ns/review.verdict.md count=0 user=1
+logged: review=clean
+next=stop
+run: sh .claude/scripts/prompt-render.sh gate3 ns
+do: show the gate 3 stop with the open Needs user item
+see: ### Gate 3 — review
+exit=0
+$ next-step.sh ns branch status=findings file=.claude/tasks/artifacts/ns/review.md summary=.claude/tasks/artifacts/ns/review.verdict.md count=0 user=1
+logged: review=clean
+next=pr reason=needs-user
+do: spawn the spec author for the PR body
+see: ### Gate 4 — pull request
+exit=0
+log:
+2026-10-05T09:00 review=2-open scope=branch
+2026-10-05T09:00 review=2-resolved
+2026-10-05T09:00 review=clean
+2026-10-05T09:00 review=clean
+$ next-step.sh ns branch status=findings file=.claude/tasks/artifacts/ns/review.md summary=.claude/tasks/artifacts/ns/review.verdict.md count=1 user=0
+logged: review=1-open scope=branch
+next=fix
+do: move the implicated stage to inprogress, resume its implementer, gauntlet, then a fresh branch review
+see: ### Gate 3 — review
+exit=0
+$ next-step.sh ns branch status=clean file=.claude/tasks/artifacts/ns/review.md summary=.claude/tasks/artifacts/ns/review.verdict.md
+logged: review=1-resolved
+next=pr
+do: spawn the spec author for the PR body
+see: ### Gate 4 — pull request
+exit=0
+$ next-step.sh ns branch status=findings file=.claude/tasks/artifacts/ns/review.md summary=.claude/tasks/artifacts/ns/review.verdict.md count=3 user=0
+logged: review=3-open scope=branch
+next=fix
+do: move the implicated stage to inprogress, resume its implementer, gauntlet, then a fresh branch review
+see: ### Gate 3 — review
+exit=0
+$ next-step.sh ns branch status=clean file=.claude/tasks/artifacts/ns/review.md summary=.claude/tasks/artifacts/ns/review.verdict.md
+logged: review=3-resolved
+next=pr
+do: spawn the spec author for the PR body
+see: ### Gate 4 — pull request
+exit=0
+log:
+2026-10-05T09:00 review=1-open scope=branch
+2026-10-05T09:00 review=1-resolved
+2026-10-05T09:00 review=3-open scope=branch
+2026-10-05T09:00 review=3-resolved
+exit=0

@@ -1,12 +1,22 @@
-Gate 4 · demo · pr.md, follow-up-1.md
+Gate 4 · demo · pr.md, follow-up-1.md, review.verdict.md
 PR: Reconnect dropped Modbus clients
 Follow-ups:
 - 1: Share the backoff helper with the RTU client
+Review: findings — 0 must fix, 1 needs you
+Not checked: s2 demo TUI run: needs a terminal
+Spec: 2 of 2 pinned
+Spec changes: MB-R-162 detail, MB-R-161 needs you
+Minors (folded into s2)
+- standards — ferrowl-modbus client_core.rs `next_delay`: comment restates the code; drop it
+Needs user:
+- MB-R-161 now gives up after 1 hour of retries; keep it?
+  - a) revert to retry forever (recommended: S1 decided by the user)
+  - b) keep the 1 hour limit
 Approving will:
 - push, replace the draft's title and body, mark #34 ready
 - file the 1 follow-up issues
 - wait for CI, clean up
 Options:
 1. follow-ups: <numbers | none> — file only these (default: all)
-Answer: approve [<n>[: <value>] …] · change <what> · stop (hold, e.g. for a manual run first)
+Answer: approve [<n>[: <value>] …] · change <what> · re-plan: <why> · stop (hold, e.g. for a manual run first)
 exit=0

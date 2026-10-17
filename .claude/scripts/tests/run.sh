@@ -22,6 +22,7 @@ pass=0; fail=0
 
 ok() { pass=$((pass + 1)); echo "ok   $1"; }
 bad() { fail=$((fail + 1)); echo "FAIL $1${2:+ — $2}"; }
+is() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected '$2', got '$3'"; fi; }
 
 # Fresh project root with the fixture board, for each test.
 project() {
@@ -65,17 +66,7 @@ golden issue-body-slice-run env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.
 golden issue-body-slice-missing env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" lb --slice 9
 golden issue-body-mrc env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" mrc
 
-# --status rewrites only line 1 of a filed body
-printf '%s\n\n%s\n%s\n' '**Status** planned · **Lane** full' '## Goal' kept > "$tmp/live.md"
-printf '\n%s\n\n%s\n%s\n' '**Status** planned · **Lane** full' '## Goal' kept > "$tmp/live-blank.md"
-golden issue-body-status env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/live.md"
-golden issue-body-status-blank env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/live-blank.md"
-printf '%s\n\n%s\n%s\n' '**Spec** rev 3' '## Goal' kept > "$tmp/live-spec.md"
-printf '%s\n\n%s\n%s\n' '**Part of epic** #40' '## Goal' kept > "$tmp/live-slice.md"
-golden issue-body-status-spec env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/live-spec.md"
-golden issue-body-status-slice env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/live-slice.md"
-echo '2026-10-04T10:00 ci=0' >> "$P/.claude/tasks/inprogress/demo.md"
-golden issue-body-status-done env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/live.md"
+golden issue-body-status-gone env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/x.md"
 
 # the visible text names no stage or agent
 refuse() { # <replacement for the Today line> — a copy of demo without a card
@@ -162,6 +153,7 @@ golden issue-request-slice-spec env ISSUE_FIXTURE="$fx/issue/slice.txt" sh "$tmp
 golden issue-request-spec-plain env ISSUE_FIXTURE="$fx/issue/plain.txt" sh "$tmp/ir/issue-request.sh" 7 --spec
 golden issue-request-new env ISSUE_FIXTURE="$fx/issue/new.txt" sh "$tmp/ir/issue-request.sh" 9
 golden issue-request-new-spec env ISSUE_FIXTURE="$fx/issue/new.txt" sh "$tmp/ir/issue-request.sh" 9 --spec
+golden issue-request-nonbehavior env ISSUE_FIXTURE="$fx/issue/nonbehavior.txt" sh "$tmp/ir/issue-request.sh" 10
 
 # --- related-ids.sh
 P=$(project); mkdir -p "$P/docs"; ln -s "$fx/specs" "$P/docs/specs"
@@ -222,8 +214,23 @@ NOW=2026-10-03T10:05 cl demo.s1 test-red MB-R-161 -- it_backoff_caps
 NOW=2026-10-03T11:05 cl demo overturned scope=stage count=2 -- comment restates the code
 NOW=2026-10-03T11:06 cl demo overturned scope=branch count=1 -- docs stale
 NOW=2026-10-03T11:07 cl demo.s1 read path=ferrowl-modbus/src/client_core.rs -- no signature for next_delay
+NOW=2026-10-04T11:50 cl demo ci=0
 golden metrics env CLAUDE_PROJECT_DIR="$P" METRICS_NOW=2026-10-04T12:00 sh "$scripts/metrics.sh" demo
 [ "$(cat "$D/metrics.log")" = "$(sed -n 1p "$fx/expected/metrics.out")" ] && ok metrics-log || bad metrics-log "the printed line is appended to metrics.log"
+metrics() { out=$(env CLAUDE_PROJECT_DIR="$P" METRICS_NOW=2026-10-04T12:00 sh "$scripts/metrics.sh" "$1"); rc=$?; }
+NOW=2026-10-04T11:55 cl demo ci=1
+metrics demo
+is metrics-ci-red "metrics=refused reason=ci-red 1" "$out $rc"
+is metrics-ci-red-unlogged 1 "$(grep -c . "$D/metrics.log")"
+NOW=2026-10-04T11:58 cl demo ci-waived -- the same check fails on main
+metrics demo
+is metrics-ci-waived ci=waived "${out##* }"
+is metrics-rerun-replaces 1 "$(grep -c '^demo ' "$D/metrics.log")"
+metrics lb
+is metrics-epic-no-ci "lane=epic ci=-" "$(echo "$out" | awk '{print $(NF-1), $NF}')"
+P=$(project); D=$P/.claude/tasks
+metrics demo
+is metrics-no-ci "metrics=refused reason=no-ci 1" "$out $rc"
 golden metrics-no-card env CLAUDE_PROJECT_DIR="$P" sh "$scripts/metrics.sh" nosuch
 
 # --- card-log.sh
@@ -253,10 +260,17 @@ golden card-log-files-add cltail demo.s1 "$D/inreview/demo.s1.md" 'files+=CONTRI
 golden card-log-note cltail demo.s1 "$D/inreview/demo.s1.md" note -- renamed '"attr-a"' to attr-b
 golden card-log-note-parent cltail demo "$D/inprogress/demo.md" note -- plan amended after review
 golden card-log-note-empty clrej demo.s1 note
+golden card-log-reject-note-typed clrej demo note -- plan-review findings count=3 round=1
+golden card-log-reject-note-review clrej demo note -- branch-review findings count=2
+clrej demo ci-waived >/dev/null; is card-log-ci-waived-text 2 "$?"
 golden card-log-accept-160 cltail demo.s1 "$D/inreview/demo.s1.md" stopped -- "$(printf 'x%.0s' $(seq 1 135))"
 for k in 1 2 3; do clrej demo.s2 read path=f$k.rs -- the plan names no signature; done
 golden card-log-read-budget clrej demo.s2 read path=f4.rs -- still thin
 golden card-log-read-no-text clrej demo.s1 read path=f1.rs
+mv "$D/open/demo.s2.md" "$D/inprogress/demo.s2.md"
+golden card-log-reject-commit-inprogress clrej demo.s2 commit=abc1234
+is card-log-commit-inprogress-unlogged 0 "$(grep -c 'commit=' "$D/inprogress/demo.s2.md")"
+is card-log-commit-inreview "2026-10-05T09:00 commit=abc1234" "$(cltail demo.s1 "$D/inreview/demo.s1.md" commit=abc1234)"
 
 # --- card-log.sh vocabulary covers every event the docs name
 root=$(cd "$scripts/../.." && pwd)
@@ -372,6 +386,14 @@ g "$W" push -q 2>/dev/null
 printf 'target/\n' >> "$W/.gitignore"; g "$W" add .gitignore; g "$W" commit -q -m ignore; g "$W" push -q 2>/dev/null
 mkdir -p "$W/target" && printf 'build\n' > "$W/target/out"
 out=$(cleanup)
+is cleanup-refuses-no-ci "cleanup=refused reason=no-ci" "$out"
+[ -d "$W" ] || bad cleanup-refuses-no-ci "worktree removed"
+CLAUDE_PROJECT_DIR="$tmp/r" sh "$scripts/card-log.sh" demo ci=1
+out=$(cleanup)
+is cleanup-refuses-ci-red "cleanup=refused reason=ci-red" "$out"
+[ -d "$W" ] && [ ! -e "$tmp/r/.claude/tasks/metrics.log" ] || bad cleanup-refuses-ci-red "worktree removed or metrics written"
+CLAUDE_PROJECT_DIR="$tmp/r" sh "$scripts/card-log.sh" demo ci=0
+out=$(cleanup)
 B=$tmp/r/.claude/tasks
 if [ "$out" = "cleanup=done archive=$B/archive/demo" ] && [ ! -e "$W" ] && ! git -C "$tmp/r" rev-parse --verify -q feat/demo >/dev/null \
     && git -C "$tmp/remote.git" rev-parse --verify -q feat/demo >/dev/null \
@@ -379,11 +401,12 @@ if [ "$out" = "cleanup=done archive=$B/archive/demo" ] && [ ! -e "$W" ] && ! git
     && [ -e "$B/archive/demo/cards/demo.md" ] && [ -e "$B/archive/demo/cards/demo.s0.md" ] && [ -e "$B/archive/demo/artifacts/issue.md" ] \
     && [ -e "$B/artifacts/nospec/issue.md" ] && [ -e "$B/inreview/nospec.md" ]; then ok cleanup-done
 else bad cleanup-done "$out"; fi
+is cleanup-records-metrics 1 "$(grep -c '^demo start=.* ci=0$' "$B/metrics.log")"
 out=$(cleanup); [ "$out" = "cleanup=done archive=none" ] && ok cleanup-idempotent || bad cleanup-idempotent "$out"
-mkdir -p "$B/artifacts/demo"; echo x > "$B/artifacts/demo/issue.md"; printf -- '---\nid: demo\n---\n' > "$B/inprogress/demo.md"
+mkdir -p "$B/artifacts/demo"; echo x > "$B/artifacts/demo/issue.md"; printf -- '---\nid: demo\n---\n2026-10-05T09:00 ci=0\n' > "$B/inprogress/demo.md"
 out=$(cleanup)
 case $out in "cleanup=done archive=$B/archive/demo-"[0-9]*T[0-9]*Z) [ -e "${out#*archive=}/cards/demo.md" ] && ok cleanup-collision || bad cleanup-collision "$out" ;; *) bad cleanup-collision "$out" ;; esac
-leftover() { mkdir -p "$B/artifacts/demo"; printf -- '---\nid: demo\n---\n' > "$B/inprogress/demo.md"; }
+leftover() { mkdir -p "$B/artifacts/demo"; printf -- '---\nid: demo\n---\n2026-10-05T09:00 ci=0\n' > "$B/inprogress/demo.md"; }
 leftover; out2=$(CLEANUP_NOW=20260101T000000Z cleanup)
 leftover; out3=$(CLEANUP_NOW=20260101T000000Z cleanup)
 [ "$out2" = "cleanup=done archive=$B/archive/demo-20260101T000000Z" ] && [ "$out3" = "cleanup=done archive=$B/archive/demo-20260101T000000Z-1" ] \
@@ -394,6 +417,12 @@ if [ "$(id -u)" != 0 ]; then
     [ "$out" = "cleanup=refused reason=archive-failed" ] && [ -e "$B/inprogress/demo.md" ] && ok cleanup-archive-unwritable || bad cleanup-archive-unwritable "$out"
     rm -rf "$B/artifacts/demo" "$B/inprogress/demo.md"
 fi
+printf -- '---\nid: demo\n---\n2026-10-05T09:00 ci=1\n2026-10-05T09:10 ci-waived -- red on main too\n' > "$B/inprogress/demo.md"; mkdir -p "$B/artifacts/demo"
+out=$(CLEANUP_NOW=20260101T000002Z cleanup)
+is cleanup-ci-waived "cleanup=done archive=$B/archive/demo-20260101T000002Z" "$out"
+printf -- '---\nid: demo\nkind: epic\n---\n' > "$B/inprogress/demo.md"; mkdir -p "$B/artifacts/demo"
+out=$(CLEANUP_NOW=20260101T000003Z cleanup)
+is cleanup-epic-no-ci "cleanup=done archive=$B/archive/demo-20260101T000003Z" "$out"
 
 # --- run-rebuild.sh: a lost board rebuilt from a stubbed issue, a stubbed draft PR and the branch
 g "$tmp/r" checkout -q main
@@ -462,7 +491,6 @@ g "$tmp/ids" checkout -q feat/x
 out=$(sh "$scripts/id-collisions.sh" "$tmp/ids" main); [ "$out" = "ids=collide MB-R-002" ] && ok ids-collide || bad ids-collide "$out"
 
 # --- decision scripts on a scratch run "ss": a main checkout with the board and the run's worktree
-is() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected '$2', got '$3'"; fi; }
 sscard() { # <n> <state> [<frontmatter line>]
     b="[]"; [ "$1" -gt 0 ] && b="[ss.s$(($1 - 1))]"
     printf -- '---\nid: ss.s%s\nparent: ss\ntitle: Stage %s\nblocked-by: %s\nfiles: [f%s.txt]\n%s---\n' "$1" "$1" "$b" "$1" "${3:+$3
@@ -490,9 +518,11 @@ is stage-stop-logged "2026-10-05T09:00 stop=1" "$(tail -1 "$SB/open/ss.s1.md")"
 printf 'Verdict: clean — ready for approval\n\nNeeds user\n- none\n' > "$SB/artifacts/ss/review.verdict.md"
 is stage-stop-verification 'stop=2 reason=verification detail="demo TUI"' "$(run_s stage-stop.sh ss s3)"
 is stage-stop-threads 'stop=3 reason=pr-threads detail="2 threads"' "$(run_s stage-stop.sh ss s1 threads=2)"
-is stage-stop-last "stop=4 reason=last-stage" "$(run_s stage-stop.sh ss s5)"
+is stage-stop-last "auto" "$(run_s stage-stop.sh ss s5)"
 sscard 2 open 'stop: yes'
 is stage-stop-plan-marked "stop=5 reason=plan-marked" "$(run_s stage-stop.sh ss s2)"
+sscard 5 open 'stop: yes'
+is stage-stop-last-plan-marked "stop=5 reason=plan-marked" "$(run_s stage-stop.sh ss s5)"
 printf 'a\n' > "$SW/a.txt"; printf 'b\nc\n' > "$SW/b.txt"
 is stage-stop-diff-size 'stop=6 reason=diff-size detail="3 lines, 2 files"' "$(STAGE_STOP_FILES=1 run_s stage-stop.sh ss s1)"
 is stage-stop-diff-under auto "$(STAGE_STOP_FILES=2 run_s stage-stop.sh ss s1)"
@@ -504,6 +534,114 @@ ssrun 5
 run_s card-log.sh ss.s2 stop=5; run_s card-log.sh ss.s3 auto=yes
 is stage-stop-checkpoint-reset auto "$(run_s stage-stop.sh ss s4)"
 golden stage-stop-no-card run_s stage-stop.sh ss s9
+
+# --- next-step.sh, on a scratch board
+nsboard() { # <lane|-> <arch> <stage rows besides s0> <clean|needs-user>
+    rm -rf "$tmp/n"; NB=$tmp/n/.claude/tasks
+    mkdir -p "$NB/open" "$NB/inprogress" "$NB/inreview" "$NB/done" "$NB/artifacts/ns"
+    { printf -- '---\nid: ns\nbranch: feat/ns\n'; [ "$1" = - ] || printf 'lane: %s\n' "$1"; printf 'gate1: 2026-10-01\narch: %s\n---\n' "$2"; } > "$NB/inprogress/ns.md"
+    { printf '# ns — plan summary (rev 1)\n\nDecide: %s stages.\n\n| Stage | What | Pins | Files | Stop |\n|---|---|---|---|---|\n' "$3"
+      i=0; while [ "$i" -le "$3" ]; do printf '| s%s | stage %s | — | 1 (x) | — |\n' "$i" "$i"; i=$((i + 1)); done; } > "$NB/artifacts/ns/plan.summary.md"
+    nsverdict "$4"
+}
+nsverdict() {
+    if [ "$1" = clean ]; then printf 'Verdict: clean — ready for approval\n\nSpec — 2 of 2 pinned\nNot checked — nothing\n'
+    else printf 'Verdict: findings — 1 needs user\n\nNeeds user\n- 1. keep the alias?\n  - a) keep (recommended)\n  - b) drop\n'; fi > "$NB/artifacts/ns/review.verdict.md"
+}
+ns() { echo "\$ next-step.sh $*"; env CLAUDE_PROJECT_DIR="$tmp/n" CARD_LOG_NOW=2026-10-05T09:00 sh "$scripts/next-step.sh" "$@"; echo "exit=$?"; }
+nslog() { echo "log:"; awk '/^---$/ { n++; next } n >= 2' "$NB"/*/ns.md; }
+nscl() { env CLAUDE_PROJECT_DIR="$tmp/n" CARD_LOG_NOW=2026-10-05T09:00 sh "$scripts/card-log.sh" ns "$@"; }
+R=.claude/tasks/artifacts/ns
+nsplan() {
+    nsboard full 2026-10-02 2 clean
+    ns ns plan status=ready file=$R/plan.md summary=$R/plan.summary.md
+    ns ns plan status=findings file=$R/review.md summary=$R/review.verdict.md count=2 user=0
+    ns ns plan status=ready file=$R/plan.md summary=$R/plan.summary.md
+    ns ns plan status=findings file=$R/review.md summary=$R/review.verdict.md count=1 user=0
+    ns ns plan status=ready file=$R/plan.md summary=$R/plan.summary.md
+    ns ns plan status=findings file=$R/review.md summary=$R/review.verdict.md count=1 user=0
+    nslog
+    nsboard full 2026-10-02 2 clean
+    ns ns plan status=findings file=$R/review.md summary=$R/review.verdict.md count=0 user=0
+    ns ns plan status=clean file=$R/review.md summary=$R/review.verdict.md
+    for t in question arch-gap split behavior-change; do ns ns plan status=$t; done
+    nslog
+}
+golden next-step-plan nsplan
+nsgate2() {
+    nsboard full 2026-10-02 2 clean; ns ns plan status=new file=$R/issue.md
+    nsboard fast 2026-10-02 2 clean; ns ns plan status=new file=$R/issue.md
+    ns ns plan status=reuse issue=41 file=$R/issue.md
+    nsboard fast skipped 1 clean; ns ns plan status=new file=$R/issue.md
+    nsboard fast 2026-10-02 3 clean; ns ns plan status=new file=$R/issue.md
+    nsboard fast 2026-10-02 2 needs-user; ns ns plan status=new file=$R/issue.md
+    nsboard - no-arch 2 clean; ns ns plan status=new file=$R/issue.md
+}
+golden next-step-gate2 nsgate2
+nsreplan() {
+    nsboard fast 2026-10-02 2 clean
+    nscl plan-review=findings count=2 round=1; nscl stop kind=approval gate=gate4; nscl replan from=s3
+    ns ns replan status=ready file=$R/plan.md summary=$R/plan.summary.md
+    ns ns replan status=clean file=$R/review.md summary=$R/review.verdict.md
+    nslog
+    nsboard fast 2026-10-02 2 clean
+    nscl stop kind=stage; nscl replan from=s3
+    ns ns replan status=clean file=$R/review.md
+    nsboard fast 2026-10-02 2 clean
+    nscl stop kind=approval gate=gate4; nscl arch-rev=1; nscl replan from=s3
+    printf '# ns — architecture summary (rev 2)\n' > "$NB/artifacts/ns/architecture.summary.md"
+    ns ns replan status=clean file=$R/review.md
+    nsboard fast 2026-10-02 3 clean
+    nscl stop kind=approval gate=gate4; nscl replan from=s3
+    ns ns replan status=clean file=$R/review.md
+    nsboard full 2026-10-02 3 clean
+    nscl stop kind=approval gate=gate4; nscl replan from=s3
+    ns ns replan status=clean file=$R/review.md
+    nsboard fast 2026-10-02 2 clean
+    nscl stop kind=approval gate=gate4; nscl replan from=s3; nscl stop kind=stage; nscl replan from=s5
+    ns ns replan status=clean file=$R/review.md
+}
+golden next-step-replan nsreplan
+nsbranch() {
+    nsboard full 2026-10-02 2 clean
+    printf -- '---\nid: ns.s1\nparent: ns\n---\n' > "$NB/done/ns.s1.md"; printf -- '---\nid: ns.s2\nparent: ns\n---\n' > "$NB/inreview/ns.s2.md"
+    ns ns branch status=findings file=$R/review.md summary=$R/review.verdict.md count=2 user=0 'stage=[s2]'
+    ns ns branch status=clean file=$R/review.md summary=$R/review.verdict.md count=0 user=0 'stage=[s2]'
+    nslog
+    mv "$NB/inreview/ns.s2.md" "$NB/done/ns.s2.md"; nsverdict needs-user
+    ns ns branch status=findings file=$R/review.md summary=$R/review.verdict.md count=0 user=1
+    sed -i 's/^lane: full$/lane: fast/' "$NB/inprogress/ns.md"
+    ns ns branch status=findings file=$R/review.md summary=$R/review.verdict.md count=0 user=1
+    nslog
+    nsboard full 2026-10-02 2 clean
+    printf -- '---\nid: ns.s1\nparent: ns\n---\n' > "$NB/done/ns.s1.md"; printf -- '---\nid: ns.s2\nparent: ns\n---\n' > "$NB/done/ns.s2.md"
+    ns ns branch status=findings file=$R/review.md summary=$R/review.verdict.md count=1 user=0
+    ns ns branch status=clean file=$R/review.md summary=$R/review.verdict.md
+    ns ns branch status=findings file=$R/review.md summary=$R/review.verdict.md count=3 user=0
+    ns ns branch status=clean file=$R/review.md summary=$R/review.verdict.md
+    nslog
+}
+golden next-step-branch nsbranch
+nsprci() {
+    nsboard full 2026-10-02 2 clean
+    ns ns pr status=ready file=$R/pr.md follow-ups=1
+    ns ns pr status=question file=$R/question.md count=1
+    ns ns ci ci=1
+    ns ns ci ci=0
+    nslog
+}
+golden next-step-pr-ci nsprci
+nsusage() {
+    nsboard full 2026-10-02 2 clean
+    ns
+    ns ns nowhere status=ready
+    ns ns pr status=new file=x
+    ns nosuch plan status=ready
+}
+golden next-step-usage nsusage
+missing=$(sed -n "s/.*see '\(#[^']*\)'.*/\1/p" "$scripts/next-step.sh" | sort -u | while IFS= read -r h; do grep -qxF "$h" "$root/.claude/AGENTS.workflow.md" || echo "$h"; done)
+is next-step-headings "" "$missing"
+is next-step-headings-found 1 "$([ "$(sed -n "s/.*see '\(#[^']*\)'.*/\1/p" "$scripts/next-step.sh" | grep -c .)" -ge 8 ] && echo 1)"
 
 # sha-check.sh
 ssrun 2
@@ -554,7 +692,7 @@ hook shell-mv-other hook-guard-shell.sh 'mv notes.md docs/notes.md' allow
 hook shell-card-move hook-guard-shell.sh 'sh .claude/scripts/card-move.sh demo.s2 done' allow
 
 # --- replayed runs: the decision scripts in workflow order, fake agents (replay.sh)
-for sc in full fast-replan light resume; do golden "replay-$sc" sh "$here/replay.sh" "$sc"; done
+for sc in full fast-replan fast-noarch pr-replan fast-tdd epic resume; do golden "replay-$sc" sh "$here/replay.sh" "$sc"; done
 
 # --- prompt-render.sh, on the fixture board
 P=$(project); D=$P/.claude/tasks
@@ -572,6 +710,7 @@ golden prompt-render-blocked pr_ blocked demo stage=s2 "reason=the parse_frame r
 golden prompt-render-delta pr_ delta demo stage=s1
 golden prompt-render-auto pr_ auto demo stage=s1
 golden prompt-render-gate2-notice pr_ gate2-notice demo issue=new
+golden prompt-render-replan-notice pr_ replan-notice demo from=s3
 golden prompt-render-epic pr_ epic lb
 golden prompt-render-stops sh -c 'grep " stop " "$0" | cut -d" " -f2-' "$D/inprogress/demo.md"
 P=$(project); D=$P/.claude/tasks

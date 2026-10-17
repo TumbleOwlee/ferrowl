@@ -30,6 +30,12 @@ user: 1: b
 
 ## re-plan from the lowest stage without a commit
 $ card-log.sh rp replan from=s1
+$ next-step.sh rp replan status=clean file=.claude/tasks/artifacts/rp/review.md summary=.claude/tasks/artifacts/rp/review.verdict.md
+logged: plan-review=clean round=1
+next=stop reason=not-gate4
+run: sh .claude/scripts/prompt-render.sh replan rp from=s1
+do: show the re-plan stop and wait for the user's approval
+see: #### Re-plan
 $ prompt-render.sh replan rp from=s1
 Re-plan from s1 · rp · plan.summary.md rev 2 · fast lane
 Plan: 3 stages.
@@ -89,6 +95,12 @@ board:
   done/rp.s1.md
   done/rp.s2.md
   done/rp.s3.md
+$ next-step.sh rp ci ci=0
+logged: ci=0
+next=done
+run: sh .claude/scripts/run-cleanup.sh rp
+do: clean up the run
+see: ### Clean up
 $ metrics.sh rp
-rp start=2026-10-05T09:00 end=2026-10-05T18:00 first-red=- stages=4 stops=2 question=0 approval=1 stage=0 blocked=1 replans=1 overturned=0 reads=0 lane=fast
+rp start=2026-10-05T09:00 end=2026-10-05T18:00 first-red=- stages=4 stops=2 question=0 approval=1 stage=0 blocked=1 replans=1 overturned=0 reads=0 lane=fast ci=0
 exit=0

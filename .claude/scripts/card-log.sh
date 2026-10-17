@@ -3,8 +3,11 @@
 #   card-log.sh <card-id> <event> [<positional>...] [k=v ...] [-- <free text>]
 # Prints nothing on success. Exit 1: card not found or ambiguous
 # (`card-log=card`); exit 2: usage or a line the vocabulary rejects
-# (`card-log=reject event=<e> reason=<event|key|scope|value|length|budget>`;
-# budget: a fourth `read` on one stage card, READ_BUDGET overrides 3).
+# (`card-log=reject event=<e> reason=<event|key|scope|value|length|budget|typed|inprogress>`;
+# budget: a fourth `read` on one stage card, READ_BUDGET overrides 3; typed: a
+# `note` whose text starts with an event's name, `use=<event>` names it;
+# inprogress: a stage card's `commit=` while it sits in inprogress/,
+# `move=inreview` names the missing move).
 # Board: $CLAUDE_PROJECT_DIR/.claude/tasks, else the main checkout's, which
 # is also found from inside a worktree. CARD_LOG_NOW overrides the stamp.
 #
@@ -36,13 +39,14 @@
 # parent pr=            draft|ready       -        -                     no
 # parent gauntlet=      pass|fail         -        cov,sha,step,reason   no
 # parent replan         -                 -        from                  no
-# parent replan=        approved          -        -                     no
+# parent replan=        approved|pre-authorized -  -                     no
 # parent plan-review=   any               -        count,round           no
 # parent review=        any               -        scope                 no
 # parent overturned     -                 -        scope,count           yes
 # parent rebuild        -                 -        reason                no
 # parent follow-ups=    any               -        -                     no
 # parent ci=            any               -        -                     no
+# parent ci-waived      -                 -        -                     required
 # vocab-end
 set -u
 
@@ -117,6 +121,13 @@ case $tspec in
     no) [ "$intext" = 0 ] || rej value ;;
     required) [ -n "$text" ] || rej value ;;
 esac
+if [ "$name" = commit= ]; then case $card in "$board"/inprogress/*) echo "card-log=reject event=commit reason=inprogress move=inreview"; exit 2 ;; esac; fi
+if [ "$name" = note ]; then
+    w=${text%% *}; w=${w%%=*}; w=${w%:}
+    use=$(sed -n '/^# vocab-begin/,/^# vocab-end/p' "$0" | awk -v w="$w" '$3 != "note" { n = $3; sub(/=$/, "", n); if (n == w) { print $3; exit } }')
+    [ -n "$use" ] || case $w in *-review) use=review= ;; esac
+    [ -z "$use" ] || { echo "card-log=reject event=note reason=typed use=$use"; exit 2; }
+fi
 
 case $val in *' '*) ev="$name\"$val\"" ;; esac
 line="${CARD_LOG_NOW:-$(date -u +%FT%H:%M)} $ev$pos$kvs${text:+ $text}"

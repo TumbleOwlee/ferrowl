@@ -1,0 +1,16 @@
+#10 Tidy the workflow docs [OPEN]
+https://github.com/o/r/issues/10
+by someone
+
+## Goal
+The workflow docs read in one pass.
+
+## Out of scope
+- the agent docs
+
+<details><summary>Original request</summary>
+
+As a user I want the docs tidied.
+</details>
+
+--- 0 comment(s) ---

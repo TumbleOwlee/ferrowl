@@ -115,7 +115,7 @@ Change: <≤ 12 words, what moved>
 
 Given candidate issues: read each (`issue-view.sh`, `## Conventions — GitHub`), write `issue.md`, then answer `reuse issue=<n> file=…` or `new file=…`. The issue the user named at gate 1 is already `request.md`.
 
-`issue.md` is the title, the goal and what is out of scope; `issue-body.sh` assembles the body from it, `spec-diff.md` and the parent card — status line, goal, requirements with local IDs, scenarios, out of scope. The issue never shows architecture or decisions (an epic: skeleton architecture and slices). No stage id or agent name in `issue.md`: `issue-body.sh` refuses it.
+`issue.md` is the title, the goal and what is out of scope; `issue-body.sh` assembles the body from it, `spec-diff.md` and the parent card — goal, requirements with local IDs, scenarios, out of scope. The issue never shows architecture or decisions (an epic: skeleton architecture and slices). No stage id or agent name in `issue.md`: `issue-body.sh` refuses it.
 
 ```
 # <title, plain language, no slug or ID>

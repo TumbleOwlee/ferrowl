@@ -29,7 +29,7 @@ Read by `spec-author` only when resumed for a split or for gate 4; everything in
   - likely to change | cited
 ```
 
-Existing IDs only, never a planned one. No issue number anywhere — the orchestrator prepends the status line.
+Existing IDs only, never a planned one. No issue number anywhere — the orchestrator appends `Split from #<issue>`.
 
 ## Gate 4 — sync, then `pr.md`
 

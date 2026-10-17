@@ -8,7 +8,7 @@
 # Reads issue-view.sh and pr-view.sh (siblings, stubbable), the PR's head
 # branch (`gh api`), `git diff main...origin/<branch> -- docs/specs`.
 # Writes under .claude/tasks/:
-#   inprogress/<slug>.md      parent card: issue, pr, branch, lane from the draft status line, gate dates = today, `rebuild` + `pr=draft` log lines
+#   inprogress/<slug>.md      parent card: issue, pr, branch, lane from the draft status line (light, a retired lane, read as fast), gate dates = today, `rebuild` + `pr=draft` log lines
 #   open|done/<slug>.s<n>.md  one card per `## Stages` line carrying `<!-- s<n> [blocked-by …] -->`; ticked → done with `commit=<sha>`
 #   artifacts/<slug>/         issue.md, spec-diff.md (scenarios from the issue, entries from the branch diff), plan.summary.md,
 #                             and from the PR's `## Architecture`: architecture.summary.md and architecture.md (`## Components`)
@@ -72,6 +72,7 @@ if [ ! -d "$wt" ]; then
     else git -C "$root" worktree add -q --track -b "$branch" "$wt" "origin/$branch" || refuse worktree; fi
 fi
 lane=$(sed -n '1,/./{/./s/.*lane \([a-z]*\).*/\1/p;}' "$work/pr")
+[ "$lane" = light ] && lane=fast
 today=$(date -u +%F)
 mkdir -p "$board/inprogress" "$board/open" "$board/done" "$board/artifacts/$slug"
 cat > "$board/inprogress/$slug.md" <<CARD

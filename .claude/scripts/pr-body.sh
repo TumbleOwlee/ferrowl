@@ -225,7 +225,7 @@ draft() {
     done
     if [ -n "$landed" ]; then echo "- on the branch: $landed — inline comments on their files are answered before the next stop"
     else echo "- nothing on the branch yet — inline comments are answered once a stage lands"; fi
-    if [ "$lane" = fast ] || [ "$lane" = light ]; then echo "- later stages land on green, no stop until gate 4"
+    if [ "$lane" = fast ]; then echo "- later stages land on green, no stop until gate 4"
     else echo "- later stages land after their review and the user's approval"; fi
     echo
 

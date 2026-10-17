@@ -1,0 +1,162 @@
+
+## plan review: one findings round, then clean
+$ next-step.sh rp plan status=ready file=.claude/tasks/artifacts/rp/plan.md summary=.claude/tasks/artifacts/rp/plan.summary.md
+next=review
+do: spawn the plan reviewer
+see: ### Gate 2 — plan and tracking issue
+$ next-step.sh rp plan status=findings file=.claude/tasks/artifacts/rp/review.md summary=.claude/tasks/artifacts/rp/review.verdict.md count=2 user=0
+logged: plan-review=findings count=2 round=1
+next=revise
+run: cp .claude/tasks/artifacts/rp/plan.md .claude/tasks/artifacts/rp/plan.prev.md
+do: resume the planner with the review file
+see: ### Gate 2 — plan and tracking issue
+$ next-step.sh rp plan status=ready file=.claude/tasks/artifacts/rp/plan.md summary=.claude/tasks/artifacts/rp/plan.summary.md
+next=follow-up
+do: spawn the plan reviewer again for a follow-up round
+see: ### Gate 2 — plan and tracking issue
+$ next-step.sh rp plan status=clean file=.claude/tasks/artifacts/rp/review.md summary=.claude/tasks/artifacts/rp/review.verdict.md
+logged: plan-review=clean round=2
+next=issue
+do: ask the spec author for the tracking issue
+see: ### Gate 2 — plan and tracking issue
+
+## fast lane after an architecture stop: gate 2 is a notice
+$ next-step.sh rp plan status=new file=.claude/tasks/artifacts/rp/issue.md
+next=notice
+run: sh .claude/scripts/prompt-render.sh gate2-notice rp issue=new
+do: show the notice without stopping, then act on approval as if given
+see: ### Gate 2 — plan and tracking issue
+$ prompt-render.sh gate2-notice rp issue=new
+Gate 2 · rp · 2 code stages. · issue new · starting s0 (pre-authorized — say stop to hold)
+Confirm: nothing flagged
+$ card-move.sh rp inprogress
+$ card-move.sh rp.s0 inprogress
+$ card-log.sh rp.s0 green
+$ card-move.sh rp.s0 inreview
+impl: status=inreview stage=s0 delta=0
+$ card-log.sh rp.s0 commit=1b8d0dd
+impl: status=committed stage=s0 sha=1b8d0dd delta=0
+$ sha-check.sh rp s0 1b8d0dd
+sha=ok
+$ card-log.sh rp gauntlet=pass cov=81% sha=1b8d0dd
+$ card-move.sh rp.s0 done
+
+## s1 test first: red for the right reason, then green with a spec change
+$ card-move.sh rp.s1 inprogress
+$ card-log.sh rp.s1 test-red MB-R-001 -- it_read_last: expected 65535, got an error
+$ card-log.sh rp.s1 green
+$ card-log.sh rp.s1 spec-delta MB-R-002 added origin=impl -- the wrap at 65535 was unstated
+$ card-move.sh rp.s1 inreview
+$ card-log.sh rp.s1 commit=0feb5e7
+impl: status=committed stage=s1 sha=0feb5e7 delta=1
+$ sha-check.sh rp s1 0feb5e7
+sha=ok
+$ card-log.sh rp gauntlet=pass cov=81% sha=0feb5e7
+
+## the delta review needs the user: delta stop, the user overturns the recommendation
+$ prompt-render.sh delta rp stage=s1
+Question · rp · delta s1 · spec-reviewer · 1 decision
+## 1. 1. MB-R-002 added: keep the wrap rule?
+Options:
+- a) keep (recommended)
+- b) revert
+Answer: <1: a · 2: b · …> · other <text> — keep, revert or split each change
+user: 1: b
+$ card-log.sh rp overturned scope=delta count=1 -- user reverted the wrap rule
+$ card-move.sh rp.s1 done
+
+## s2 green
+$ card-move.sh rp.s2 inprogress
+$ card-log.sh rp.s2 green
+$ card-move.sh rp.s2 inreview
+impl: status=inreview stage=s2 delta=0
+$ card-log.sh rp.s2 commit=dd0c1fb
+impl: status=committed stage=s2 sha=dd0c1fb delta=0
+$ sha-check.sh rp s2 dd0c1fb
+sha=ok
+$ card-log.sh rp gauntlet=pass cov=81% sha=dd0c1fb
+$ card-move.sh rp.s2 done
+board:
+  inprogress/rp.md
+  done/rp.s0.md
+  done/rp.s1.md
+  done/rp.s2.md
+
+## branch review: one finding fixed, then clean
+$ card-move.sh rp inreview
+$ next-step.sh rp branch status=findings file=.claude/tasks/artifacts/rp/review.md summary=.claude/tasks/artifacts/rp/review.verdict.md count=1 user=0
+logged: review=1-open scope=branch
+next=fix
+do: move the implicated stage to inprogress, resume its implementer, gauntlet, then a fresh branch review
+see: ### Gate 3 — review
+$ card-move.sh rp.s2 inprogress
+$ card-log.sh rp.s2 green
+$ card-move.sh rp.s2 inreview
+$ card-log.sh rp.s2 commit=af11706
+impl: status=committed stage=s2 sha=af11706 delta=0
+$ sha-check.sh rp s2 af11706
+sha=ok
+$ card-log.sh rp gauntlet=pass cov=81% sha=af11706
+$ card-move.sh rp.s2 done
+$ next-step.sh rp branch status=clean file=.claude/tasks/artifacts/rp/review.md summary=.claude/tasks/artifacts/rp/review.verdict.md
+logged: review=1-resolved
+next=pr
+do: spawn the spec author for the PR body
+see: ### Gate 4 — pull request
+
+## gate 4 shows the verdict
+$ next-step.sh rp pr status=ready file=.claude/tasks/artifacts/rp/pr.md follow-ups=0
+next=stop
+run: sh .claude/scripts/prompt-render.sh gate4 rp
+do: show the gate 4 stop and wait for the user's approval
+see: ### Gate 4 — pull request
+$ prompt-render.sh gate4 rp pr=9
+Gate 4 · rp · pr.md, review.verdict.md · fast lane
+PR: Read register 65535
+Review: clean — ready for approval
+Not checked: nothing
+Spec: 2 of 2 pinned
+Approving will:
+- push, replace the draft's title and body, mark #9 ready
+- wait for CI, clean up
+Answer: approve · change <what> · re-plan: <why> · stop (hold, e.g. for a manual run first)
+user: approve
+$ prompt-render.sh approved rp
+approved
+
+## CI red: clean-up refuses until the fix lands
+$ next-step.sh rp ci ci=1
+logged: ci=1
+next=fix
+run: bash .claude/scripts/failed-workflow.sh feat/rp
+do: read the failed workflow and fix it
+see: ### Gate 4 — pull request
+$ run-cleanup.sh rp
+cleanup=refused reason=ci-red
+$ card-move.sh rp.s1 inprogress
+$ card-log.sh rp.s1 green
+
+## the fix's commit is refused until its card moves
+$ card-log.sh rp.s1 commit=0badc0d
+card-log=reject event=commit reason=inprogress move=inreview
+$ card-move.sh rp.s1 inreview
+$ card-log.sh rp.s1 commit=d6043f4
+impl: status=committed stage=s1 sha=d6043f4 delta=0
+$ sha-check.sh rp s1 d6043f4
+sha=ok
+$ card-log.sh rp gauntlet=pass cov=81% sha=d6043f4
+$ card-move.sh rp.s1 done
+
+## CI green: clean-up records the metrics and archives the run
+$ next-step.sh rp ci ci=0
+logged: ci=0
+next=done
+run: sh .claude/scripts/run-cleanup.sh rp
+do: clean up the run
+see: ### Clean up
+$ run-cleanup.sh rp
+cleanup=done archive=<R>/.claude/tasks/archive/rp
+metrics.log:
+rp start=2026-10-05T09:00 end=2026-10-05T18:00 first-red=2026-10-05T09:00 stages=3 stops=2 question=0 approval=2 stage=0 blocked=0 replans=0 overturned=1 reads=0 lane=fast ci=0
+board:
+exit=0

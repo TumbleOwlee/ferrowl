@@ -14,7 +14,7 @@ Confirm:
 - legacy line without a tag — skipped by every renderer (planner)
 Approving will:
 - settle the lane
-- hand the brief to the architect (light lane: to the planner, no architecture step)
+- hand the brief to the architect
 Options:
 1. full lane (recommended)
 2. fast lane
