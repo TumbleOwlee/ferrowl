@@ -3,7 +3,8 @@
 #   card-log.sh <card-id> <event> [<positional>...] [k=v ...] [-- <free text>]
 # Prints nothing on success. Exit 1: card not found or ambiguous
 # (`card-log=card`); exit 2: usage or a line the vocabulary rejects
-# (`card-log=reject event=<e> reason=<event|key|scope|value|length>`).
+# (`card-log=reject event=<e> reason=<event|key|scope|value|length|budget>`;
+# budget: a fourth `read` on one stage card, READ_BUDGET overrides 3).
 # Board: $CLAUDE_PROJECT_DIR/.claude/tasks, else the main checkout's, which
 # is also found from inside a worktree. CARD_LOG_NOW overrides the stamp.
 #
@@ -19,6 +20,7 @@
 # both   feedback=      any               -        -                     no
 # stage  stopped        -                 -        -                     required
 # stage  follow-up      -                 -        -                     required
+# stage  read           -                 -        path                  required
 # both   note           -                 -        -                     required
 # both   moved=         open|inprogress|inreview|done -  -              no
 # stage  minor=         any               -        -                     yes
@@ -109,6 +111,7 @@ done
 [ "$pspec" != id,kind ] || [ $npos = 2 ] || rej value
 [ "$name" != stop ] || case $kvs in *' kind='*) ;; *) rej key ;; esac
 [ "$name" != spec-delta ] || [ -n "$origin" ] || rej value
+[ "$name" != read ] || [ "$(grep -c '^[^ ]* read path=' "$card")" -lt "${READ_BUDGET:-3}" ] || rej budget
 case $tspec in
     no) [ "$intext" = 0 ] || rej value ;;
     required) [ -n "$text" ] || rej value ;;

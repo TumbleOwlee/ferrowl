@@ -92,8 +92,10 @@ fast-replan)
     git -C "$R" worktree add -q "$W" -b feat/rp main
     run card-move.sh rp inprogress
     impl 0; commit 0
-    step "s1 blocked: a plan reference too thin to act on"
+    step "s1 blocked: a plan reference too thin to act on, the read budget spent"
     run card-move.sh rp.s1 inprogress
+    for f in f1.txt f0.txt f1.txt; do run card-log.sh rp.s1 read "path=$f" -- no signature for parse_frame; done
+    run card-log.sh rp.s1 read path=src/lib.rs -- still nothing
     echo "impl: status=blocked stage=s1 reason=parse_frame has no signature in the plan"
     run prompt-render.sh blocked rp stage=s1 "reason=parse_frame has no signature in the plan"
     echo "user: 1: b"

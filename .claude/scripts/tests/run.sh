@@ -221,6 +221,7 @@ NOW=2026-10-03T10:50 cl demo stop kind=approval
 NOW=2026-10-03T10:05 cl demo.s1 test-red MB-R-161 -- it_backoff_caps
 NOW=2026-10-03T11:05 cl demo overturned scope=stage count=2 -- comment restates the code
 NOW=2026-10-03T11:06 cl demo overturned scope=branch count=1 -- docs stale
+NOW=2026-10-03T11:07 cl demo.s1 read path=ferrowl-modbus/src/client_core.rs -- no signature for next_delay
 golden metrics env CLAUDE_PROJECT_DIR="$P" METRICS_NOW=2026-10-04T12:00 sh "$scripts/metrics.sh" demo
 [ "$(cat "$D/metrics.log")" = "$(sed -n 1p "$fx/expected/metrics.out")" ] && ok metrics-log || bad metrics-log "the printed line is appended to metrics.log"
 golden metrics-no-card env CLAUDE_PROJECT_DIR="$P" sh "$scripts/metrics.sh" nosuch
@@ -253,6 +254,9 @@ golden card-log-note cltail demo.s1 "$D/inreview/demo.s1.md" note -- renamed '"a
 golden card-log-note-parent cltail demo "$D/inprogress/demo.md" note -- plan amended after review
 golden card-log-note-empty clrej demo.s1 note
 golden card-log-accept-160 cltail demo.s1 "$D/inreview/demo.s1.md" stopped -- "$(printf 'x%.0s' $(seq 1 135))"
+for k in 1 2 3; do clrej demo.s2 read path=f$k.rs -- the plan names no signature; done
+golden card-log-read-budget clrej demo.s2 read path=f4.rs -- still thin
+golden card-log-read-no-text clrej demo.s1 read path=f1.rs
 
 # --- card-log.sh vocabulary covers every event the docs name
 root=$(cd "$scripts/../.." && pwd)

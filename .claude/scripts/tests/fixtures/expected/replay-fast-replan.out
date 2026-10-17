@@ -10,8 +10,13 @@ sha=ok
 $ card-log.sh rp gauntlet=pass cov=81% sha=1b8d0dd
 $ card-move.sh rp.s0 done
 
-## s1 blocked: a plan reference too thin to act on
+## s1 blocked: a plan reference too thin to act on, the read budget spent
 $ card-move.sh rp.s1 inprogress
+$ card-log.sh rp.s1 read path=f1.txt -- no signature for parse_frame
+$ card-log.sh rp.s1 read path=f0.txt -- no signature for parse_frame
+$ card-log.sh rp.s1 read path=f1.txt -- no signature for parse_frame
+$ card-log.sh rp.s1 read path=src/lib.rs -- still nothing
+card-log=reject event=read reason=budget
 impl: status=blocked stage=s1 reason=parse_frame has no signature in the plan
 $ prompt-render.sh blocked rp stage=s1 reason=parse_frame has no signature in the plan
 Question · rp · s1 · spec-implementer · 1 decision
@@ -86,5 +91,5 @@ board:
   done/rp.s2.md
   done/rp.s3.md
 $ metrics.sh rp
-rp start=2026-10-05T09:00 end=2026-10-05T18:00 first-red=- stages=4 stops=2 question=0 approval=1 stage=0 blocked=1 replans=1 overturned=0 lane=fast
+rp start=2026-10-05T09:00 end=2026-10-05T18:00 first-red=- stages=4 stops=2 question=0 approval=1 stage=0 blocked=1 replans=1 overturned=0 reads=0 lane=fast
 exit=0

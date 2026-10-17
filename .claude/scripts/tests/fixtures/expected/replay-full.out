@@ -116,5 +116,5 @@ board:
 $ reconcile.sh rp
 reconcile=clean next=none
 $ metrics.sh rp
-rp start=2026-10-05T09:00 end=2026-10-05T18:00 first-red=- stages=4 stops=2 question=0 approval=1 stage=1 blocked=0 replans=0 overturned=0 lane=full
+rp start=2026-10-05T09:00 end=2026-10-05T18:00 first-red=- stages=4 stops=2 question=0 approval=1 stage=1 blocked=0 replans=0 overturned=0 reads=0 lane=full
 exit=0
