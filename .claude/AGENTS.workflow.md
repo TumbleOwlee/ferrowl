@@ -213,7 +213,7 @@ A feature too big for one run: the author answered `size=epic`, or the architect
 5. **On approval, in order** — no further stop:
    1. File or rewrite the epic issue from `issue-body.sh <slug>` (*Tracking issue*); record `issue`.
    2. Per slice, in `slices.md` order: `sh .claude/scripts/issue-body.sh <slug> --slice <n> > artifacts/<slug>/slice-<n>.md`; an open issue already titled exactly as its line 1 (`gh issue list --state open --search "<title> in:title"`) is adopted, never filed twice — else `gh issue create` from it (title = line 1, body = the rest); then append the number to the parent card's `slices:` — a later slice's `Depends on` links it.
-   3. Reassemble and edit the epic issue's body: its `## Slices` list now links every child.
+   3. Reassemble and edit the epic issue's body — the one exception to *Tracking issue*'s never-rewritten rule: its `## Slices` list now links every child.
    4. *Clean up* — no worktree, no CI; it records the metrics; cards and artifacts go.
    5. One notice line: `Epic · <slug> · #<e> · slices #a, #b, … filed · start with /spec-feature on #a`.
 
@@ -262,7 +262,7 @@ gh issue create --title "$(head -1 artifacts/<slug>/issue-body.md | sed 's/^# //
 gh issue edit <n> --title "$(head -1 artifacts/<slug>/issue-body.md | sed 's/^# //')" --body-file <(tail -n +2 artifacts/<slug>/issue-body.md)
 ```
 
-**After filing, the body is never rewritten** — it carries no status: the draft PR, linked to the issue, shows the progress.
+**After filing, the body is never rewritten** — it carries no status: the draft PR, linked to the issue, shows the progress. One exception: an epic's body is edited once, at *Epic* step 5.3, to link its slice issues.
 
 Every requirement or scenario change kept after filing, detail or meaningful (*Spec changes*), gets `issue-comment.md` from `spec-author`, which the orchestrator posts with no further approval:
 

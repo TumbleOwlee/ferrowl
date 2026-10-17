@@ -1,7 +1,8 @@
 #!/bin/sh
 # Assemble the tracking issue's body from a run's artifacts: what the user
 # gets, never how it is built. Written once, at filing, and never
-# rewritten: the linked PR shows the progress.
+# rewritten: the linked PR shows the progress. One exception: an epic's
+# body is rendered again once its slices are filed, to link them.
 #
 #   sh .claude/scripts/issue-body.sh <slug> > <out>
 #
