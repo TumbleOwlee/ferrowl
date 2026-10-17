@@ -8,7 +8,7 @@ description: Independent second-developer review of an open PR against its ticke
 
 **Concise, compact, facts only.**
 
-Criteria and output shape are `ferrule guide reviewer`'s (`## Axes, reported separately`, `## Spec changes`, `## Output`); this skill supplies gate 3's *inputs* for a reviewer outside the implementing session.
+Criteria and output shape: `ferrule guide reviewer --section 'Axes, reported separately' --section 'Spec changes' --section Output`; this skill supplies gate 3's *inputs* for a reviewer outside the implementing session.
 
 ## Gather inputs — no shared session
 
