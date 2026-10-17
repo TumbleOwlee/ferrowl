@@ -39,8 +39,8 @@ Recommended default, by size:
 | | fast | full |
 |---|---|---|
 | Brief (gate 1) | no stop of its own — approved at the architecture stop, or at gate 2's stop without one | own stop, settles the lane |
-| Architecture | one stop: brief + architecture + lane; approving pre-authorizes gate 2's *On approval* steps (none at ≤ 1 entry) | own stop |
-| Gate 2 | no stop unless the plan review leaves a `Needs user` item or the plan outgrows the fast default; else a notice; without an architecture step: one stop, brief + plan + issue | plan summary + issue draft |
+| Architecture | one stop: brief + architecture + lane; approving pre-authorizes gate 2's *On approval*; no architecture step at ≤ 1 entry | own stop |
+| Gate 2 | no stop unless the plan review leaves a `Needs user` item or the plan outgrows the fast default; else a notice; no architecture step: one stop, brief + plan + issue | plan summary + issue draft |
 | Stages | *Fast lane* | *Full lane*, stops per *Stage stop* |
 | End | one stop, *Gate 4 — pull request*, showing the branch verdict | *Gate 4 — pull request* stop with the branch verdict; a separate *Gate 3 — review* stop only for a `Needs user` item |
 
