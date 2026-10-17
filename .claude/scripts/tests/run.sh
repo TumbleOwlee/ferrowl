@@ -583,5 +583,20 @@ golden prompt-render-arch-fast pr_ arch demo
 seq 1 40 | sed 's/^/- line /' >> "$D/artifacts/demo/plan.summary.md"
 pr_ gate2 demo >/dev/null 2>&1; is prompt-render-cap 3 "$?"
 
+# --- size budget: the orchestrator's and the agents' docs never grow past their
+# ceiling (chars, ~4 per token). A change that must grow one lowers another or
+# raises the ceiling in the same PR, with the reason; lower a ceiling whenever a
+# file shrinks.
+budget() {
+    n=$(wc -c < "$root/$1")
+    if [ "$n" -le "$2" ]; then ok "budget $1"; else bad "budget $1" "$n chars, ceiling $2"; fi
+}
+budget .claude/AGENTS.workflow.md 53000
+budget .claude/agents/spec-author.md 12500
+budget .claude/agents/spec-architect.md 10000
+budget .claude/agents/spec-planner.md 11500
+budget .claude/agents/spec-implementer.md 11500
+budget .claude/agents/spec-reviewer.md 11000
+
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]
