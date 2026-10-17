@@ -1,0 +1,11 @@
+$ next-step.sh 
+exit=2
+$ next-step.sh ns nowhere status=ready
+exit=2
+$ next-step.sh ns pr status=new file=x
+next-step=unknown at=pr status=new
+exit=2
+$ next-step.sh nosuch plan status=ready
+next-step=card
+exit=1
+exit=0

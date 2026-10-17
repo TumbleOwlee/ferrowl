@@ -1,0 +1,43 @@
+$ next-step.sh ns plan status=new file=.claude/tasks/artifacts/ns/issue.md
+next=stop reason=lane
+run: sh .claude/scripts/prompt-render.sh gate2 ns issue=new
+do: show the gate 2 stop and wait for the user's approval
+see: ### Gate 2 — plan and tracking issue
+exit=0
+$ next-step.sh ns plan status=new file=.claude/tasks/artifacts/ns/issue.md
+next=notice
+run: sh .claude/scripts/prompt-render.sh gate2-notice ns issue=new
+do: show the notice without stopping, then act on approval as if given
+see: ### Gate 2 — plan and tracking issue
+exit=0
+$ next-step.sh ns plan status=reuse issue=41 file=.claude/tasks/artifacts/ns/issue.md
+next=stop reason=reuse
+run: sh .claude/scripts/prompt-render.sh gate2 ns issue=41
+do: show the gate 2 stop and wait for the user's approval
+see: ### Gate 2 — plan and tracking issue
+exit=0
+$ next-step.sh ns plan status=new file=.claude/tasks/artifacts/ns/issue.md
+next=stop reason=no-arch-stop
+run: sh .claude/scripts/prompt-render.sh gate2 ns issue=new
+do: show the gate 2 stop and wait for the user's approval
+see: ### Gate 2 — plan and tracking issue
+exit=0
+$ next-step.sh ns plan status=new file=.claude/tasks/artifacts/ns/issue.md
+next=stop reason=outgrown
+run: sh .claude/scripts/prompt-render.sh gate2 ns issue=new
+do: show the gate 2 stop and wait for the user's approval
+see: ### Gate 2 — plan and tracking issue
+exit=0
+$ next-step.sh ns plan status=new file=.claude/tasks/artifacts/ns/issue.md
+next=stop reason=needs-user
+run: sh .claude/scripts/prompt-render.sh gate2 ns issue=new
+do: show the gate 2 stop and wait for the user's approval
+see: ### Gate 2 — plan and tracking issue
+exit=0
+$ next-step.sh ns plan status=new file=.claude/tasks/artifacts/ns/issue.md
+next=stop reason=lane
+run: sh .claude/scripts/prompt-render.sh gate2 ns issue=new
+do: show the gate 2 stop and wait for the user's approval
+see: ### Gate 2 — plan and tracking issue
+exit=0
+exit=0

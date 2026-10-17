@@ -540,6 +540,109 @@ run_s card-log.sh ss.s2 stop=5; run_s card-log.sh ss.s3 auto=yes
 is stage-stop-checkpoint-reset auto "$(run_s stage-stop.sh ss s4)"
 golden stage-stop-no-card run_s stage-stop.sh ss s9
 
+# --- next-step.sh, on a scratch board
+nsboard() { # <lane|-> <arch> <stage rows besides s0> <clean|needs-user>
+    rm -rf "$tmp/n"; NB=$tmp/n/.claude/tasks
+    mkdir -p "$NB/open" "$NB/inprogress" "$NB/inreview" "$NB/done" "$NB/artifacts/ns"
+    { printf -- '---\nid: ns\nbranch: feat/ns\n'; [ "$1" = - ] || printf 'lane: %s\n' "$1"; printf 'gate1: 2026-10-01\narch: %s\n---\n' "$2"; } > "$NB/inprogress/ns.md"
+    { printf '# ns — plan summary (rev 1)\n\nDecide: %s stages.\n\n| Stage | What | Pins | Files | Stop |\n|---|---|---|---|---|\n' "$3"
+      i=0; while [ "$i" -le "$3" ]; do printf '| s%s | stage %s | — | 1 (x) | — |\n' "$i" "$i"; i=$((i + 1)); done; } > "$NB/artifacts/ns/plan.summary.md"
+    nsverdict "$4"
+}
+nsverdict() {
+    if [ "$1" = clean ]; then printf 'Verdict: clean — ready for approval\n\nSpec — 2 of 2 pinned\nNot checked — nothing\n'
+    else printf 'Verdict: findings — 1 needs user\n\nNeeds user\n- 1. keep the alias?\n  - a) keep (recommended)\n  - b) drop\n'; fi > "$NB/artifacts/ns/review.verdict.md"
+}
+ns() { echo "\$ next-step.sh $*"; env CLAUDE_PROJECT_DIR="$tmp/n" CARD_LOG_NOW=2026-10-05T09:00 sh "$scripts/next-step.sh" "$@"; echo "exit=$?"; }
+nslog() { echo "log:"; awk '/^---$/ { n++; next } n >= 2' "$NB"/*/ns.md; }
+nscl() { env CLAUDE_PROJECT_DIR="$tmp/n" CARD_LOG_NOW=2026-10-05T09:00 sh "$scripts/card-log.sh" ns "$@"; }
+R=.claude/tasks/artifacts/ns
+nsplan() {
+    nsboard full 2026-10-02 2 clean
+    ns ns plan status=ready file=$R/plan.md summary=$R/plan.summary.md
+    ns ns plan status=findings file=$R/review.md summary=$R/review.verdict.md count=2 user=0
+    ns ns plan status=ready file=$R/plan.md summary=$R/plan.summary.md
+    ns ns plan status=findings file=$R/review.md summary=$R/review.verdict.md count=1 user=0
+    ns ns plan status=ready file=$R/plan.md summary=$R/plan.summary.md
+    ns ns plan status=findings file=$R/review.md summary=$R/review.verdict.md count=1 user=0
+    nslog
+    nsboard full 2026-10-02 2 clean
+    ns ns plan status=findings file=$R/review.md summary=$R/review.verdict.md count=0 user=0
+    ns ns plan status=clean file=$R/review.md summary=$R/review.verdict.md
+    for t in question arch-gap split behavior-change; do ns ns plan status=$t; done
+    nslog
+}
+golden next-step-plan nsplan
+nsgate2() {
+    nsboard full 2026-10-02 2 clean; ns ns plan status=new file=$R/issue.md
+    nsboard fast 2026-10-02 2 clean; ns ns plan status=new file=$R/issue.md
+    ns ns plan status=reuse issue=41 file=$R/issue.md
+    nsboard fast skipped 1 clean; ns ns plan status=new file=$R/issue.md
+    nsboard fast 2026-10-02 3 clean; ns ns plan status=new file=$R/issue.md
+    nsboard fast 2026-10-02 2 needs-user; ns ns plan status=new file=$R/issue.md
+    nsboard - no-arch 2 clean; ns ns plan status=new file=$R/issue.md
+}
+golden next-step-gate2 nsgate2
+nsreplan() {
+    nsboard fast 2026-10-02 2 clean
+    nscl plan-review=findings count=2 round=1; nscl stop kind=approval gate=gate4; nscl replan from=s3
+    ns ns replan status=ready file=$R/plan.md summary=$R/plan.summary.md
+    ns ns replan status=clean file=$R/review.md summary=$R/review.verdict.md
+    nslog
+    nsboard fast 2026-10-02 2 clean
+    nscl stop kind=stage; nscl replan from=s3
+    ns ns replan status=clean file=$R/review.md
+    nsboard fast 2026-10-02 2 clean
+    nscl stop kind=approval gate=gate4; nscl arch-rev=1; nscl replan from=s3
+    printf '# ns — architecture summary (rev 2)\n' > "$NB/artifacts/ns/architecture.summary.md"
+    ns ns replan status=clean file=$R/review.md
+    nsboard fast 2026-10-02 3 clean
+    nscl stop kind=approval gate=gate4; nscl replan from=s3
+    ns ns replan status=clean file=$R/review.md
+    nsboard full 2026-10-02 3 clean
+    nscl stop kind=approval gate=gate4; nscl replan from=s3
+    ns ns replan status=clean file=$R/review.md
+}
+golden next-step-replan nsreplan
+nsbranch() {
+    nsboard full 2026-10-02 2 clean
+    printf -- '---\nid: ns.s1\nparent: ns\n---\n' > "$NB/done/ns.s1.md"; printf -- '---\nid: ns.s2\nparent: ns\n---\n' > "$NB/inreview/ns.s2.md"
+    ns ns branch status=findings file=$R/review.md summary=$R/review.verdict.md count=2 user=0 'stage=[s2]'
+    ns ns branch status=clean file=$R/review.md summary=$R/review.verdict.md count=0 user=0 'stage=[s2]'
+    nslog
+    mv "$NB/inreview/ns.s2.md" "$NB/done/ns.s2.md"; nsverdict needs-user
+    ns ns branch status=findings file=$R/review.md summary=$R/review.verdict.md count=0 user=1
+    sed -i 's/^lane: full$/lane: fast/' "$NB/inprogress/ns.md"
+    ns ns branch status=findings file=$R/review.md summary=$R/review.verdict.md count=0 user=1
+    nslog
+    nsboard full 2026-10-02 2 clean
+    printf -- '---\nid: ns.s1\nparent: ns\n---\n' > "$NB/done/ns.s1.md"; printf -- '---\nid: ns.s2\nparent: ns\n---\n' > "$NB/done/ns.s2.md"
+    ns ns branch status=findings file=$R/review.md summary=$R/review.verdict.md count=1 user=0
+    ns ns branch status=clean file=$R/review.md summary=$R/review.verdict.md
+    nslog
+}
+golden next-step-branch nsbranch
+nsprci() {
+    nsboard full 2026-10-02 2 clean
+    ns ns pr status=ready file=$R/pr.md follow-ups=1
+    ns ns pr status=question file=$R/question.md count=1
+    ns ns ci ci=1
+    ns ns ci ci=0
+    nslog
+}
+golden next-step-pr-ci nsprci
+nsusage() {
+    nsboard full 2026-10-02 2 clean
+    ns
+    ns ns nowhere status=ready
+    ns ns pr status=new file=x
+    ns nosuch plan status=ready
+}
+golden next-step-usage nsusage
+missing=$(sed -n "s/.*see '\(#[^']*\)'.*/\1/p" "$scripts/next-step.sh" | sort -u | while IFS= read -r h; do grep -qxF "$h" "$root/.claude/AGENTS.workflow.md" || echo "$h"; done)
+is next-step-headings "" "$missing"
+is next-step-headings-found 1 "$([ "$(sed -n "s/.*see '\(#[^']*\)'.*/\1/p" "$scripts/next-step.sh" | grep -c .)" -ge 8 ] && echo 1)"
+
 # sha-check.sh
 ssrun 2
 printf 'x\n' > "$SW/f1.txt"; g "$SW" add f1.txt; g "$SW" commit -q -m s1; S1=$(git -C "$SW" rev-parse --short HEAD)
