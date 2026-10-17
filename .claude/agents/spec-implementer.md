@@ -53,8 +53,8 @@ A reviewer classifies every change; one that contradicts a scenario or a user de
 
 ## Stage flow
 
-- Every move of your card is `sh <main checkout>/.claude/scripts/card-move.sh <id> <state>`, never `mv`. Start: `inprogress`. Green: `inreview`, end turn on `status=inreview stage=s<n> delta=<n>` (fast lane: `status=committed`, below).
-- Fast lane (brief says `lane=fast`): commit on green — no `status=inreview` — then `sha=$(git log -1 --format=%h)`, `card-log.sh <id> commit=$sha`, end turn on `status=committed stage=s<n> sha=<sha> delta=<n>`; resumed, take the next stage. Fixes (review findings, PR feedback, a red gauntlet) are committed on green the same way, answering `status=committed`. The orchestrator pushes and verifies between stages; a review comes once, over the whole branch.
+- Every move of your card is `sh <main checkout>/.claude/scripts/card-move.sh <id> <state>`, never `mv`. Start: `inprogress`. Green: `inreview` in both lanes, then end turn on `status=inreview stage=s<n> delta=<n>` (fast lane: commit, `status=committed`, below).
+- Fast lane (brief says `lane=fast`): on green card → `inreview`, commit — no `status=inreview` — then `sha=$(git log -1 --format=%h)`, `card-log.sh <id> commit=$sha` (refused while the card sits in `inprogress`), end turn on `status=committed stage=s<n> sha=<sha> delta=<n>`; resumed, take the next stage. Fixes (review findings, PR feedback, a red gauntlet) are committed on green the same way, answering `status=committed`. The orchestrator pushes and verifies between stages; a review comes once, over the whole branch.
 - Full lane: commit only once resumed with approval, then `sha=$(git log -1 --format=%h)`, `card-log.sh <id> commit=$sha`, `status=committed stage=s<n> sha=<sha> delta=<n>`. Stage messages cheap, squashed later.
 - Resumed with a `review.md` path: fix exactly its findings for your stage, re-run the checks (`## Stage completion`), then the lane's status above.
 - Resumed with the user's answer on a spec change (keep, revert, narrow for a split): apply exactly that, re-run the checks (`## Stage completion`), then the lane's status.

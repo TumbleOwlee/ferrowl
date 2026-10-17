@@ -229,6 +229,8 @@ fast-tdd)
     run card-move.sh rp.s1 inprogress
     printf 'stage 1 fixed\n' > "$W/f1.txt"
     run card-log.sh rp.s1 green
+    step "the fix's commit is refused until its card moves"
+    run card-log.sh rp.s1 commit=0badc0d
     run card-move.sh rp.s1 inreview
     commit 1
     git_ push -q 2>/dev/null

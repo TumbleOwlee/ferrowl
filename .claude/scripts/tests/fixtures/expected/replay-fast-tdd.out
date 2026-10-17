@@ -135,6 +135,10 @@ $ run-cleanup.sh rp
 cleanup=refused reason=ci-red
 $ card-move.sh rp.s1 inprogress
 $ card-log.sh rp.s1 green
+
+## the fix's commit is refused until its card moves
+$ card-log.sh rp.s1 commit=0badc0d
+card-log=reject event=commit reason=inprogress move=inreview
 $ card-move.sh rp.s1 inreview
 $ card-log.sh rp.s1 commit=d6043f4
 impl: status=committed stage=s1 sha=d6043f4 delta=0

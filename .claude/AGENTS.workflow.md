@@ -295,13 +295,13 @@ gh pr create --draft --title "$(head -1 artifacts/<slug>/pr-draft.md | sed 's/^#
 
 Per stage:
 
-1. Green: the implementer commits, card → `inreview/`, answers `status=committed stage=s<n> sha=<sha> delta=<n>` — no per-stage code review, no approval stop.
+1. Green: card → `inreview/`, the implementer commits (`card-log.sh` refuses `commit=` from `inprogress/`), answers `status=committed stage=s<n> sha=<sha> delta=<n>` — no per-stage code review, no approval stop.
 2. Orchestrator verifies the reported sha (below), runs `gauntlet.sh`, pushes, logs `gauntlet=pass sha=<sha>` on the parent card. `delta>0` → fresh `spec-reviewer`, scope `delta s<n>` (*Spec changes*): `count>0` → resume the implementer with the `review.md` path, fixes committed on green, gauntlet, push, follow-up pass by the same reviewer, rounds per *Verify before an approval stop*; a `Needs user` item → the Delta stop below. Then card → `done`, the next stage (*Every stage*). Red gauntlet → card → `inprogress/`, resume the implementer with the gauntlet line.
 3. Last stage `done` → *PR feedback*, then *Gate 3 — review*: its branch review is the only code review of a fast-lane run.
 
 **Stop (delta):** `prompt-render.sh delta <slug> stage=s<n>` — the verdict's `Needs user` items as a question batch; the answers (keep · revert · split) go to the implementer, then the next stage.
 
-Fixes in the fast lane (gate 3 findings, PR feedback, red gauntlet) are committed on green too: the implementer answers `status=committed`, the orchestrator runs `gauntlet.sh` and pushes before any re-review — a review diffs commits, never a dirty worktree.
+Fixes in the fast lane (gate 3 findings, PR feedback, red gauntlet) are committed on green too, card → `inreview/` first: the implementer answers `status=committed`, the orchestrator runs `gauntlet.sh` and pushes before any re-review — a review diffs commits, never a dirty worktree.
 
 #### Full lane
 

@@ -267,6 +267,10 @@ golden card-log-accept-160 cltail demo.s1 "$D/inreview/demo.s1.md" stopped -- "$
 for k in 1 2 3; do clrej demo.s2 read path=f$k.rs -- the plan names no signature; done
 golden card-log-read-budget clrej demo.s2 read path=f4.rs -- still thin
 golden card-log-read-no-text clrej demo.s1 read path=f1.rs
+mv "$D/open/demo.s2.md" "$D/inprogress/demo.s2.md"
+golden card-log-reject-commit-inprogress clrej demo.s2 commit=abc1234
+is card-log-commit-inprogress-unlogged 0 "$(grep -c 'commit=' "$D/inprogress/demo.s2.md")"
+is card-log-commit-inreview "2026-10-05T09:00 commit=abc1234" "$(cltail demo.s1 "$D/inreview/demo.s1.md" commit=abc1234)"
 
 # --- card-log.sh vocabulary covers every event the docs name
 root=$(cd "$scripts/../.." && pwd)
