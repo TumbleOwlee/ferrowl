@@ -218,6 +218,8 @@ NOW=2026-10-03T09:30 cl demo stop kind=question
 NOW=2026-10-03T10:40 cl demo replan from=s2
 NOW=2026-10-03T10:50 cl demo stop kind=approval
 NOW=2026-10-03T10:05 cl demo.s1 test-red MB-R-161 -- it_backoff_caps
+NOW=2026-10-03T11:05 cl demo overturned scope=stage count=2 -- comment restates the code
+NOW=2026-10-03T11:06 cl demo overturned scope=branch count=1 -- docs stale
 golden metrics env CLAUDE_PROJECT_DIR="$P" METRICS_NOW=2026-10-04T12:00 sh "$scripts/metrics.sh" demo
 [ "$(cat "$D/metrics.log")" = "$(sed -n 1p "$fx/expected/metrics.out")" ] && ok metrics-log || bad metrics-log "the printed line is appended to metrics.log"
 golden metrics-no-card env CLAUDE_PROJECT_DIR="$P" sh "$scripts/metrics.sh" nosuch

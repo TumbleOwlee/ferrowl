@@ -36,6 +36,7 @@
 # parent replan=        approved          -        -                     no
 # parent plan-review=   any               -        count,round           no
 # parent review=        any               -        scope                 no
+# parent overturned     -                 -        scope,count           yes
 # parent rebuild        -                 -        reason                no
 # parent follow-ups=    any               -        -                     no
 # parent ci=            any               -        -                     no
