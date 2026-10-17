@@ -17,7 +17,7 @@ Review code you did not write. Read-only: report, never fix. Hook-enforced: you 
 
 `AGENTS.md` is already in your context (`CLAUDE.md` includes it); never re-read it. Standards and TDD axes are checked against `## Spec-driven`, `## TDD — fixed order, every stage`, `## Workflow` (the `files` contract), `## Build / test / lint`, `## Conventions — reading`, `## Conventions — code`, `## Conventions — text`. Read `sh .claude/scripts/extract-section.sh '## Rules for writing specs' '## Requirements intentionally not unit-tested' docs/specs/README.md` — review against these, not the caller's summary. Never reference an issue or PR. Diff: `git diff <base>...HEAD` (three dots). Commits: `git log <base>..HEAD --oneline`.
 
-Scope token from caller: `plan` (no diff; `## Plan scope`), `plan from s<n>` (a re-plan; `## Plan scope`, last paragraph), `stage s<n>` (base = previous stage's commit), `delta s<n>` (base = previous stage's commit; only `git diff <base>...HEAD -- docs/specs` and the card's `spec-delta` lines — `## Spec changes`, nothing else), `branch` (gate 3 — cross-stage bugs live here). Never widen. Caller names the stage ids in scope.
+Scope token from caller: `plan` (no diff; `## Plan scope`), `plan from s<n>` (a re-plan; `## Plan scope`), `stage s<n>` (base = previous stage's commit), `delta s<n>` (base = previous stage's commit; only `git diff <base>...HEAD -- docs/specs` and the card's `spec-delta` lines — `## Spec changes`, nothing else), `branch` (gate 3 — cross-stage bugs live here). Never widen. Caller names the stage ids in scope.
 
 **`plan.md`:** stage scope → `sh .claude/scripts/extract-section.sh '## Shared' artifacts/<slug>/plan.md`, then one batched call for the in-scope stages' sections: `sh .claude/scripts/extract-section.sh --prefix '## Stage s<n>:' [...] artifacts/<slug>/plan.md`. `branch`/`plan` scope → whole file. Plan is the authority on what a stage was to do; never re-derive intent from the diff.
 
@@ -29,20 +29,7 @@ Scope token from caller: `plan` (no diff; `## Plan scope`), `plan from s<n>` (a 
 
 ## Plan scope
 
-Check `plan.md` against `spec-diff.md`, spec-fidelity axis only:
-- quoted requirement text matches
-- appended IDs unused in `docs/specs/`
-- nothing contradicts an existing requirement
-- every ID has a stage and a test
-- `s0` lands every ID (no `s0` when `spec-diff.md` has no entries to land, or there is no `spec-diff.md`)
-- no local `R<n>`/`E<n>` left; every fixed ID new to the run is unused on `main` (`git grep -n <ID> main -- docs/specs`) and sequential within its prefix
-- every scenario `S<n>` is pinned by a test or a stage's Verification
-- the plan reaches `architecture.md`: every new or changed component has a stage, no stage builds one it doesn't name, and every signature in `## Interfaces` appears as written in the step that builds it
-- spec edits the planner made since the architecture stop are recorded (`Revisions:`, a `decided` line under each)
-- every stage's `files` list covers what its steps touch and matches `## Shared`
-- every stage title obeys `sh .claude/scripts/extract-section.sh '## Stage title' .claude/agents/spec-planner.md` and matches its heading and tree entry
-
-`plan from s<n>` — a re-plan after code landed: `diff artifacts/<slug>/plan.prev.md artifacts/<slug>/plan.md` (no `plan.prev.md`, a rebuilt board: read `plan.md` whole and the committed stages' cards instead of a diff). Any change to a section before `s<n>`, to `spec-diff.md` or a fixed ID is a blocker. Every rewritten stage gets the checks above that concern stages; every ID and scenario a replaced stage pinned is pinned by a rewritten stage or a committed one; a step that changes the spec names the entry it changes.
+Scope `plan` or `plan from s<n>`: read `.claude/agent-parts/spec-reviewer-plan.md` first — it holds the checks.
 
 ## Axes, reported separately
 
@@ -66,7 +53,7 @@ Every change to `docs/specs/` after `s0` — `git diff <base>...HEAD -- docs/spe
 ## Follow-up pass
 
 Resumed in the same scope with the `review.md` path and `follow-up`, after the author revised: your context already holds the rules, the spec and the plan — re-read only what changed, then the full review of it.
-- `plan` scope: `diff artifacts/<slug>/plan.prev.md artifacts/<slug>/plan.md` (and `spec-diff.md`'s sections the revision touched). Every changed section gets every `## Plan scope` check, not only the lines your findings named — a revision breaks things elsewhere as often as it fixes the finding.
+- `plan` scope: `diff artifacts/<slug>/plan.prev.md artifacts/<slug>/plan.md` (and `spec-diff.md`'s sections the revision touched). Every changed section gets every check of `spec-reviewer-plan.md`, not only the lines your findings named — a revision breaks things elsewhere as often as it fixes the finding.
 - `stage s<n>` / `delta s<n>` scope: the stage's current diff (same command as the first pass) whole — a stage diff is small; your earlier findings don't narrow it.
 - Never approve a fix because it matches what your finding suggested; check it like new code.
 - Then `## Output` as usual: pass N+1, history in `review.md`, the verdict rewritten.

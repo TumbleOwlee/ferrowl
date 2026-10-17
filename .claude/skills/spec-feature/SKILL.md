@@ -22,21 +22,24 @@ Headings of `.claude/AGENTS.workflow.md`, one pull each (`AGENTS.md` `## Convent
 | Orchestrator role — read once per run | `### Principles` |
 | Branch/worktree/agent/plan rules — read once per run | `### Principles — implementation` |
 | What runs before any approval stop | `### Verify before an approval stop` |
-| Card files, states, artifacts directory | `### Task board` |
+| Task board — cards: files, frontmatter, log lines, states | `#### Cards` |
+| Artifacts directory — every file of `artifacts/<slug>/` | `#### Artifacts` |
 | Agent hand-off (status lines, file paths) | `### Agent hand-off` |
 | Approval prompt — the fixed shape of every stop, built from `show-file.sh`'s lines | `### Approval prompt` |
 | Relayed question — an agent's batch of decisions | `### Relayed question` |
 | Lane — fast or full, proposed by size, settled at the first approval stop | `### Lane — fast or full` |
 | Gate 1 — brief: grilling, scenarios, best-effort entries | `### Gate 1 — brief` |
 | Architecture — structure the plan must reach | `### Architecture` |
-| Epic — a feature too big for one run: skeleton, slices, child issues; a slice run | `### Epic` |
+| Epic — a feature too big for one run: skeleton, slices, child issues | `### Epic` |
+| Slice run — a run on one child issue of an epic | `#### Slice run` |
 | Gate 2 — plan and tracking issue | `### Gate 2 — plan and tracking issue` |
 | Tracking issue — draft, file, status line, changelog comments | `### Tracking issue` |
 | Implement — every lane: spawn brief, draft PR | `#### Every stage` |
 | Implement — fast lane | `#### Fast lane` |
 | Implement — full lane | `#### Full lane`, `#### Per-stage review`, `#### Stage stop` |
 | PR feedback — draft PR comments back into the run, before every approval stop once the draft exists | `### PR feedback` |
-| Spec changes — who edits the spec when, detail vs meaningful, split | `### Spec changes` |
+| Spec changes — who edits the spec when, detail vs meaningful | `### Spec changes` |
+| Split — a change needed only outside the goal; fold in | `#### Split` |
 | Gate 3 — independent review | `### Gate 3 — review` |
 | Gate 4 — pull request, mark ready, CI | `### Gate 4 — pull request` |
 | Clean up — after the PR is ready and CI is green; the run's end | `### Clean up` |

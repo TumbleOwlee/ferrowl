@@ -12,10 +12,10 @@ Ferrowl — Rust TUI simulator for Modbus (client/server, TCP/RTU) and OCPP (Cha
 - Before editing an area: pull the headings the task touches from its `requirements.md` and their `edge-cases.md` counterparts (`## Conventions — reading`); the whole file only for a cross-cutting change. `edge-cases.md` = deliberate ugliness; check before "fixing".
 - Behavior change with no spec change = incomplete.
 - `main` never holds unfinished spec: a requirement on `main` describes code that exists and is tested. A branch may hold a spec commit ahead of its code; squash merge keeps it off `main`.
-- A run's spec settles with its code (`.claude/AGENTS.workflow.md` *Spec changes*). Draft entries carry local IDs — `S<n>` scenarios, `R<n>`, `E<n>`, the next free number each time; a dropped local ID is retired, never reused in the run; the planner assigns fixed IDs at gate 2. After `s0` the implementer updates `docs/specs/` inside the stage commit and `spec-reviewer` classifies every change (`## Spec changes` in its file).
+- A run's spec settles with its code (`.claude/AGENTS.workflow.md` *Spec changes*). Draft entries carry local IDs — `S<n>` scenarios, `R<n>`, `E<n>`, the next free number each time; the planner assigns fixed IDs at gate 2.
 - Pre-existing spec/code disagreement outside your task: stop, raise separately. Folding it in widens approved work and skips its own review.
 - Specs carry no `file:line`. Locate code with search tools.
-- Requirement and edge-case IDs (`-R-`, `-E-`) stable, append-only once on `main` (sole exception: `docs/specs/README.md` rule 2). A fixed ID added on a branch may be dropped before merge; its number is never reused within that run. Cite in commits and PRs.
+- Requirement and edge-case IDs (`-R-`, `-E-`) stable, append-only once on `main` (sole exception: `docs/specs/README.md` rule 2). A fixed ID added on a branch may be dropped before merge. A dropped ID, local or fixed, is retired: its number is never reused within the run. Cite in commits and PRs.
 
 ## TDD — fixed order, every stage
 
