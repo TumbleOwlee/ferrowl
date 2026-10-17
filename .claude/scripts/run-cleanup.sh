@@ -6,18 +6,23 @@
 #   sh .claude/scripts/run-cleanup.sh <slug>
 #
 # Refuses, changing nothing, while the worktree has uncommitted changes or
-# commits its upstream lacks — the PR would not carry them. Else removes the
+# commits its upstream lacks — the PR would not carry them. Also refuses,
+# changing nothing, when the run's parent card shows no green CI (`no-ci`, or
+# `ci-red` for a last `ci=` not 0, unless a newer `ci-waived` line; a
+# `kind: epic` card is exempt): metrics.sh decides. Records the run's
+# metrics.log line before removing anything. Else removes the
 # worktree .claude/worktrees/<slug>, deletes its local branch (the pushed one
 # stays for the PR), then moves every card of the run to
 # .claude/tasks/archive/<slug>/cards/ and artifacts/<slug>/ to
 # archive/<slug>/artifacts/ (an existing archive/<slug> becomes
 # archive/<slug>-<UTC yyyymmddThhmmssZ>); the archive is never pruned.
-# Prints `cleanup=done archive=<path | none>` or `cleanup=refused reason=<…>` (exit 1).
+# Prints `cleanup=done archive=<path | none>` or `cleanup=refused reason=<… | no-ci | ci-red>` (exit 1).
 [ $# -eq 1 ] || { echo "usage: $0 <slug>" >&2; exit 2; }
 slug=$1
 root=${CLAUDE_PROJECT_DIR:-.}
 wt=$root/.claude/worktrees/$slug
 board=$root/.claude/tasks
+here=$(dirname -- "$0")
 refuse() { echo "cleanup=refused reason=$1"; exit 1; }
 
 branch=
@@ -26,6 +31,15 @@ if [ -d "$wt" ]; then
     [ -z "$(git -C "$wt" status --porcelain)" ] || refuse "uncommitted-changes"
     git -C "$wt" rev-parse --quiet --verify '@{upstream}' >/dev/null || refuse "no-upstream"
     [ "$(git -C "$wt" rev-list --count '@{upstream}..HEAD')" -eq 0 ] || refuse "unpushed-commits"
+fi
+parent=
+for d in open inprogress inreview done; do
+    [ -f "$board/$d/$slug.md" ] && { parent="$board/$d/$slug.md"; break; }
+done
+if [ -n "$parent" ]; then
+    m=$(sh "$here/metrics.sh" "$slug") || refuse "${m#metrics=refused reason=}"
+fi
+if [ -n "$branch" ]; then
     git -C "$root" worktree remove "$wt" || refuse "worktree-remove-failed"
     git -C "$root" branch -D "$branch" >/dev/null || refuse "branch-delete-failed"
 fi

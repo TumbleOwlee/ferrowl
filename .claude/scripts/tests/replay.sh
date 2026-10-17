@@ -89,6 +89,7 @@ full)
     run prompt-render.sh gate4 rp pr=9
     step "end of run"
     run reconcile.sh rp
+    run card-log.sh rp ci=0
     run metrics.sh rp ;;
 fast-replan)
     setup fast 2
@@ -116,6 +117,7 @@ fast-replan)
     step "the new stages land on green"
     for i in 1 2 3; do impl "$i"; commit "$i"; done
     board
+    run card-log.sh rp ci=0
     run metrics.sh rp ;;
 fast-noarch)
     setup fast 1
@@ -134,6 +136,7 @@ fast-noarch)
     run card-move.sh rp inreview
     printf '# Read register 65535\n\n## Why\nThe last register reads.\n' > "$A/pr.md"
     run prompt-render.sh gate4 rp pr=9
+    run card-log.sh rp ci=0
     run metrics.sh rp ;;
 pr-replan)
     setup full 1
@@ -159,6 +162,7 @@ pr-replan)
     impl 2; run stage-stop.sh rp s2; commit 2; run prompt-render.sh auto rp stage=s2
     run card-move.sh rp inreview
     run prompt-render.sh gate4 rp pr=9
+    run card-log.sh rp ci=0
     run metrics.sh rp ;;
 resume)
     setup full 2

@@ -22,6 +22,7 @@ pass=0; fail=0
 
 ok() { pass=$((pass + 1)); echo "ok   $1"; }
 bad() { fail=$((fail + 1)); echo "FAIL $1${2:+ — $2}"; }
+is() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected '$2', got '$3'"; fi; }
 
 # Fresh project root with the fixture board, for each test.
 project() {
@@ -222,8 +223,23 @@ NOW=2026-10-03T10:05 cl demo.s1 test-red MB-R-161 -- it_backoff_caps
 NOW=2026-10-03T11:05 cl demo overturned scope=stage count=2 -- comment restates the code
 NOW=2026-10-03T11:06 cl demo overturned scope=branch count=1 -- docs stale
 NOW=2026-10-03T11:07 cl demo.s1 read path=ferrowl-modbus/src/client_core.rs -- no signature for next_delay
+NOW=2026-10-04T11:50 cl demo ci=0
 golden metrics env CLAUDE_PROJECT_DIR="$P" METRICS_NOW=2026-10-04T12:00 sh "$scripts/metrics.sh" demo
 [ "$(cat "$D/metrics.log")" = "$(sed -n 1p "$fx/expected/metrics.out")" ] && ok metrics-log || bad metrics-log "the printed line is appended to metrics.log"
+metrics() { out=$(env CLAUDE_PROJECT_DIR="$P" METRICS_NOW=2026-10-04T12:00 sh "$scripts/metrics.sh" "$1"); rc=$?; }
+NOW=2026-10-04T11:55 cl demo ci=1
+metrics demo
+is metrics-ci-red "metrics=refused reason=ci-red 1" "$out $rc"
+is metrics-ci-red-unlogged 1 "$(grep -c . "$D/metrics.log")"
+NOW=2026-10-04T11:58 cl demo ci-waived -- the same check fails on main
+metrics demo
+is metrics-ci-waived ci=waived "${out##* }"
+is metrics-rerun-replaces 1 "$(grep -c '^demo ' "$D/metrics.log")"
+metrics lb
+is metrics-epic-no-ci "lane=epic ci=-" "$(echo "$out" | awk '{print $(NF-1), $NF}')"
+P=$(project); D=$P/.claude/tasks
+metrics demo
+is metrics-no-ci "metrics=refused reason=no-ci 1" "$out $rc"
 golden metrics-no-card env CLAUDE_PROJECT_DIR="$P" sh "$scripts/metrics.sh" nosuch
 
 # --- card-log.sh
@@ -253,6 +269,9 @@ golden card-log-files-add cltail demo.s1 "$D/inreview/demo.s1.md" 'files+=CONTRI
 golden card-log-note cltail demo.s1 "$D/inreview/demo.s1.md" note -- renamed '"attr-a"' to attr-b
 golden card-log-note-parent cltail demo "$D/inprogress/demo.md" note -- plan amended after review
 golden card-log-note-empty clrej demo.s1 note
+golden card-log-reject-note-typed clrej demo note -- plan-review findings count=3 round=1
+golden card-log-reject-note-review clrej demo note -- branch-review findings count=2
+clrej demo ci-waived >/dev/null; is card-log-ci-waived-text 2 "$?"
 golden card-log-accept-160 cltail demo.s1 "$D/inreview/demo.s1.md" stopped -- "$(printf 'x%.0s' $(seq 1 135))"
 for k in 1 2 3; do clrej demo.s2 read path=f$k.rs -- the plan names no signature; done
 golden card-log-read-budget clrej demo.s2 read path=f4.rs -- still thin
@@ -372,6 +391,14 @@ g "$W" push -q 2>/dev/null
 printf 'target/\n' >> "$W/.gitignore"; g "$W" add .gitignore; g "$W" commit -q -m ignore; g "$W" push -q 2>/dev/null
 mkdir -p "$W/target" && printf 'build\n' > "$W/target/out"
 out=$(cleanup)
+is cleanup-refuses-no-ci "cleanup=refused reason=no-ci" "$out"
+[ -d "$W" ] || bad cleanup-refuses-no-ci "worktree removed"
+CLAUDE_PROJECT_DIR="$tmp/r" sh "$scripts/card-log.sh" demo ci=1
+out=$(cleanup)
+is cleanup-refuses-ci-red "cleanup=refused reason=ci-red" "$out"
+[ -d "$W" ] && [ ! -e "$tmp/r/.claude/tasks/metrics.log" ] || bad cleanup-refuses-ci-red "worktree removed or metrics written"
+CLAUDE_PROJECT_DIR="$tmp/r" sh "$scripts/card-log.sh" demo ci=0
+out=$(cleanup)
 B=$tmp/r/.claude/tasks
 if [ "$out" = "cleanup=done archive=$B/archive/demo" ] && [ ! -e "$W" ] && ! git -C "$tmp/r" rev-parse --verify -q feat/demo >/dev/null \
     && git -C "$tmp/remote.git" rev-parse --verify -q feat/demo >/dev/null \
@@ -379,11 +406,12 @@ if [ "$out" = "cleanup=done archive=$B/archive/demo" ] && [ ! -e "$W" ] && ! git
     && [ -e "$B/archive/demo/cards/demo.md" ] && [ -e "$B/archive/demo/cards/demo.s0.md" ] && [ -e "$B/archive/demo/artifacts/issue.md" ] \
     && [ -e "$B/artifacts/nospec/issue.md" ] && [ -e "$B/inreview/nospec.md" ]; then ok cleanup-done
 else bad cleanup-done "$out"; fi
+is cleanup-records-metrics 1 "$(grep -c '^demo start=.* ci=0$' "$B/metrics.log")"
 out=$(cleanup); [ "$out" = "cleanup=done archive=none" ] && ok cleanup-idempotent || bad cleanup-idempotent "$out"
-mkdir -p "$B/artifacts/demo"; echo x > "$B/artifacts/demo/issue.md"; printf -- '---\nid: demo\n---\n' > "$B/inprogress/demo.md"
+mkdir -p "$B/artifacts/demo"; echo x > "$B/artifacts/demo/issue.md"; printf -- '---\nid: demo\n---\n2026-10-05T09:00 ci=0\n' > "$B/inprogress/demo.md"
 out=$(cleanup)
 case $out in "cleanup=done archive=$B/archive/demo-"[0-9]*T[0-9]*Z) [ -e "${out#*archive=}/cards/demo.md" ] && ok cleanup-collision || bad cleanup-collision "$out" ;; *) bad cleanup-collision "$out" ;; esac
-leftover() { mkdir -p "$B/artifacts/demo"; printf -- '---\nid: demo\n---\n' > "$B/inprogress/demo.md"; }
+leftover() { mkdir -p "$B/artifacts/demo"; printf -- '---\nid: demo\n---\n2026-10-05T09:00 ci=0\n' > "$B/inprogress/demo.md"; }
 leftover; out2=$(CLEANUP_NOW=20260101T000000Z cleanup)
 leftover; out3=$(CLEANUP_NOW=20260101T000000Z cleanup)
 [ "$out2" = "cleanup=done archive=$B/archive/demo-20260101T000000Z" ] && [ "$out3" = "cleanup=done archive=$B/archive/demo-20260101T000000Z-1" ] \
@@ -394,6 +422,12 @@ if [ "$(id -u)" != 0 ]; then
     [ "$out" = "cleanup=refused reason=archive-failed" ] && [ -e "$B/inprogress/demo.md" ] && ok cleanup-archive-unwritable || bad cleanup-archive-unwritable "$out"
     rm -rf "$B/artifacts/demo" "$B/inprogress/demo.md"
 fi
+printf -- '---\nid: demo\n---\n2026-10-05T09:00 ci=1\n2026-10-05T09:10 ci-waived -- red on main too\n' > "$B/inprogress/demo.md"; mkdir -p "$B/artifacts/demo"
+out=$(CLEANUP_NOW=20260101T000002Z cleanup)
+is cleanup-ci-waived "cleanup=done archive=$B/archive/demo-20260101T000002Z" "$out"
+printf -- '---\nid: demo\nkind: epic\n---\n' > "$B/inprogress/demo.md"; mkdir -p "$B/artifacts/demo"
+out=$(CLEANUP_NOW=20260101T000003Z cleanup)
+is cleanup-epic-no-ci "cleanup=done archive=$B/archive/demo-20260101T000003Z" "$out"
 
 # --- run-rebuild.sh: a lost board rebuilt from a stubbed issue, a stubbed draft PR and the branch
 g "$tmp/r" checkout -q main
@@ -462,7 +496,6 @@ g "$tmp/ids" checkout -q feat/x
 out=$(sh "$scripts/id-collisions.sh" "$tmp/ids" main); [ "$out" = "ids=collide MB-R-002" ] && ok ids-collide || bad ids-collide "$out"
 
 # --- decision scripts on a scratch run "ss": a main checkout with the board and the run's worktree
-is() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected '$2', got '$3'"; fi; }
 sscard() { # <n> <state> [<frontmatter line>]
     b="[]"; [ "$1" -gt 0 ] && b="[ss.s$(($1 - 1))]"
     printf -- '---\nid: ss.s%s\nparent: ss\ntitle: Stage %s\nblocked-by: %s\nfiles: [f%s.txt]\n%s---\n' "$1" "$1" "$b" "$1" "${3:+$3

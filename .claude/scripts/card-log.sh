@@ -3,8 +3,9 @@
 #   card-log.sh <card-id> <event> [<positional>...] [k=v ...] [-- <free text>]
 # Prints nothing on success. Exit 1: card not found or ambiguous
 # (`card-log=card`); exit 2: usage or a line the vocabulary rejects
-# (`card-log=reject event=<e> reason=<event|key|scope|value|length|budget>`;
-# budget: a fourth `read` on one stage card, READ_BUDGET overrides 3).
+# (`card-log=reject event=<e> reason=<event|key|scope|value|length|budget|typed>`;
+# budget: a fourth `read` on one stage card, READ_BUDGET overrides 3; typed: a
+# `note` whose text starts with an event's name, `use=<event>` names it).
 # Board: $CLAUDE_PROJECT_DIR/.claude/tasks, else the main checkout's, which
 # is also found from inside a worktree. CARD_LOG_NOW overrides the stamp.
 #
@@ -43,6 +44,7 @@
 # parent rebuild        -                 -        reason                no
 # parent follow-ups=    any               -        -                     no
 # parent ci=            any               -        -                     no
+# parent ci-waived      -                 -        -                     required
 # vocab-end
 set -u
 
@@ -117,6 +119,12 @@ case $tspec in
     no) [ "$intext" = 0 ] || rej value ;;
     required) [ -n "$text" ] || rej value ;;
 esac
+if [ "$name" = note ]; then
+    w=${text%% *}; w=${w%%=*}; w=${w%:}
+    use=$(sed -n '/^# vocab-begin/,/^# vocab-end/p' "$0" | awk -v w="$w" '$3 != "note" { n = $3; sub(/=$/, "", n); if (n == w) { print $3; exit } }')
+    [ -n "$use" ] || case $w in *-review) use=review= ;; esac
+    [ -z "$use" ] || { echo "card-log=reject event=note reason=typed use=$use"; exit 2; }
+fi
 
 case $val in *' '*) ev="$name\"$val\"" ;; esac
 line="${CARD_LOG_NOW:-$(date -u +%FT%H:%M)} $ev$pos$kvs${text:+ $text}"
