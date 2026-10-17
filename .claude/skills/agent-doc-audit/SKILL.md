@@ -1,6 +1,6 @@
 ---
 name: agent-doc-audit
-description: Audit every agent-facing markdown file (AGENTS.md, .claude/AGENTS.workflow.md, .claude/agents/*.md, .claude/skills/*/SKILL.md, docs/specs/**) for prose bloat, instructions stated more than once, and headings extract-section.sh cannot slice; propose splits where an agent must read another agent's content. Use for "audit agent docs", "check doc splitting", "propose a split plan", or /agent-doc-audit.
+description: Audit every agent-facing markdown file (AGENTS.md, .ferrule/guide/*.md, .claude/agents/*.md, .claude/skills/*/SKILL.md, docs/specs/**) for prose bloat, instructions stated more than once, and headings ferrule spec section cannot slice; propose splits where an agent must read another agent's content. Use for "audit agent docs", "check doc splitting", "propose a split plan", or /agent-doc-audit.
 ---
 
 # Agent-facing doc split audit
@@ -11,11 +11,11 @@ Read-only. Never split or edit — propose, user decides (a split churns every c
 
 ## 1. Scope: agent-facing files
 
-`AGENTS.md`, `.claude/AGENTS.workflow.md`, `.claude/agents/*.md`, `.claude/skills/*/SKILL.md`, `docs/specs/**/*.md`, any file a skill/agent instruction names with "Read". Skip human-facing docs (`PRD.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md`, `README.md`) unless an agent's instructions cite one.
+`AGENTS.md`, `.ferrule/guide/*.md` (ferrowl's overrides of the `ferrule guide` topics; the topics themselves are ferrule's), project agents and skills under `.claude/` (the generated `fe-*` files are ferrule's: findings on them go to ferrule), `docs/specs/**/*.md`, any file a skill/agent instruction names with "Read". Skip human-facing docs (`PRD.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md`, `README.md`) unless an agent's instructions cite one.
 
 ## 2. Build the read-map
 
-For each agent/skill file, grep its text for "Read `X`" / "pull `Y` section"; note which *sections* it names. `.claude/agents/spec-planner.md`, `spec-implementer.md`, `spec-reviewer.md`, and each `.claude/skills/*/SKILL.md` are the source — they declare who reads what. Table: file → heading → citing agent(s).
+For each agent/skill file, grep its text for "Read `X`" / "pull `Y` section"; note which *sections* it names. `ferrule guide planner`, `ferrule guide implementer`, `ferrule guide reviewer` (with the project's overrides), and each `.claude/skills/*/SKILL.md` are the source — they declare who reads what. Table: file → heading → citing agent(s).
 
 ## 3. Flag split candidates
 
@@ -33,7 +33,7 @@ Before proposing a split, the section must justify the extra file. Scan for:
 - Explaining *what* code does where names suffice — only *why* (non-obvious constraint, workaround, invariant) earns a sentence.
 - Every trim: zero information loss. Fewer words, same fact — never a dropped constraint, edge case, or rule.
 
-`.claude/scripts/token-rank.sh <file>...` (if present) gives per-file cost to prioritize. Trim first, split second: a bloated section split is two bloated files — flag the trim regardless.
+`sh .claude/skills/spec-coverage-audit/scripts/token-rank.sh <file>...` gives per-file cost to prioritize. Trim first, split second: a bloated section split is two bloated files — flag the trim regardless.
 
 ## 5. Check duplication across all in-scope files
 

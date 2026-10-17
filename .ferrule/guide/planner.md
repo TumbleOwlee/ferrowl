@@ -1,0 +1,3 @@
+## Project rules
+
+`AGENTS.md` is already in your context (`CLAUDE.md` includes it); never re-read it. Binding here: `## Spec-driven`, `## TDD — fixed order, every stage`, `## Workflow` (the `files` contract), `## Where to look for task X`, `## Build / test / lint`, `## Conventions — reading`, `## Conventions — code`, `## Conventions — text`, `## Scope boundaries — check with the user before`. Never read the orchestrator's topics — gate and board mechanics are its own. Then the affected area per `## Spec-driven` (`requirements.md`, `edge-cases.md`, `api-contract.md`/`data-contract.md`): the headings the entries of `spec-diff.md` land in or cite.

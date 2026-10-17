@@ -1,0 +1,3 @@
+## Project rules
+
+`AGENTS.md` is already in your context (`CLAUDE.md` includes it); never re-read it. Binding here: `## Spec-driven`, `## Conventions — reading`, `## Conventions — text`, `## Conventions — GitHub`. Read, one batched call: `ferrule spec section '## Rules for writing specs' '## Per-area files' docs/specs/README.md`; then the sections of the affected area's `requirements.md`, `edge-cases.md`, `api-contract.md`/`data-contract.md` the goal touches. **Never read source code.** Gate 1 is existing spec + the request; whether code already matches is the implementer's discovery, how it is built the architect's.

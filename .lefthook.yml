@@ -49,3 +49,8 @@ pre-commit:
           fi
         fi
         exit 0
+
+# ferrule:begin
+extends:
+  - .ferrule/lefthook.yml
+# ferrule:end

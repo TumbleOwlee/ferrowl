@@ -26,11 +26,13 @@ steps:
     commands:
       - cargo test --workspace
 
-  # Fixture tests for the agent-workflow scripts in .claude/scripts/.
-  scripts:
+  # The generated workflow files match .ferrule/ferrule.lock and the ferrule
+  # version pinned in .ferrule/ferrule.toml; the tag moves with that pin.
+  workflow:
     image: rust:latest
     commands:
-      - sh .claude/scripts/tests/run.sh
+      - cargo install --git https://github.com/TumbleOwlee/ferrule --tag v0.1.0 --locked ferrule
+      - ferrule install --check
 
   # Advisories, licenses, and banned/duplicate crates. Policy lives in deny.toml.
   deny:

@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'cards=$(find .claude/tasks/inprogress .claude/tasks/inreview -name \"*.md\" 2>/dev/null); if [ -n \"$cards\" ]; then echo \"[task board] unfinished cards — a gated run was interrupted:\"; echo \"$cards\"; echo \"Ask to resume: reconcile every card against git before acting on it (.claude/AGENTS.workflow.md, Resume an interrupted run).\"; fi; exit 0'"
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.ferrule/ferrule hook session-start"
           }
         ]
       }
@@ -16,14 +16,40 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"$CLAUDE_PROJECT_DIR\"/.claude/scripts/hook-guard-shell.sh"
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.ferrule/ferrule hook shell"
           },
           {
             "type": "command",
-            "command": "sh \"$CLAUDE_PROJECT_DIR\"/.claude/scripts/hook-guard-attribution.sh"
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.ferrule/ferrule hook attribution"
           }
         ]
       }
+    ]
+  },
+  "permissions": {
+    "deny": [
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git worktree add:*)",
+      "Bash(git worktree remove:*)",
+      "Bash(gh issue create:*)",
+      "Bash(gh issue edit:*)",
+      "Bash(gh issue comment:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr edit:*)",
+      "Bash(gh pr ready:*)",
+      "Bash(gh pr comment:*)",
+      "Bash(gh issue view:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh run view:*)",
+      "Edit(**/.ferrule/state.db)",
+      "Write(**/.ferrule/state.db)",
+      "Edit(**/.ferrule/ferrule.lock)",
+      "Write(**/.ferrule/ferrule.lock)",
+      "Edit(**/.claude/agents/fe-*.md)",
+      "Write(**/.claude/agents/fe-*.md)",
+      "Edit(**/.claude/skills/fe-*/SKILL.md)",
+      "Write(**/.claude/skills/fe-*/SKILL.md)"
     ]
   }
 }

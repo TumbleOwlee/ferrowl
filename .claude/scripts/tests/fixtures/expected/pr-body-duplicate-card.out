@@ -1,8 +1,0 @@
-# Reconnect dropped Modbus clients
-
-Draft · lane full · spec rev 5 · gauntlet green at bbb2222
-
-## Why
-A client tab reconnects on its own after the server drops the connection.
-
-exit=2

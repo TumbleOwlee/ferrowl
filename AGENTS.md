@@ -12,7 +12,7 @@ Ferrowl — Rust TUI simulator for Modbus (client/server, TCP/RTU) and OCPP (Cha
 - Before editing an area: pull the headings the task touches from its `requirements.md` and their `edge-cases.md` counterparts (`## Conventions — reading`); the whole file only for a cross-cutting change. `edge-cases.md` = deliberate ugliness; check before "fixing".
 - Behavior change with no spec change = incomplete.
 - `main` never holds unfinished spec: a requirement on `main` describes code that exists and is tested. A branch may hold a spec commit ahead of its code; squash merge keeps it off `main`.
-- A run's spec settles with its code (`.claude/AGENTS.workflow.md` *Spec changes*). Draft entries carry local IDs — `S<n>` scenarios, `R<n>`, `E<n>`, the next free number each time; the planner assigns fixed IDs at gate 2.
+- A run's spec settles with its code (`ferrule guide spec-changes`). Draft entries carry local IDs — `S<n>` scenarios, `R<n>`, `E<n>`, the next free number each time; the planner assigns fixed IDs at gate 2.
 - Pre-existing spec/code disagreement outside your task: stop, raise separately. Folding it in widens approved work and skips its own review.
 - Specs carry no `file:line`. Locate code with search tools.
 - Requirement and edge-case IDs (`-R-`, `-E-`) stable, append-only once on `main` (sole exception: `docs/specs/README.md` rule 2). A fixed ID added on a branch may be dropped before merge. A dropped ID, local or fixed, is retired: its number is never reused within the run. Cite in commits and PRs.
@@ -32,7 +32,7 @@ Ferrowl — Rust TUI simulator for Modbus (client/server, TCP/RTU) and OCPP (Cha
 
 Triggers on **behavior change, any size**: new public function, changed default, new error variant, any observable semantics. Size sets stage count, never gate existence. Non-behavior change (refactor, rename, perf with identical semantics, test-only, docs, tooling): gate 1 skipped, rest runs. Trivial edit (one file, no semantics, no test/CI/build effect — typo, comment, doc wording): no gates, branch + PR.
 
-Gate/task-board mechanics (Gate 1 through Merge, Resume): [`.claude/AGENTS.workflow.md`](./.claude/AGENTS.workflow.md).
+Gate/task-board mechanics (Gate 1 through Merge, Resume) are served by `ferrule guide` (`ferrule guide --list`; the *Workflow — ferrule* block below); start a run with `/fe-feature`.
 
 A plan stage's `files` list is a contract: the stage touches exactly the files it names — tooling, test helpers, config, scripts, a flaky-test fix, a drive-by rename included; the `docs/specs/` files its logged spec changes touch count as named.
 
@@ -59,7 +59,7 @@ cargo clippy --workspace -- -D warnings
 cargo check --workspace
 cargo test --workspace
 cargo llvm-cov --workspace --fail-under-lines 80
-sh .claude/scripts/tests/run.sh      # workflow scripts, fixture tests
+ferrule install --check              # generated workflow files match .ferrule/ferrule.lock
 ```
 
 Narrow the loop while iterating. `cargo test --workspace <name>` still builds and runs every crate's test binary (each prints `test result: ok. 0 passed`), even though only one crate can match:
@@ -72,13 +72,13 @@ cargo check -p ferrowl-ocpp               # typecheck one crate
 cargo llvm-cov --workspace --html         # browsable per-line coverage
 ```
 
-Full set before done (in a spec-driven run: the orchestrator's `gauntlet.sh`). `lefthook` enforces `fmt --check` and `clippy -D warnings` pre-commit; CI runs the full set plus `cargo deny check` on every push **and every pull request** (NF-R-055, NF-R-056).
+Full set before done (in a spec-driven run: the orchestrator's `ferrule run gauntlet`, the steps in `.ferrule/ferrule.toml`). `lefthook` enforces `fmt --check` and `clippy -D warnings` pre-commit; CI runs the full set plus `cargo deny check` on every push **and every pull request** (NF-R-055, NF-R-056).
 
 Dev loop: `cargo run --release -- --demo` (built-in demo tabs, no config) or `cargo build --profile fastrel` (opt-level 1, faster iterative builds).
 
 ## Conventions — reading
 
-- **Never read a whole file when only part is needed.** Any `.md` (specs, `SKILL.md`s, other repos' docs): `sh .claude/scripts/extract-section.sh '<heading>' ['<heading>' ...] <file>` (unknown heading: `sh .claude/scripts/list-sections.sh <file>` first). Other large files: `sed -n '<start>,<end>p' <file>`. **Enforced:** `PreToolUse` hook (`.claude/scripts/hook-guard-shell.sh`) denies an unpiped Bash `cat` of a `.md` file or any file over 80 lines, pointing at `extract-section.sh`/`sed -n`/Read. On denial, follow the redirect, never retry the `cat` differently.
+- **Never read a whole file when only part is needed.** Any `.md` (specs, `SKILL.md`s, other repos' docs): `ferrule spec section '<heading>' ['<heading>' ...] <file>` (unknown heading: `ferrule spec sections <file>` first). Other large files: `sed -n '<start>,<end>p' <file>`. **Enforced:** `PreToolUse` hook (`ferrule hook shell`) denies an unpiped Bash `cat` of a `.md` file or any file over 80 lines, pointing at `ferrule spec section`/`sed -n`/Read. On denial, follow the redirect, never retry the `cat` differently.
 - **Filter shell output before it lands in context.** `find -name`/`-path`, `git show --stat` or a path filter before full content, `grep`/`tail -N`/`head -N` on `cargo test`/`cargo llvm-cov` output.
 - **Don't re-run a read-only command whose output is already in context** (`git diff`, `git log`, `git show` on the same refs/paths). Scroll back.
 
@@ -98,14 +98,25 @@ Dev loop: `cargo run --release -- --demo` (built-in demo tabs, no config) or `ca
 
 - **No hard line wrap on anything posted externally** — issue bodies, PR bodies, PR/review comments. GitHub soft-wraps; an inserted `\n` mid-sentence renders as a real line break. Paragraphs as single lines; only headings, list items, code blocks get their own line.
 - **One fact per line in every text a human reads** — approval prompts, agent summaries, issue and PR bodies: a list item or sub-item, never a `;`- or ` — `-joined sentence.
-- **Spec text never wrapped** — `docs/specs/` and any `spec-diff.md`: one requirement, one physical line, however long, so `grep -rn <ID or keyword> docs/specs/` returns the whole entry and `sh .claude/scripts/extract-id.sh <ID> [<ID> ...]` (batch IDs into one call) points at one line. **Commit messages are the exception: wrap** — subject ≤ 72 columns, body at 72. `git log` never soft-wraps.
-- **No attribution trailer** — never `Co-Authored-By`, "Generated with", or any tool attribution on a commit, PR body, issue, or comment: pure `git log` noise, forever. `hook-guard-attribution.sh` denies it anyway.
+- **Spec text never wrapped** — `docs/specs/` and any `spec-diff.md`: one requirement, one physical line, however long, so `grep -rn <ID or keyword> docs/specs/` returns the whole entry and `ferrule spec id <ID> [<ID> ...]` (batch IDs into one call) points at one line. **Commit messages are the exception: wrap** — subject ≤ 72 columns, body at 72. `git log` never soft-wraps.
+- **No attribution trailer** — never `Co-Authored-By`, "Generated with", or any tool attribution on a commit, PR body, issue, or comment: pure `git log` noise, forever. `ferrule hook attribution` and the `commit-msg` git hook strip it anyway.
 
 ## Conventions — GitHub
 
-- Read an existing issue with `bash .claude/scripts/issue-view.sh <number|key>` and an existing PR's body/comments with `bash .claude/scripts/pr-view.sh <number>`, never raw `gh issue view`/`gh pr view` — both hit the GitHub Projects-Classic GraphQL bug (`projectCards`), with or without `--comments`. Inline review threads go through `bash .claude/scripts/pr-feedback.sh fetch|reply` (`.claude/AGENTS.workflow.md` *PR feedback*) — into a file, one status line in context.
+- Read an existing issue with `ferrule issue view <number|key>` and an existing PR's body/comments with `ferrule pr view <number>`, never raw `gh issue view`/`gh pr view` — both hit the GitHub Projects-Classic GraphQL bug (`projectCards`), with or without `--comments`. Inline review threads go through `ferrule pr feedback route|fetch|reply` (`ferrule guide feedback`) — into a file, one status line in context.
 
 ## Scope boundaries — check with the user before
 
 - **Expanding the Lua `C_*` API.** Surface (`C_Register`, `C_OCPP`, `C_Time`, `C_Log`, `C_Test`, `C_Module`, `C_Statics`) deliberately small and fixed. A new module or method is a design decision.
 - **Bridging Modbus and OCPP.** Architecturally separate; no shared lifecycle abstraction. A fix/pattern in one does not transfer without checking both specs.
+
+<!-- ferrule:begin -->
+## Workflow — ferrule
+
+Behavior changes go through the spec-driven workflow: `/fe-feature` (a request only: `/fe-request`; an outside review: `/fe-review`). Instructions arrive per step: `ferrule run next` names the topic that applies now, `ferrule guide --list` every topic.
+
+- Git and GitHub writes are ferrule's: `ferrule card commit`, `ferrule pr push`, `ferrule issue file`, `ferrule pr publish`; the session guard names the replacement for any raw call. Outside a run: `ferrule card commit --no-run -m <msg>`, `ferrule pr push --no-run`.
+- Read long markdown by section: `ferrule spec sections <file>`, then `ferrule spec section '<heading>' <file>`; a spec entry by ID: `ferrule spec id <ID>`.
+- Read issues and PRs with `ferrule issue view <n>` and `ferrule pr view <n>`.
+- The board lives in `.ferrule/state.db`: `ferrule card board`, `ferrule card show <id>`.
+<!-- ferrule:end -->

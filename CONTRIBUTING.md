@@ -1,6 +1,6 @@
 # Contributing to Ferrowl
 
-One page: how to build and test, the rules every change follows, and what you see and answer when an agent drives the change for you. The rulebook behind it is [`.claude/AGENTS.workflow.md`](./.claude/AGENTS.workflow.md); you never need to read it to work with it.
+One page: how to build and test, the rules every change follows, and what you see and answer when an agent drives the change for you. The rulebook behind it ships inside [ferrule](https://github.com/TumbleOwlee/ferrule) and is printed step by step with `ferrule guide`; you never need to read it to work with it.
 
 ## Setup
 
@@ -10,7 +10,8 @@ Rust stable, pinned by `rust-toolchain.toml` ([rustup.rs](https://rustup.rs/)):
 cargo build --release
 cargo run --release -- --demo          # built-in demo tabs, no config
 cargo install cargo-llvm-cov --locked  # for the coverage gate
-lefthook install                       # optional: fmt and clippy before every commit
+cargo install --git https://github.com/TumbleOwlee/ferrule --tag v0.1.0 --locked  # the workflow's CLI, pinned in .ferrule/ferrule.toml
+lefthook install                       # fmt and clippy before every commit; no commit or push to main
 ```
 
 Crate graph and responsibilities: [`ARCHITECTURE.md`](./ARCHITECTURE.md). Product framing: [`PRD.md`](./PRD.md).
@@ -28,7 +29,7 @@ cargo clippy --workspace -- -D warnings
 cargo check --workspace
 cargo test --workspace
 cargo llvm-cov --workspace --fail-under-lines 80
-sh .claude/scripts/tests/run.sh   # when .claude/ changed
+ferrule install --check           # when .ferrule/ or a generated fe-* file changed
 ```
 
 - **Pull requests**: branch `<type>/<slug>` off `main` (`feat/`, `fix/`, `docs/`), one change per PR, requirement IDs in the body, README updated for user-facing commands, keys, config or the Lua API. Squash-merged. No tool attribution (`Co-Authored-By` for an assistant, "Generated with") anywhere.
@@ -41,10 +42,10 @@ You talk to one agent, the orchestrator. It spawns the others (author, architect
 
 | You want to | Type |
 |---|---|
-| Build a feature or fix a bug | `/spec-feature <goal>` or `/spec-feature take issue #42` |
-| Turn a requirement into an approved ticket, nothing more | `/spec-request <requirement>` |
-| Review someone else's finished PR against its ticket | `/spec-review #<issue>` (the ticket; its PR is found from it) |
-| Carry on after a crash or a closed session | `/spec-feature` again — it reconciles the board with git and resumes |
+| Build a feature or fix a bug | `/fe-feature <goal>` or `/fe-feature take issue #42` |
+| Turn a requirement into an approved ticket, nothing more | `/fe-request <requirement>` |
+| Review someone else's finished PR against its ticket | `/fe-review #<issue>` (the ticket; its PR is found from it) |
+| Carry on after a crash or a closed session | `/fe-feature` again — it reconciles the board with git and resumes |
 
 **Lanes.** At the first stop you pick a lane; the orchestrator recommends one by size.
 
@@ -69,7 +70,7 @@ Answer: approve [<n>[: <value>] …]             ## 2. …
 
 - `approve` lets the run continue; `approve 1` also takes option 1; `approve 1: s1,s3` gives the option a value.
 - `change <what>` goes back to the agent that wrote the file; you see the stop again with the revision.
-- `stop` halts with everything kept — resume later with `/spec-feature`. At the PR stop it holds for a manual run.
+- `stop` halts with everything kept — resume later with `/fe-feature`. At the PR stop it holds for a manual run.
 - A question batch is answered by number and letter (`1: a · 2: b`), or `other <text>`.
 - A `Needs user` item under an approval (a reviewer's question to you) is answered in the same reply by its letter: `approve · a`.
 - `re-plan: <why>` at any stage stop or after an auto-continue line rewrites the stages not yet committed.
@@ -81,11 +82,11 @@ Answer: approve [<n>[: <value>] …]             ## 2. …
 
 **When the spec changes mid-run.** The brief is best effort and settles as the run learns. A *detail* change (a deferred point filled, wording sharpened) is listed and posted to the issue as a changelog comment. A *meaningful* one — it contradicts a scenario, an answer of yours or the approved architecture — comes to you: keep, revert, or split into its own issue.
 
-**Where things are.** `.claude/tasks/` is the run's state: the card directories (`open`, `inprogress`, `inreview`, `done`), `artifacts/<slug>/` with every file the agents wrote (`spec-diff.md` the brief, `architecture.md`, `plan.md`, `decisions.md`, `review.md`), `metrics.log` with one line per finished run, `archive/` with finished runs. Local, never committed, never edited by hand. Each run works in its own worktree under `.claude/worktrees/`.
+**Where things are.** `.ferrule/state.db` is the board: cards, their logs, one metrics line per finished run, the archive of finished runs (`ferrule card board`, `ferrule card show <id>`, `ferrule run metrics`). `.ferrule/runs/<slug>/` holds every file the agents wrote (`spec-diff.md` the brief, `architecture.md`, `plan.md`, `decisions.md`, `review.md`). Local, never committed, never edited by hand. Each run works in its own worktree under `.ferrule/worktrees/`.
 
 ## Changing the workflow itself
 
-The workflow's mechanics are scripts in [`.claude/scripts/`](./.claude/scripts/), each with its contract in its header; `.claude/AGENTS.workflow.md` says when to call which. A change to a card move, a stop rule or a prompt updates the replayed runs in `.claude/scripts/tests/replay.sh`. `sh .claude/scripts/tests/run.sh` also caps the size of the orchestrator's and the agents' docs: a change that grows one lowers another or raises the ceiling with its reason. A change that adds stops or agents names its expected effect on `metrics.log` in its PR.
+The workflow's mechanics and its instructions live in [ferrule](https://github.com/TumbleOwlee/ferrule): commands with their contract in `--help`, instructions as `ferrule guide` topics. Changes to either go there. What is ferrowl's own sits here: `.ferrule/ferrule.toml` (gauntlet steps, thresholds) and `.ferrule/guide/<topic>.md`, which overrides a topic section by section. The `fe-*` agents and skills under `.claude/` are generated by `ferrule install` — never edit them; `ferrule install --check` in CI catches drift. Moving to a new ferrule version is `ferrule install` with that binary, committed with the `version` it writes. A change that adds stops or agents names its expected effect on `ferrule run metrics` in its PR.
 
 ## Reporting issues
 

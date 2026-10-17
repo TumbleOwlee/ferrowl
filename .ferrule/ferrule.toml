@@ -1,0 +1,35 @@
+version = "0.1.0"
+hosts = ["claude"]
+stack = "rust"
+main_branch = "main"
+
+[backend]
+tracker = "github"
+ci = "github"
+
+# One full set per tree: fmt, clippy and the workspace tests, then the
+# coverage floor (NF-R-055). No `cargo check` step: clippy type-checks the
+# same crates.
+[[gauntlet.step]]
+name = "fmt"
+cmd = ["cargo", "fmt", "--check"]
+timeout = "15m"
+
+[[gauntlet.step]]
+name = "clippy"
+cmd = ["cargo", "clippy", "--workspace", "--", "-D", "warnings"]
+timeout = "15m"
+
+[[gauntlet.step]]
+name = "test"
+cmd = ["cargo", "test", "--workspace"]
+timeout = "30m"
+
+[[gauntlet.step]]
+name = "cov"
+cmd = ["cargo", "llvm-cov", "--workspace", "--fail-under-lines", "80"]
+timeout = "30m"
+coverage = "llvm-cov"
+
+[viewer]
+command = ["glow"]
