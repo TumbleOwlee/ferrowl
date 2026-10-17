@@ -483,7 +483,7 @@ Before proposing a PR, whole-branch pass — cross-stage bugs, spec drift across
 sh .claude/scripts/pr-body.sh <slug> full > artifacts/<slug>/pr-full.md   # exit 3 (body=refused stage-ref=…): resume spec-author to reword pr.md
 ```
 
-- The full body is the draft minus `## Stages` and `## Review here`, with its own status line and the `pr.md` prose in place of `## Why`; its spec changes come from the synced `spec-diff.md` Revisions lines, so the tick boxes and board state drop out and the remaining sections keep their order.
+- The full body is the draft minus `## Stages` and `## Review here`, with its own status line, the `pr.md` prose in place of `## Why` and `## Scenarios covered` in place of `## Scenarios`; its spec changes come from the synced `spec-diff.md` Revisions lines, so the tick boxes and board state drop out and the remaining sections keep their order.
 
 - **One stop**: `show-file.sh` on `pr.md` and every `follow-up-<k>.md` (fast lane: plus `review.verdict.md`, per *Agent hand-off*); approving will push · replace the draft's title and body · mark #<pr> ready · file the <n> follow-up issues · wait for CI · clean up. Answer: `approve [follow-ups: 1,3 | none] · manual run first · change <what> · stop` — no list files every follow-up — the user may want a manual run; don't pre-empt it. Approved → push, replace the draft's title and body, mark ready, log `pr=ready`:
 

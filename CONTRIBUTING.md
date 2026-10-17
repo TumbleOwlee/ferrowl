@@ -211,7 +211,7 @@ sequenceDiagram
         Impl-->>Orch: committed
         Orch->>Git: push, checks on the pushed commit (cached: it is the reviewed tree)
         opt first push of the branch
-            Orch->>Git: open draft PR, body assembled from the stage board
+            Orch->>Git: open draft PR, body assembled from the stage board and the shared sections
             Note over Orch,Git: the body is re-rendered on every card move, the user reviews there, gate 4 marks it ready
         end
         opt replies filled in
