@@ -8,14 +8,14 @@
 #   sh .claude/scripts/issue-request.sh <number> --comments    # the issue's comments, for epic.md
 #
 # The issue body as filed, blank lines kept; when that body was assembled by
-# this workflow (it carries `## Scenarios` or `## Spec (rev`, or starts
-# `**Status** `), only the text inside its
+# this workflow (it carries `## Scenarios`, `## Spec (rev` or an `Original request`
+# details block, or starts `**Status** `, as bodies filed before carry), only the text inside its
 # `<details>` block, so the request is never nested twice.
 # --spec: an assembled body's `## Spec (rev N)`, `## Architecture`,
 # `## Requirements` and `## Scenarios` sections — the brief a /spec-request
 # ticket carries — for spec-author to
 # start from; prints nothing for a body this workflow did not assemble.
-# --epic: the number in a slice issue's `**Part of epic** #<e>` status line;
+# --epic: the number in a slice issue's `**Part of epic** #<e>` line;
 # nothing for any other issue.
 case ${2:-} in ''|--spec|--epic|--slice-line|--comments) ;; *) echo "usage: $0 <number> [--spec | --epic | --slice-line | --comments]" >&2; exit 2 ;; esac
 [ $# -le 2 ] || { echo "usage: $0 <number> [--spec | --epic | --slice-line | --comments]" >&2; exit 2; }
@@ -34,11 +34,11 @@ if [ "${2:-}" = --epic ]; then
 fi
 if [ $# -eq 2 ]; then
     case $body in
-        *"## Spec (rev"*|*"## Scenarios"*|"**Status** "*) printf '%s\n' "$body" | awk '/^## (Spec \(rev|Architecture$|Requirements$|Scenarios$)/ { on = 1; print; next } /^## / || /^<details>/ { on = 0 } on' ;;
+        *"## Spec (rev"*|*"## Scenarios"*|"**Status** "*|*"<summary>Original request</summary>"*) printf '%s\n' "$body" | awk '/^## (Spec \(rev|Architecture$|Requirements$|Scenarios$)/ { on = 1; print; next } /^## / || /^<details>/ { on = 0 } on' ;;
     esac
     exit 0
 fi
 case $body in
-    *"## Spec (rev"*|*"## Scenarios"*|"**Status** "*) printf '%s\n' "$body" | awk '/^<\/details>/ { exit } on { print } /<summary>/ { on = 1 }' | sed '1{/^$/d;}' ;;
+    *"## Spec (rev"*|*"## Scenarios"*|"**Status** "*|*"<summary>Original request</summary>"*) printf '%s\n' "$body" | awk '/^<\/details>/ { exit } on { print } /<summary>/ { on = 1 }' | sed '1{/^$/d;}' ;;
     *) printf '%s\n' "$body" ;;
 esac

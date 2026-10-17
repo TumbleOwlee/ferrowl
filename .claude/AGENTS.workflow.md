@@ -80,8 +80,6 @@ By running, never by reading:
   slice-<n>.md       epic run: slice n's assembled issue body
   epic.md            slice run: the epic issue's spec and skeleton architecture (*Epic*)
   issue.md           title + goal + out of scope (*Tracking issue*)
-  issue-live.md      the live issue body, fetched for the status-line rewrite
-  issue-status.md    the live body with its status line rewritten
   request.md         the request issue's original body, stored once (gate 1 or reuse)
   issue-comment.md   changelog comment of the latest user-approved spec change after filing
   split-issue.md     an issue split off (*Split*)
@@ -224,7 +222,7 @@ The human closes the epic once its last slice merges.
 #### Slice run
 
 `/spec-feature` on a child issue ("take issue #n"), a normal run otherwise.
-- **Gate 1 board:** record `kind: slice` and `epic: <e>`; store the slice's status line, `sh .claude/scripts/issue-request.sh <n> --slice-line > artifacts/<slug>/slice-line.md` (`issue-body.sh` keeps it on every rewrite), and the epic as it stands, `issue-request.sh <e> --spec > artifacts/<slug>/epic.md` then `issue-request.sh <e> --comments >> artifacts/<slug>/epic.md`. Name `epic.md`'s path in every spawn brief of the run except the implementer's.
+- **Gate 1 board:** record `kind: slice` and `epic: <e>`; store the slice's `**Part of epic**` line, `sh .claude/scripts/issue-request.sh <n> --slice-line > artifacts/<slug>/slice-line.md` (`issue-body.sh` puts it under the run's title), and the epic as it stands, `issue-request.sh <e> --spec > artifacts/<slug>/epic.md` then `issue-request.sh <e> --comments >> artifacts/<slug>/epic.md`. Name `epic.md`'s path in every spawn brief of the run except the implementer's.
 - **Kept skeleton change** — its `issue-comment.md` is posted on the epic too: `gh issue comment <epic> --body-file …`, the card's `epic`.
 - **Split** — a slice's split-off issue gets `**Part of epic** #<e> · split from #<slice>` prepended as its first line, and a one-line comment on the epic names it.
 - Slices whose `Depends on` don't chain may run at the same time; gate 4's ID collision check covers them.
@@ -244,7 +242,7 @@ Every status line of the gate (planner, plan reviewer, the author's issue answer
 **On approval, in order:**
 1. File or rewrite the issue (*Tracking issue*); record `issue` on the parent card. Fast lane without an architecture stop: `gate1` too.
 2. Create the worktree: `git worktree add .claude/worktrees/<slug> -b <type>/<slug> main`.
-3. Record `gate2` (and `lane`, for a non-behavior change with `no-arch`) on parent card, move parent → `inprogress/`, then the status-line update (*Tracking issue*).
+3. Record `gate2` (and `lane`, for a non-behavior change with `no-arch`) on parent card, move parent → `inprogress/`.
 4. Create `open/<slug>.s<n>.md` per plan stage (`s0` only when the plan has one), `title`/`files`/`blocked-by` copied from the tree (`title` is display-only — agents find a stage by `--prefix '## Stage s<n>:'`) and `stop: yes|no` from `plan.summary.md`'s `Stop` column as the user settled it — `sh .claude/scripts/extract-section.sh '## Shared' artifacts/<slug>/plan.md` is the one plan read the orchestrator makes, for exactly those three fields. Stage ids match plan ids.
 5. Spawn the implementer, its brief naming the lane.
 
@@ -252,7 +250,7 @@ Every status line of the gate (planner, plan reviewer, the author's issue answer
 
 Drafted inside gate 2 once the plan review is clean, approved at gate 2's stop (fast lane: pre-authorized at the architecture stop), filed on approval.
 
-Orchestrator searches existing issues (`gh issue list --state all --search …`) for the same goal and passes candidate numbers — plus the one the user named at gate 1 — to `spec-author`, which writes `artifacts/<slug>/issue.md` (title + goal; shape: its file) and answers `status=reuse issue=<n> file=…` or `status=new file=…` in one turn. Reuse, never duplicate. On reuse the orchestrator stores the issue's original body once (unless gate 1 already did) with `sh .claude/scripts/issue-request.sh <n> > artifacts/<slug>/request.md` — the body as filed, or, when that body is one this workflow assembled (it carries `## Scenarios` or `## Spec (rev`), the text inside its `<details>` block.
+Orchestrator searches existing issues (`gh issue list --state all --search …`) for the same goal and passes candidate numbers — plus the one the user named at gate 1 — to `spec-author`, which writes `artifacts/<slug>/issue.md` (title + goal; shape: its file) and answers `status=reuse issue=<n> file=…` or `status=new file=…` in one turn. Reuse, never duplicate. On reuse the orchestrator stores the issue's original body once (unless gate 1 already did) with `sh .claude/scripts/issue-request.sh <n> > artifacts/<slug>/request.md` — the body as filed, or, when that body is one this workflow assembled (it carries `## Scenarios`, `## Spec (rev` or an `Original request` block), the text inside its `<details>` block.
 
 Filing:
 
@@ -264,13 +262,7 @@ gh issue create --title "$(head -1 artifacts/<slug>/issue-body.md | sed 's/^# //
 gh issue edit <n> --title "$(head -1 artifacts/<slug>/issue-body.md | sed 's/^# //')" --body-file <(tail -n +2 artifacts/<slug>/issue-body.md)
 ```
 
-**After filing, the body is never rewritten**; only its status line (line 1) changes, at gate 2 *On approval* step 3 (`in progress`), when a split is filed (`Split off`) and at `ci=0` (`done`):
-
-```sh
-gh api repos/{owner}/{repo}/issues/<n> --jq .body > artifacts/<slug>/issue-live.md
-sh .claude/scripts/issue-body.sh <slug> --status artifacts/<slug>/issue-live.md > artifacts/<slug>/issue-status.md
-gh issue edit <n> --body-file artifacts/<slug>/issue-status.md
-```
+**After filing, the body is never rewritten** — it carries no status: the draft PR, linked to the issue, shows the progress.
 
 Every requirement or scenario change kept after filing, detail or meaningful (*Spec changes*), gets `issue-comment.md` from `spec-author`, which the orchestrator posts with no further approval:
 
@@ -394,7 +386,7 @@ Gate 3's reviewer checks every branch spec change was classified; gate 4's sync 
 
 #### Split
 
-A change needed only for something outside the goal; the user's choice at a question or a `Needs user` item. Before `s0` the raising agent (architect, planner) has already narrowed the entry when it answers `status=split reason=…`; after `s0` the reviewer only raised it, and the implementer narrows it last (below). Orchestrator resumes `spec-author` with the reason verbatim (after `s0`: the verdict item and the `review.md` path); it writes `split-issue.md`. Orchestrator files it (`gh issue create`, as in *Tracking issue*) with `Split from #<issue>` appended as its last line — at once if the tracking issue is filed, else right after gate 2 approval step 1 — appends it to the parent card's `split:`, updates the issue's status line (*Tracking issue*), posts one notice line `Split · <slug> · <IDs> · #<m> filed`, then resumes the architect or planner that raised it — after `s0`, the implementer with `split <ID>: narrow it`, gauntlet, the usual review. The split issue's body is `split-issue.md` with the status line `Split from #<issue> · no spec yet` prepended. The new issue is its own later run.
+A change needed only for something outside the goal; the user's choice at a question or a `Needs user` item. Before `s0` the raising agent (architect, planner) has already narrowed the entry when it answers `status=split reason=…`; after `s0` the reviewer only raised it, and the implementer narrows it last (below). Orchestrator resumes `spec-author` with the reason verbatim (after `s0`: the verdict item and the `review.md` path); it writes `split-issue.md`. Orchestrator files it (`gh issue create`, as in *Tracking issue*) with `Split from #<issue>` appended as its last line — at once if the tracking issue is filed, else right after gate 2 approval step 1 — appends it to the parent card's `split:`, posts one notice line `Split · <slug> · <IDs> · #<m> filed`, then resumes the architect or planner that raised it — after `s0`, the implementer with `split <ID>: narrow it`, gauntlet, the usual review. The new issue is its own later run.
 
 **Fold in** — the user's explicit override of a split: the raising agent rewrites the `Goal:` line to the widened scope (after `s0`: it is a meaningful change, kept).
 
@@ -438,7 +430,7 @@ gh pr checks <pr> --watch > artifacts/<slug>/ci.log 2>&1; ci=$?
 sh .claude/scripts/next-step.sh <slug> ci ci=$ci
 ```
 
-  - `ci=0` → status line `done` (*Tracking issue*; `issue-body.sh` reads the `ci=0` line), then *Clean up*, which records the metrics.
+  - `ci=0` → *Clean up*, which records the metrics.
   - otherwise (`next-step.sh` prints the `failed-workflow.sh` call; never raw `gh run view`) → implicated stage card → `inprogress/`, resume or spawn the implementer to fix, gauntlet, push, wait again. No stop unless a fix needs a user decision.
   - A failure the user rules unrelated to the run (e.g. also red on `main`), on the user's word only → `card-log.sh <slug> ci-waived -- <why>`, then *Clean up*.
 

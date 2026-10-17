@@ -1,15 +1,11 @@
 #!/bin/sh
 # Assemble the tracking issue's body from a run's artifacts: what the user
-# gets, never how it is built. Written once, at filing; afterwards
-# only its status line (line 1) is rewritten, a filed split included.
+# gets, never how it is built. Written once, at filing, and never
+# rewritten: the linked PR shows the progress.
 #
 #   sh .claude/scripts/issue-body.sh <slug> > <out>
 #
 # Line 1 is `# <title>` (the orchestrator strips it for --title), then:
-#   status line     `**Status** planned | in progress | done[ · **Lane** <lane>][ · **Split off** #n, #m]`
-#                   from the parent card: dir open → planned, inprogress or
-#                   inreview → in progress, a `ci=0` log token → done; lane
-#                   and split from its frontmatter, Lane omitted without one
 #   issue.md        ## Goal, ## Out of scope (omitted when absent)
 #   spec-diff.md    ## Requirements and ## Scenarios through spec-render.sh,
 #                   local R<n>/E<n>/S<n> IDs; no table, kind, architecture or
@@ -22,28 +18,22 @@
 #
 #   sh .claude/scripts/issue-body.sh <slug> --slice <n>
 #
-# Slice n's own issue: title `<epic title>: <slice title>`, `**Status**
-# planned`, the `**Part of epic** #<e>` line (issue-request.sh --epic reads
+# Slice n's own issue: title `<epic title>: <slice title>`, the
+# `**Part of epic** #<e>` line (issue-request.sh --epic reads
 # it), the slice's goal, and only the requirements and scenarios slices.md
 # assigns it. A slice run's own body (card `kind: slice`) keeps the
-# `**Part of epic**` line from slice-line.md under its status line.
-#
-#   sh .claude/scripts/issue-body.sh <slug> --status <live-body-file>
-#
-# The filed body with line 1 (its first non-blank line) replaced by a fresh
-# status line when that line starts `**Status** ` or `**Spec** `; any other
-# first line (an old slice body) gets the status line above it.
+# `**Part of epic**` line from slice-line.md under its title.
 #
 # Exit 3 with `body=refused stage-ref=<token>` when the visible text names a
 # stage (`s3`) or an agent: reword issue.md. Code spans holding `.` or `/`,
 # fenced blocks and the original request are not scanned.
 # `## Scenarios` and the `<details>` block are parsed by issue-request.sh and
 # the Resume table — keep them when changing the shape.
-usage() { echo "usage: $0 <slug> [--slice <n> | --status <body-file>]" >&2; exit 2; }
-slice=; sfile=
+usage() { echo "usage: $0 <slug> [--slice <n>]" >&2; exit 2; }
+slice=
 case $# in
     1) ;;
-    3) case $2 in --slice) slice=$3 ;; --status) sfile=$3 ;; *) usage ;; esac ;;
+    3) [ "$2" = --slice ] || usage; slice=$3 ;;
     *) usage ;;
 esac
 slug=$1
@@ -64,26 +54,6 @@ section() {
     body=$(sed -n "/^## $1\$/,/^## /{ /^## /d; p; }" "$a/issue.md" | sed '/^$/d')
     [ -n "$body" ] && printf '## %s\n%s\n\n' "$1" "$body"
 }
-status_line() {
-    dir=$(basename "$(dirname "$(field path)")")
-    case $dir in inprogress|inreview) s="in progress" ;; *) s=planned ;; esac
-    [ "$(field log:ci)" = 0 ] && s=done
-    line="**Status** $s"
-    lane=$(field lane); split=$(field split)
-    [ -n "$lane" ] && line="$line · **Lane** $lane"
-    [ -n "$split" ] && line="$line · **Split off** $(printf '%s' "$split" | tr -d '[] ' | sed 's/\([0-9][0-9]*\)/#\1/g; s/,/, /g')"
-    printf '%s\n' "$line"
-}
-
-if [ -n "$sfile" ]; then
-    [ -f "$sfile" ] || { echo "issue-body: missing $sfile" >&2; exit 1; }
-    live=$(sed '/./,$!d' "$sfile")
-    case $live in
-        "**Status** "*|"**Spec** "*) status_line; printf '%s\n' "$live" | tail -n +2 ;;
-        *) status_line; printf '%s\n' "$live" ;;
-    esac
-    exit 0
-fi
 
 [ -f "$a/issue.md" ] || { echo "issue-body: missing $a/issue.md" >&2; exit 1; }
 out=$(mktemp); trap 'rm -f "$out"' EXIT INT TERM
@@ -97,7 +67,7 @@ if [ -n "$slice" ]; then
     deps=; for d in $(slice_field "$slice" "Depends on" | tr ',' ' '); do
         case $d in none) ;; *) num=$(nth "$(field slices)" "$d"); deps="$deps${deps:+, }${num:+#}${num:-slice $d}" ;; esac
     done
-    printf '**Status** planned\n**Part of epic** #%s · **Slice** %s of %s · **Depends on** %s\n\n' "${epic:-?}" "$slice" "$total" "${deps:-none}"
+    printf '**Part of epic** #%s · **Slice** %s of %s · **Depends on** %s\n\n' "${epic:-?}" "$slice" "$total" "${deps:-none}"
     printf '## Goal\n%s\n\n' "$(slice_field "$slice" Goal)"
     only=$(printf '%s %s' "$(slice_field "$slice" Scenarios)" "$(slice_field "$slice" Entries)" | tr ',' ' ')
     if [ -f "$a/spec-diff.md" ]; then
@@ -106,9 +76,7 @@ if [ -n "$slice" ]; then
     fi
 else
     printf '%s\n\n' "$(head -1 "$a/issue.md")"
-    status_line
-    [ "$(field kind)" = slice ] && [ -s "$a/slice-line.md" ] && head -1 "$a/slice-line.md"
-    echo
+    if [ "$(field kind)" = slice ] && [ -s "$a/slice-line.md" ]; then head -1 "$a/slice-line.md"; echo; fi
     section Goal
     if [ -f "$a/spec-diff.md" ]; then
         render requirements

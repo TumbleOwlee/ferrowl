@@ -66,17 +66,7 @@ golden issue-body-slice-run env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.
 golden issue-body-slice-missing env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" lb --slice 9
 golden issue-body-mrc env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" mrc
 
-# --status rewrites only line 1 of a filed body
-printf '%s\n\n%s\n%s\n' '**Status** planned · **Lane** full' '## Goal' kept > "$tmp/live.md"
-printf '\n%s\n\n%s\n%s\n' '**Status** planned · **Lane** full' '## Goal' kept > "$tmp/live-blank.md"
-golden issue-body-status env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/live.md"
-golden issue-body-status-blank env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/live-blank.md"
-printf '%s\n\n%s\n%s\n' '**Spec** rev 3' '## Goal' kept > "$tmp/live-spec.md"
-printf '%s\n\n%s\n%s\n' '**Part of epic** #40' '## Goal' kept > "$tmp/live-slice.md"
-golden issue-body-status-spec env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/live-spec.md"
-golden issue-body-status-slice env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/live-slice.md"
-echo '2026-10-04T10:00 ci=0' >> "$P/.claude/tasks/inprogress/demo.md"
-golden issue-body-status-done env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/live.md"
+golden issue-body-status-gone env CLAUDE_PROJECT_DIR="$P" sh "$scripts/issue-body.sh" demo --status "$tmp/x.md"
 
 # the visible text names no stage or agent
 refuse() { # <replacement for the Today line> — a copy of demo without a card
@@ -163,6 +153,7 @@ golden issue-request-slice-spec env ISSUE_FIXTURE="$fx/issue/slice.txt" sh "$tmp
 golden issue-request-spec-plain env ISSUE_FIXTURE="$fx/issue/plain.txt" sh "$tmp/ir/issue-request.sh" 7 --spec
 golden issue-request-new env ISSUE_FIXTURE="$fx/issue/new.txt" sh "$tmp/ir/issue-request.sh" 9
 golden issue-request-new-spec env ISSUE_FIXTURE="$fx/issue/new.txt" sh "$tmp/ir/issue-request.sh" 9 --spec
+golden issue-request-nonbehavior env ISSUE_FIXTURE="$fx/issue/nonbehavior.txt" sh "$tmp/ir/issue-request.sh" 10
 
 # --- related-ids.sh
 P=$(project); mkdir -p "$P/docs"; ln -s "$fx/specs" "$P/docs/specs"
@@ -735,7 +726,7 @@ budget() {
     n=$(wc -c < "$root/$1")
     if [ "$n" -le "$2" ]; then ok "budget $1"; else bad "budget $1" "$n chars, ceiling $2"; fi
 }
-budget .claude/AGENTS.workflow.md 53500
+budget .claude/AGENTS.workflow.md 53000
 budget .claude/agents/spec-author.md 12500
 budget .claude/agents/spec-architect.md 10000
 budget .claude/agents/spec-planner.md 11500
