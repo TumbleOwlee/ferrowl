@@ -36,7 +36,7 @@
 # parent pr=            draft|ready       -        -                     no
 # parent gauntlet=      pass|fail         -        cov,sha,step,reason   no
 # parent replan         -                 -        from                  no
-# parent replan=        approved|pre-authorized -        -                     no
+# parent replan=        approved|pre-authorized -  -                     no
 # parent plan-review=   any               -        count,round           no
 # parent review=        any               -        scope                 no
 # parent overturned     -                 -        scope,count           yes
