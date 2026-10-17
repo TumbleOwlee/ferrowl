@@ -2,7 +2,12 @@
 # PreToolUse guard on the Bash tool: denies a git commit / gh pr create /
 # gh pr edit / gh pr comment / gh issue create / gh issue comment that
 # carries a tool-attribution trailer (Co-Authored-By, "Generated with",
-# ...). CONTRIBUTING.md and .claude/AGENTS.workflow.md both forbid these in
+# ...) — only the trailer form: a line starting with it, or a quoted body
+# starting with it, after optional markdown markers (`-`, `*`, `_`, `>`),
+# before and after an emoji; a `--trailer` option value (`:` or `=` separator);
+# a trailer after an escaped `\n` in a single-line body. Prose that merely
+# mentions the words passes.
+# CONTRIBUTING.md and .claude/AGENTS.workflow.md both forbid these in
 # commits, PR bodies, issues, and comments — this stops the command before
 # it runs instead of relying on the agent having read that prose first.
 #
@@ -36,10 +41,8 @@ done
 
 lower=$(printf '%s' "$text" | tr '[:upper:]' '[:lower:]')
 
-case "$lower" in
-  *co-authored-by*|*generated\ with*)
+if printf '%s\n' "$lower" | grep -qE '(^|["'"'"']|--trailer[= ]|\\n)[[:space:]]*[-*_>[:space:]]*(((🤖|:robot:)[[:space:]]*[-*_>[:space:]]*)?generated with([^[:alnum:]]|$)|co-authored-by[:=])'; then
     reason="Command carries a tool-attribution trailer (Co-Authored-By / \"Generated with\"). This repo forbids attribution trailers in commit messages, PR bodies, issues, and comments (CONTRIBUTING.md, .claude/AGENTS.workflow.md). Remove the trailer and retry."
     jq -n --arg reason "$reason" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $reason}}'
-    ;;
-esac
+fi
 exit 0

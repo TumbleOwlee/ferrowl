@@ -246,7 +246,7 @@ sequenceDiagram
     User->>Orch: approved
     Orch->>Git: push, replace the draft PR's title and body, mark ready, file the kept follow-ups
     Orch->>Git: wait for CI, on red the implementer fixes, push, wait again
-    Orch->>Orch: append the run's metrics line, then clean up: worktree, local branch, cards, artifact dir
+    Orch->>Orch: append the run's metrics line, then clean up: remove worktree and local branch, archive cards and artifacts
     Note over User,Git: the run ends here, the human reviews and merges on GitHub, outside the workflow
     deactivate Orch
     end

@@ -163,6 +163,8 @@ golden card-field env CLAUDE_PROJECT_DIR="$P" sh -c 'for f in lane issue split l
 golden list-sections sh "$scripts/list-sections.sh" "$fx/md/doc.md"
 golden extract-section sh "$scripts/extract-section.sh" '## Alpha' '## Beta' "$fx/md/doc.md"
 golden extract-section-missing sh "$scripts/extract-section.sh" '## Gamma' "$fx/md/doc.md"
+golden extract-section-prefix sh "$scripts/extract-section.sh" --prefix '## Al' '## Beta' "$fx/md/doc.md"
+golden extract-section-prefix-missing sh "$scripts/extract-section.sh" --prefix '## Zz' "$fx/md/doc.md"
 golden extract-id sh -c 'cd "$1" && sh "$0" specs MB-R-002 MB-E-001' "$scripts/extract-id.sh" "$fx"
 
 # --- show-file.sh
@@ -178,6 +180,9 @@ P=$(project)
 out=$(cd "$tmp" && CLAUDE_PROJECT_DIR="$P" sh "$scripts/gauntlet.sh" "$tmp/no-worktree" artifacts/demo 2>/dev/null)
 [ "$out" = "gauntlet=fail step=cd reason=no-worktree" ] && ok gauntlet-no-worktree || bad gauntlet-no-worktree "$out"
 [ -f "$P/.claude/tasks/artifacts/demo/gauntlet.log" ] && [ ! -e "$tmp/artifacts" ] && ok gauntlet-artifacts-shorthand || bad gauntlet-artifacts-shorthand "artifacts/<slug> resolves under the board"
+rm -f "$P/.claude/tasks/artifacts/demo/gauntlet.log"
+(cd "$tmp" && CLAUDE_PROJECT_DIR="$P" sh "$scripts/gauntlet.sh" "$tmp/no-worktree" .claude/tasks/artifacts/demo >/dev/null 2>&1)
+[ -f "$P/.claude/tasks/artifacts/demo/gauntlet.log" ] && [ ! -e "$tmp/.claude" ] && ok gauntlet-tasks-relative || bad gauntlet-tasks-relative "a relative path resolves under the project root"
 
 # gauntlet.sh pass cache: keyed by the worktree's tree, untracked files included
 rm -rf "$tmp/g"; git init -q -b main "$tmp/g"; echo a > "$tmp/g/a.txt"
@@ -218,6 +223,8 @@ golden card-log-reject-scope clrej demo.s1 stop kind=question
 golden card-log-reject-value clrej demo.s1 checks=maybe
 golden card-log-reject-length clrej demo.s1 stopped -- "$(printf 'x%.0s' $(seq 1 160))"
 golden card-log-reject-stop-kind clrej demo stop gate=plan
+golden card-log-reject-stop-delta clrej demo stop kind=delta
+golden card-log-reject-stop-replan clrej demo stop kind=replan
 golden card-log-reject-event-quote clrej demo.s1 'commit=a"b'
 golden card-log-no-card clrej nosuch.s9 green
 cp "$D/inreview/demo.s1.md" "$D/open/demo.s1.md"
@@ -226,6 +233,9 @@ rm "$D/open/demo.s1.md"
 [ "$sum" = "$(cksum "$D"/*/demo*.md)" ] && ok card-log-reject-unchanged || bad card-log-reject-unchanged "a rejected call must not touch a card"
 golden card-log-minor-moved cltail demo.s1 "$D/inreview/demo.s1.md" 'minor-moved=wording -> s3' -- the template
 golden card-log-files-add cltail demo.s1 "$D/inreview/demo.s1.md" 'files+=CONTRIBUTING.md, a.md' user=approved reason=review
+golden card-log-note cltail demo.s1 "$D/inreview/demo.s1.md" note -- renamed '"attr-a"' to attr-b
+golden card-log-note-parent cltail demo "$D/inprogress/demo.md" note -- plan amended after review
+golden card-log-note-empty clrej demo.s1 note
 golden card-log-accept-160 cltail demo.s1 "$D/inreview/demo.s1.md" stopped -- "$(printf 'x%.0s' $(seq 1 135))"
 
 # --- card-log.sh vocabulary covers every event the docs name
@@ -274,6 +284,38 @@ hook attr-trailer hook-guard-attribution.sh 'git commit -m "fix: x
 Co-Authored-By: Someone <a@b.c>"' deny
 hook attr-generated hook-guard-attribution.sh 'gh pr create --title t --body "Generated with a tool"' deny
 hook attr-clean hook-guard-attribution.sh 'git commit -m "fix: x"' allow
+hook attr-generated-line hook-guard-attribution.sh 'git commit -F - <<EOF
+fix: x
+
+🤖 Generated with a tool
+EOF' deny
+hook attr-trailer-option-quoted hook-guard-attribution.sh 'git commit --trailer "Co-Authored-By: X <a@b.c>" -m x' deny
+hook attr-trailer-option hook-guard-attribution.sh 'git commit --trailer Co-authored-by:X -m x' deny
+hook attr-trailer-eq hook-guard-attribution.sh 'git commit --trailer=Co-authored-by:X -m x' deny
+hook attr-list-footer hook-guard-attribution.sh 'git commit -F - <<EOF
+fix: x
+
+- 🤖 Generated with a tool
+EOF' deny
+hook attr-italic-footer hook-guard-attribution.sh 'git commit -F - <<EOF
+fix: x
+
+*Generated with a tool*
+EOF' deny
+hook attr-marker-after-emoji hook-guard-attribution.sh 'git commit -F - <<EOF
+fix: x
+
+🤖 *Generated with a tool*
+EOF' deny
+hook attr-trailer-eqsep hook-guard-attribution.sh 'git commit --trailer Co-authored-by=A -m x' deny
+hook attr-escaped-newline hook-guard-attribution.sh 'gh pr create --title t --body "x\n\nCo-authored-by: A"' deny
+hook attr-quote-footer hook-guard-attribution.sh 'git commit -F - <<EOF
+fix: x
+
+> Generated with a tool
+EOF' deny
+hook attr-regenerated hook-guard-attribution.sh 'git commit -m "docs: images regenerated with images/capture.py"' allow
+hook attr-mention hook-guard-attribution.sh 'git commit -m "fix: hook no longer matches generated with in prose"' allow
 
 # --- git-state guards and run-cleanup.sh, on a scratch repository with a bare remote
 g() { d=$1; shift; git -C "$d" -c user.name=t -c user.email=t@t -c commit.gpgsign=false "$@"; }

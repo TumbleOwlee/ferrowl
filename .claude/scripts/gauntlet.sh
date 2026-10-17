@@ -4,7 +4,8 @@
 # orchestrator reads the line, never the log.
 # Usage: gauntlet.sh <worktree> <artifacts-dir>
 # An <artifacts-dir> written as the workflow's shorthand `artifacts/<slug>`
-# resolves under the main checkout's .claude/tasks/, never the caller's cwd.
+# resolves under the main checkout's .claude/tasks/, never the caller's cwd;
+# any other relative path resolves under the main checkout too.
 # A pass is cached in <artifacts>/gauntlet.pass under the worktree's tree
 # (tracked and untracked files, as `git add -A` would stage them): the same
 # tree again prints the cached pass with `cached` and runs nothing, so a
@@ -15,7 +16,7 @@
 #     or: gauntlet=fail step=<fmt|clippy|test|cov> sha=<short> reason=timeout log=<path>
 set -u
 wt="${1:?worktree}"; art="${2:?artifacts dir}"
-case $art in artifacts/*) art="${CLAUDE_PROJECT_DIR:-.}/.claude/tasks/$art" ;; esac
+root=${CLAUDE_PROJECT_DIR:-.}; case $art in /*) ;; artifacts/*) art=$root/.claude/tasks/$art ;; *) art=$root/$art ;; esac
 mkdir -p "$art"
 log="$art/gauntlet.log"
 cache="$art/gauntlet.pass"

@@ -14,7 +14,7 @@ No issue/PR/tracker knowledge — never reference one; orchestrator owns that.
 
 `AGENTS.md` is already in your context (`CLAUDE.md` includes it); never re-read it. Binding here: `## Spec-driven`, `## TDD — fixed order, every stage`, `## Workflow` (the `files` contract), `## Build / test / lint`, `## Conventions — reading`, `## Conventions — code`, `## Conventions — text`, `## Scope boundaries — check with the user before`. Never `.claude/AGENTS.workflow.md` — gate/board mechanics are the orchestrator's.
 
-Given `plan.md`'s path and your stage id(s): pull only your section(s), one batched call: `sh .claude/scripts/extract-section.sh '## Stage s<n>: <title>' ['## Shared'] artifacts/<slug>/plan.md` (`<title>` = the card's `title:`) (`## Shared` only if your steps point to it). Plan's inline refs carry the exact existing signature/pattern each step needs. **Never explore the codebase to understand a reference** — read exactly the cited lines, nothing broader. A reference too thin to act on is a wrong plan (`status=blocked`, `## Ask or stop`), not a cue to search.
+Given `plan.md`'s path and your stage id(s): pull only your section(s), one batched call: `sh .claude/scripts/extract-section.sh --prefix '## Stage s<n>:' ['## Shared'] artifacts/<slug>/plan.md` (the title is display-only) (`## Shared` only if your steps point to it). Plan's inline refs carry the exact existing signature/pattern each step needs. **Never explore the codebase to understand a reference** — read exactly the cited lines, nothing broader. A reference too thin to act on is a wrong plan (`status=blocked`, `## Ask or stop`), not a cue to search.
 
 Work **only** inside your worktree path — never the main checkout, never another agent's worktree. Never `git add -A` outside your assigned path.
 
@@ -32,9 +32,11 @@ card-log.sh <id> commit=<sha>
 card-log.sh <id> feedback=<n>
 card-log.sh <id> stopped -- <what and why>
 card-log.sh <id> follow-up -- <what> — <where> — <why it matters>
+card-log.sh <id> note -- <text>
 ```
 
 - `origin=user` when the user asked (an answer, a PR comment; quote their words), `review` for a review finding, `impl` when you found it.
+- `note -- <text>` records anything else worth a later reader (a renamed test, a correction); never misuse `test-red` for it.
 - The `test-red` text names the test and the failure seen (`-- <test name>: <failure, ≤ 8 words>`), never only the test names.
 
 Given up to 3 code stages of the run (`s0` aside) — and only the plan: a slice run's epic context reaches you through it, never directly; a fresh implementer takes the next ones from your card. Implement them in plan order, within the `files` contract (`AGENTS.md` `## Workflow`). Stage `s0` (`Land spec`), when the plan has one, is yours: copy the approved text where the plan says — `**bold**` marks in a changed entry are stripped and the heading's ` · was R<n>` is dropped, the landed line is plain — one commit, no code.

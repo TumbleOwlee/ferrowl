@@ -19,6 +19,7 @@
 # both   feedback=      any               -        -                     no
 # stage  stopped        -                 -        -                     required
 # stage  follow-up      -                 -        -                     required
+# both   note           -                 -        -                     required
 # stage  minor=         any               -        -                     yes
 # stage  minor-moved=   any               -        -                     yes
 # stage  files+=        any               -        user,reason           no
@@ -83,7 +84,7 @@ for a in "$@"; do
             [ -n "$v" ] || rej value
             case $v in *'"'*) rej value ;; esac
             case $name$k in
-                stopkind) case $v in question|approval|stage|blocked|delta|replan) ;; *) rej value ;; esac ;;
+                stopkind) case $v in question|approval|stage|blocked) ;; *) rej value ;; esac ;;
                 spec-deltaorigin) case $v in user|review|impl) origin=$v ;; *) rej value ;; esac ;;
             esac
             case $v in *' '*) v="\"$v\"" ;; esac
