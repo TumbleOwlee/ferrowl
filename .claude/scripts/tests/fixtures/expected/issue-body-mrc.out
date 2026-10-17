@@ -1,7 +1,5 @@
 # Edit Modbus read ranges in their own module settings dialog
 
-**Status** planned · **Lane** full
-
 ## Goal
 Modbus read ranges are edited in a separate module settings dialog (`:module`), so loading a module from a device-config file keeps that file's ranges.
 Today the read-range inputs sit in the setup dialog, and confirming it to load a file also applies the dialog's range inputs over the file's ranges.

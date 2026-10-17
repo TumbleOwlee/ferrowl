@@ -33,7 +33,7 @@ Headings of `.claude/AGENTS.workflow.md`, one pull each (`AGENTS.md` `## Convent
 | Epic — a feature too big for one run: skeleton, slices, child issues | `### Epic` |
 | Slice run — a run on one child issue of an epic | `#### Slice run` |
 | Gate 2 — plan and tracking issue | `### Gate 2 — plan and tracking issue` |
-| Tracking issue — draft, file, status line, changelog comments | `### Tracking issue` |
+| Tracking issue — draft, file, changelog comments | `### Tracking issue` |
 | Implement — every lane: spawn brief, draft PR | `#### Every stage` |
 | Implement — fast lane | `#### Fast lane` |
 | Implement — full lane | `#### Full lane`, `#### Per-stage review`, `#### Stage stop` |

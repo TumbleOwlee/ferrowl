@@ -1,0 +1,27 @@
+
+## the epic stop approves skeleton and slices
+$ prompt-render.sh epic rp issue=new
+Epic · rp · slices.md rev 1
+Slices:
+- 1: Walking skeleton — depends on none — S1 · R1
+- 2: Batteries — depends on 1 — S2 · R2, E1
+- 3: Nested groups — depends on 1, 2 — S3 · R3
+Issue: new — Shared site limit
+Confirm: nothing flagged
+Approving will:
+- file the epic issue
+- file 3 slice issues in order and link them from the epic
+- clean up — no code, no worktree
+Answer: approve · change <what> · stop
+user: approve
+$ prompt-render.sh approved rp
+approved
+
+## slices filed: no code, no PR, no CI; clean-up records the metrics
+$ card-move.sh rp inreview
+$ run-cleanup.sh rp
+cleanup=done archive=<R>/.claude/tasks/archive/rp
+metrics.log:
+rp start=2026-10-05T09:00 end=2026-10-05T18:00 first-red=- stages=0 stops=1 question=0 approval=1 stage=0 blocked=0 replans=0 overturned=0 reads=0 lane=epic ci=-
+board:
+exit=0

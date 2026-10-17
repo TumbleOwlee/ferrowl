@@ -1,0 +1,76 @@
+$ next-step.sh ns plan status=ready file=.claude/tasks/artifacts/ns/plan.md summary=.claude/tasks/artifacts/ns/plan.summary.md
+next=review
+do: spawn the plan reviewer
+see: ### Gate 2 — plan and tracking issue
+exit=0
+$ next-step.sh ns plan status=findings file=.claude/tasks/artifacts/ns/review.md summary=.claude/tasks/artifacts/ns/review.verdict.md count=2 user=0
+logged: plan-review=findings count=2 round=1
+next=revise
+run: cp .claude/tasks/artifacts/ns/plan.md .claude/tasks/artifacts/ns/plan.prev.md
+do: resume the planner with the review file
+see: ### Gate 2 — plan and tracking issue
+exit=0
+$ next-step.sh ns plan status=ready file=.claude/tasks/artifacts/ns/plan.md summary=.claude/tasks/artifacts/ns/plan.summary.md
+next=follow-up
+do: spawn the plan reviewer again for a follow-up round
+see: ### Gate 2 — plan and tracking issue
+exit=0
+$ next-step.sh ns plan status=findings file=.claude/tasks/artifacts/ns/review.md summary=.claude/tasks/artifacts/ns/review.verdict.md count=1 user=0
+logged: plan-review=findings count=1 round=2
+next=revise
+run: cp .claude/tasks/artifacts/ns/plan.md .claude/tasks/artifacts/ns/plan.prev.md
+do: resume the planner with the review file
+see: ### Gate 2 — plan and tracking issue
+exit=0
+$ next-step.sh ns plan status=ready file=.claude/tasks/artifacts/ns/plan.md summary=.claude/tasks/artifacts/ns/plan.summary.md
+next=follow-up
+do: spawn the plan reviewer again for a follow-up round
+see: ### Gate 2 — plan and tracking issue
+exit=0
+$ next-step.sh ns plan status=findings file=.claude/tasks/artifacts/ns/review.md summary=.claude/tasks/artifacts/ns/review.verdict.md count=1 user=0
+logged: plan-review=findings count=1 round=3
+next=issue
+do: ask the spec author for the tracking issue
+see: ### Gate 2 — plan and tracking issue
+exit=0
+log:
+2026-10-05T09:00 plan-review=findings count=2 round=1
+2026-10-05T09:00 plan-review=findings count=1 round=2
+2026-10-05T09:00 plan-review=findings count=1 round=3
+$ next-step.sh ns plan status=findings file=.claude/tasks/artifacts/ns/review.md summary=.claude/tasks/artifacts/ns/review.verdict.md count=0 user=0
+logged: plan-review=findings count=0 round=1
+next=revise
+run: cp .claude/tasks/artifacts/ns/plan.md .claude/tasks/artifacts/ns/plan.prev.md
+do: resume the planner with the review file
+see: ### Gate 2 — plan and tracking issue
+exit=0
+$ next-step.sh ns plan status=clean file=.claude/tasks/artifacts/ns/review.md summary=.claude/tasks/artifacts/ns/review.verdict.md
+logged: plan-review=clean round=2
+next=issue
+do: ask the spec author for the tracking issue
+see: ### Gate 2 — plan and tracking issue
+exit=0
+$ next-step.sh ns plan status=question
+next=relay
+do: relay the question file to the user and resume the agent with the answers
+see: ### Relayed question
+exit=0
+$ next-step.sh ns plan status=arch-gap
+next=arch-gap
+do: spawn the architect, then resume the planner with its summary
+see: ### Gate 2 — plan and tracking issue
+exit=0
+$ next-step.sh ns plan status=split
+next=split
+do: handle the split request
+see: #### Split
+exit=0
+$ next-step.sh ns plan status=behavior-change
+next=behavior-change
+do: the plan found a behavior change in a non-behavior run: back to the spec author
+see: ### Principles — implementation
+exit=0
+log:
+2026-10-05T09:00 plan-review=findings count=0 round=1
+2026-10-05T09:00 plan-review=clean round=2
+exit=0

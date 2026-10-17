@@ -6,9 +6,9 @@
 # fixtures/expected/replay-<scenario>.out. Deterministic: fixed clock,
 # identity and commit dates, so shas are stable.
 #
-#   sh .claude/scripts/tests/replay.sh <full|fast-replan|light|resume>
+#   sh .claude/scripts/tests/replay.sh <full|fast-replan|fast-noarch|pr-replan|fast-tdd|epic|resume>
 set -u
-scenario=${1:?usage: replay.sh <full|fast-replan|light|resume>}
+scenario=${1:?usage: replay.sh <full|fast-replan|fast-noarch|pr-replan|fast-tdd|epic|resume>}
 scripts=$(cd "$(dirname -- "$0")/.." && pwd)
 tmp=$(mktemp -d) || exit 1
 trap 'rm -rf "$tmp"' EXIT INT TERM
@@ -21,7 +21,9 @@ B=$R/.claude/tasks; W=$R/.claude/worktrees/rp; A=$B/artifacts/rp
 step() { printf '\n## %s\n' "$*"; }
 # run <script> <args…> — the call and its output, paths shortened
 run() { s=$1; shift; echo "\$ $s $*"; sh "$scripts/$s" "$@" 2>&1 | sed "s#$R#<R>#g"; }
-board() { echo "board:"; for d in open inprogress inreview done; do for c in "$B/$d"/rp*.md; do [ -f "$c" ] && echo "  $d/$(basename "$c")"; done; done; }
+board() { echo "board:"; for d in open inprogress inreview done; do for c in "$B/$d"/rp*.md; do [ -f "$c" ] && echo "  $d/$(basename "$c")"; done; done; return 0; }
+RA=.claude/tasks/artifacts/rp
+rev_st="file=$RA/review.md summary=$RA/review.verdict.md"
 git_() { git -C "$W" -c commit.gpgsign=false "$@"; }
 
 setup() { # <lane> <stages besides s0>
@@ -81,12 +83,16 @@ full)
     impl 2; run stage-stop.sh rp s2
     run prompt-render.sh stage rp stage=s2 reason=verification "detail=demo TUI"
     echo "user: approve"; run prompt-render.sh approved rp; commit 2
-    step "s3 green: the last code stage is gate 3's stop"
-    impl 3; run stage-stop.sh rp s3; run prompt-render.sh gate3 rp
-    echo "user: approve"; commit 3
+    step "s3 green, clean branch review: commits without a stop, gate 4's stop is its stop"
+    impl 3; run next-step.sh rp branch status=clean $rev_st; run stage-stop.sh rp s3; commit 3; run prompt-render.sh auto rp stage=s3
     run card-move.sh rp inreview; board
+    step "gate 4 shows the branch verdict"
+    printf '# Read register 65535\n\n## Why\nThe last register reads.\n' > "$A/pr.md"
+    run next-step.sh rp pr status=ready file=$RA/pr.md follow-ups=0
+    run prompt-render.sh gate4 rp pr=9
     step "end of run"
     run reconcile.sh rp
+    run next-step.sh rp ci ci=0
     run metrics.sh rp ;;
 fast-replan)
     setup fast 2
@@ -108,19 +114,23 @@ fast-replan)
         printf -- '---\nid: rp.s%s\nparent: rp\ntitle: Stage %s\nblocked-by: [rp.s%s]\nfiles: [f%s.txt]\n---\n' "$i" "$i" "$((i - 1))" "$i" > "$B/open/rp.s$i.md"
     done
     printf '# rp — plan summary (rev 2)\n\nDecide: 3 stages.\n' > "$A/plan.summary.md"
+    run next-step.sh rp replan status=clean $rev_st
     run prompt-render.sh replan rp from=s1
     echo "user: approve"; run prompt-render.sh approved rp
     run card-log.sh rp replan=approved; board
     step "the new stages land on green"
     for i in 1 2 3; do impl "$i"; commit "$i"; done
     board
+    run next-step.sh rp ci ci=0
     run metrics.sh rp ;;
-light)
-    setup light 1
+fast-noarch)
+    setup fast 1
     sed -i 's/^gate1: .*/gate1: with-plan/; s/^arch: .*/arch: skipped/' "$B/open/rp.md"
     printf '# rp — spec diff (rev 1)\n\n## Summary\nGoal: Register 65535 reads correctly.\n\n## S1 — Read the last register\n\n## R1 — changed · requirements `## Addressing`\nAddresses span 0 to 65535 inclusive.\n' > "$A/spec-diff.md"
     printf '# Read register 65535\n' > "$A/issue.md"
-    step "no architecture step, no plan review: gate 2 is the first stop and approves the brief"
+    step "no architecture step: gate 2 is the first stop and approves the brief"
+    run next-step.sh rp plan status=clean $rev_st
+    run next-step.sh rp plan status=new file=$RA/issue.md
     run prompt-render.sh gate2 rp issue=new
     echo "user: approve"; run prompt-render.sh approved rp
     sed -i 's/^gate1: .*/gate1: 2026-10-03\ngate2: 2026-10-03/' "$B/open/rp.md"
@@ -128,11 +138,119 @@ light)
     run card-move.sh rp inprogress
     step "one code stage, committed on green"
     impl 0; commit 0; impl 1; commit 1; board
-    step "gate 3's branch review is the only review; gate 4 shows its verdict"
+    step "gate 3's branch review is the only code review; gate 4 shows its verdict"
+    run next-step.sh rp branch status=clean $rev_st
     run card-move.sh rp inreview
     printf '# Read register 65535\n\n## Why\nThe last register reads.\n' > "$A/pr.md"
     run prompt-render.sh gate4 rp pr=9
+    run next-step.sh rp ci ci=0
     run metrics.sh rp ;;
+pr-replan)
+    setup full 1
+    sed -i 's/^arch: .*/&\ngate2: 2026-10-03/' "$B/open/rp.md"
+    git -C "$R" worktree add -q "$W" -b feat/rp main
+    run card-move.sh rp inprogress
+    impl 0; run stage-stop.sh rp s0; commit 0
+    step "s1, the last code stage, clean branch review: commits without a stop"
+    impl 1; run next-step.sh rp branch status=clean $rev_st; run stage-stop.sh rp s1; commit 1; run prompt-render.sh auto rp stage=s1
+    run card-move.sh rp inreview
+    printf '# Read register 65535\n\n## Why\nThe last register reads.\n' > "$A/pr.md"
+    step "gate 4 shows the verdict; the user asks for a re-plan"
+    run prompt-render.sh gate4 rp pr=9
+    echo "user: re-plan: split the parser out"
+    step "re-plan from s2, pre-authorized at gate 4: a notice, no stop"
+    run card-move.sh rp inprogress
+    run card-log.sh rp replan from=s2
+    printf -- '---\nid: rp.s2\nparent: rp\ntitle: Stage 2\nblocked-by: [rp.s1]\nfiles: [f2.txt]\n---\n' > "$B/open/rp.s2.md"
+    printf '# rp — plan summary (rev 2)\n\nDecide: 1 more stage.\n' > "$A/plan.summary.md"
+    run next-step.sh rp replan status=clean $rev_st
+    run prompt-render.sh replan-notice rp from=s2
+    board
+    step "s2 lands on its clean branch review; gate 4 shows verdict, new plan and PR"
+    impl 2; run next-step.sh rp branch status=clean $rev_st; run stage-stop.sh rp s2; commit 2; run prompt-render.sh auto rp stage=s2
+    run card-move.sh rp inreview
+    run prompt-render.sh gate4 rp pr=9
+    run next-step.sh rp ci ci=0
+    run metrics.sh rp ;;
+fast-tdd)
+    setup fast 2
+    git init -q --bare "$tmp/remote.git"; git -C "$R" remote add origin "$tmp/remote.git"
+    step "plan review: one findings round, then clean"
+    run next-step.sh rp plan status=ready file=$RA/plan.md summary=$RA/plan.summary.md
+    run next-step.sh rp plan status=findings $rev_st count=2 user=0
+    run next-step.sh rp plan status=ready file=$RA/plan.md summary=$RA/plan.summary.md
+    run next-step.sh rp plan status=clean $rev_st
+    step "fast lane after an architecture stop: gate 2 is a notice"
+    run next-step.sh rp plan status=new file=$RA/issue.md
+    run prompt-render.sh gate2-notice rp issue=new
+    sed -i 's/^arch: .*/&\ngate2: 2026-10-03/' "$B/open/rp.md"
+    git -C "$R" worktree add -q "$W" -b feat/rp main
+    run card-move.sh rp inprogress
+    impl 0; commit 0
+    step "s1 test first: red for the right reason, then green with a spec change"
+    run card-move.sh rp.s1 inprogress
+    run card-log.sh rp.s1 test-red MB-R-001 -- it_read_last: expected 65535, got an error
+    printf 'stage 1\n' > "$W/f1.txt"
+    run card-log.sh rp.s1 green
+    run card-log.sh rp.s1 spec-delta MB-R-002 added origin=impl -- the wrap at 65535 was unstated
+    run card-move.sh rp.s1 inreview
+    git_ add f1.txt; git_ commit -q -m s1; sha=$(git_ rev-parse --short HEAD)
+    run card-log.sh rp.s1 "commit=$sha"
+    echo "impl: status=committed stage=s1 sha=$sha delta=1"
+    run sha-check.sh rp s1 "$sha"
+    run card-log.sh rp gauntlet=pass cov=81% "sha=$sha"
+    step "the delta review needs the user: delta stop, the user overturns the recommendation"
+    printf 'Verdict: findings — 1 needs user\n\nNeeds user\n- 1. MB-R-002 added: keep the wrap rule?\n  - a) keep (recommended)\n  - b) revert\n' > "$A/review.verdict.md"
+    run prompt-render.sh delta rp stage=s1
+    echo "user: 1: b"
+    run card-log.sh rp overturned scope=delta count=1 -- user reverted the wrap rule
+    printf 'Verdict: clean — ready for approval\n\nSpec — 2 of 2 pinned\nNot checked — nothing\n' > "$A/review.verdict.md"
+    run card-move.sh rp.s1 done
+    step "s2 green"
+    impl 2; commit 2; board
+    step "branch review: one finding fixed, then clean"
+    run card-move.sh rp inreview
+    run next-step.sh rp branch status=findings $rev_st count=1 user=0
+    run card-move.sh rp.s2 inprogress
+    printf 'stage 2 fixed\n' > "$W/f2.txt"
+    run card-log.sh rp.s2 green
+    run card-move.sh rp.s2 inreview
+    commit 2
+    run next-step.sh rp branch status=clean $rev_st
+    step "gate 4 shows the verdict"
+    printf '# Read register 65535\n\n## Why\nThe last register reads.\n' > "$A/pr.md"
+    run next-step.sh rp pr status=ready file=$RA/pr.md follow-ups=0
+    run prompt-render.sh gate4 rp pr=9
+    echo "user: approve"; run prompt-render.sh approved rp
+    git_ push -q -u origin feat/rp 2>/dev/null
+    step "CI red: clean-up refuses until the fix lands"
+    run next-step.sh rp ci ci=1
+    run run-cleanup.sh rp
+    run card-move.sh rp.s1 inprogress
+    printf 'stage 1 fixed\n' > "$W/f1.txt"
+    run card-log.sh rp.s1 green
+    run card-move.sh rp.s1 inreview
+    commit 1
+    git_ push -q 2>/dev/null
+    step "CI green: clean-up records the metrics and archives the run"
+    run next-step.sh rp ci ci=0
+    run run-cleanup.sh rp
+    echo "metrics.log:"; sed "s#$R#<R>#g" "$B/metrics.log"
+    board ;;
+epic)
+    setup full 0
+    rm "$B/open/rp.s0.md"
+    sed -i '/^lane:/d; /^arch:/d; s/^issue: 7$/kind: epic/' "$B/open/rp.md"
+    cp "$scripts/tests/fixtures/board/artifacts/lb/slices.md" "$A/slices.md"
+    printf '# Shared site limit\n' > "$A/issue.md"
+    step "the epic stop approves skeleton and slices"
+    run prompt-render.sh epic rp issue=new
+    echo "user: approve"; run prompt-render.sh approved rp
+    step "slices filed: no code, no PR, no CI; clean-up records the metrics"
+    run card-move.sh rp inreview
+    run run-cleanup.sh rp
+    echo "metrics.log:"; sed "s#$R#<R>#g" "$B/metrics.log"
+    board ;;
 resume)
     setup full 2
     sed -i 's/^arch: .*/&\ngate2: 2026-10-03/' "$B/open/rp.md"

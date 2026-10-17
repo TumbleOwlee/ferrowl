@@ -10,14 +10,14 @@
 # order, `Approving will:`, `Options:`, `Answer: approve [<n>[: <value>] …] ·
 # change <what> · stop`); logs `stop kind=approval gate=<kind>` (a stage
 # stop: `stop kind=stage`):
-#   gate1    [size=epic reason=<text>] [recommend=full|fast|light]
+#   gate1    [size=epic reason=<text>] [recommend=full|fast]
 #   arch     the architecture stop (fast lane: the brief too)
 #   epic     the epic stop
 #   gate2    [issue=new|<n>]
 #   stage    stage=s<n> reason=<stage-stop.sh's reason word> [detail=<text>]
 #   replan   from=s<n>
-#   gate3
-#   gate4    [pr=<n>]
+#   gate3    full lane, a Needs user item left by the branch review
+#   gate4    [pr=<n>]                                      the branch verdict in every lane
 # Question (`Question · <slug> · <where> · <agent> · <n> decisions`, the
 # numbered decisions, `Answer: <1: a · 2: b · …> · other <text>`):
 #   question where=<gate or s<n>> agent=<agent>     question.md verbatim; logs kind=question
@@ -26,6 +26,7 @@
 # Notice (one line, no answer awaited, nothing logged):
 #   auto     stage=s<n>                             a stage that auto-continues
 #   gate2-notice [issue=new|<n>]                    fast lane: gate 2 pre-authorized
+#   replan-notice from=s<n>                         a re-plan asked at gate 4, pre-authorized
 # Record:
 #   approved                                        logs `spec-rev=` / `arch-rev=` for the files
 #                                                   the last stop showed (its approval marker)
@@ -35,12 +36,13 @@
 # brief is not approved yet (`gate1:` is no date) or its rev moved past the
 # last `spec-rev=`; architecture.summary.md at a re-plan only when its rev
 # moved past `arch-rev=`; review.verdict.md at gate 2 and a re-plan only with
-# a `Needs user` item; at gate 4 in the fast and light lanes. Every stop that
+# a `Needs user` item; always at gate 4, plus plan.summary.md at gate 4 while a
+# `replan=pre-authorized` line is newer than the last gate 4 stop. Every stop that
 # confirms decisions quotes decisions.md below the last `decisions-seen=`.
 # SHOW_FILE_VIEWER passes through to show-file.sh.
 # Exit: show-file.sh's (3: a summary over its cap, the agent trims it), 2 usage.
 set -u
-usage() { echo "usage: $0 <gate1|arch|epic|gate2|stage|replan|gate3|gate4|question|blocked|delta|auto|gate2-notice|approved> <slug> [k=v ...]" >&2; exit 2; }
+usage() { echo "usage: $0 <gate1|arch|epic|gate2|stage|replan|gate3|gate4|question|blocked|delta|auto|gate2-notice|replan-notice|approved> <slug> [k=v ...]" >&2; exit 2; }
 [ $# -ge 2 ] || usage
 kind=$1 slug=$2; shift 2
 here=$(cd "$(dirname -- "$0")" && pwd)
@@ -62,6 +64,7 @@ parent=$(ls "$board"/*/"$slug".md 2>/dev/null | head -1)
 field() { sh "$here/card-field.sh" "$slug" "$1"; }
 rev() { [ -f "$1" ] && sed -n '1s/.*(rev \([0-9]*\)).*/\1/p' "$1"; }
 log() { sh "$here/card-log.sh" "$slug" "$@" >/dev/null; }
+replan_unseen() { [ -f "$parent" ] && awk '/ replan=pre-authorized/ { r = NR } / stop kind=approval gate=gate4/ { g = NR } END { exit !(r > g) }' "$parent"; }
 has_needs_user() { [ -f "$art/review.verdict.md" ] && awk '/^Needs user/ { on = 1; next } on && /^- / { if ($0 != "- none") f = 1; next } on { on = 0 } END { exit !f }' "$art/review.verdict.md"; }
 stages() { for c in "$board"/*/"$slug".s[0-9]*.md; do [ -f "$c" ] || continue; s=${c##*.s}; echo "${s%.md}"; done | sort -n; }
 
@@ -93,7 +96,7 @@ auto)
     pass=$(grep ' gauntlet=pass' "$parent" | tail -1)
     cov=$(printf '%s' "$pass" | sed -n 's/.* cov=\([^ ]*\).*/\1/p'); sha=$(printf '%s' "$pass" | sed -n 's/.* sha=\([^ ]*\).*/\1/p')
     detail=$(sed -n 's/^Spec changes — \(.*\) detail.*/\1/p' "$art/review.verdict.md" 2>/dev/null)
-    echo "Landed $sid · $slug · review clean · gauntlet pass ${cov:--} · pushed ${sha:--} · spec detail: ${detail:-none} · next: ${next:-gate 3} (auto-continue — say stop to hold)"
+    echo "Landed $sid · $slug · review clean · gauntlet pass ${cov:--} · pushed ${sha:--} · spec detail: ${detail:-none} · next: ${next:-gate 4} (auto-continue — say stop to hold)"
     exit 0 ;;
 esac
 
@@ -114,14 +117,16 @@ case $kind in
     gate4)
         add pr.md
         for f in "$art"/follow-up-*.md; do [ -f "$f" ] && show="$show $f"; done
-        case $lane in fast|light) add review.verdict.md ;; esac ;;
+        add review.verdict.md
+        replan_unseen && add plan.summary.md ;;
+    replan-notice) addq decisions.md; add plan.summary.md ;;
     question) addq question.md ;;
     blocked|delta) ;;
     *) usage ;;
 esac
 
 viewer_note=
-if [ -n "$show" ] && [ "$kind" != gate2-notice ]; then
+if [ -n "$show" ] && [ "$kind" != gate2-notice ] && [ "$kind" != replan-notice ]; then
     # shellcheck disable=SC2086 # artifact paths carry no spaces
     shown=$(SHOW_FILE_LINES=none sh "$here/show-file.sh" $show) || { rc=$?; [ $rc = 3 ] && exit 3; viewer_note="Viewer: failed — open the files manually"; }
     printf '%s\n' "$shown" | grep -q 'open manually' && viewer_note="Viewer: none available — open manually:$(printf '%s\n' "$shown" | sed -n 's/.*open manually: \([^ ]*\).*/ \1/p' | tr -d '\n')"
@@ -164,7 +169,7 @@ extra=
 nstages=$(awk -F'|' '/^\| s[0-9]/' "$art/plan.summary.md" 2>/dev/null | grep -c .)
 first=$(awk -F'|' '/^\| s[0-9]/ { s = $2; gsub(/ /, "", s); print s; exit }' "$art/plan.summary.md" 2>/dev/null)
 entries=$(awk '/^## ([A-Z][A-Z]-[RE]-[0-9]+|[RE][0-9]+) — / && !/ — dropped/' "$art/spec-diff.md" 2>/dev/null | grep -c .)
-other_lane() { case $lane in full|light) echo fast ;; *) echo full ;; esac; }
+other_lane() { case $lane in full) echo fast ;; *) echo full ;; esac; }
 
 title= will= opts= answer="approve · change <what> · stop"
 bp=; [ "$brief_pending" = 1 ] && bp="- approve the brief
@@ -181,10 +186,9 @@ gate1)
     else
         rec=$(arg recommend); rec=${rec:-full}
         will="- settle the lane
-- hand the brief to the architect (light lane: to the planner, no architecture step)"
+- hand the brief to the architect"
         i=0
-        for l in full fast light; do
-            [ "$l" = light ] && [ "$entries" -gt 1 ] && continue
+        for l in full fast; do
             i=$((i + 1)); opts="$opts${opts:+
 }$i. $l lane$([ "$l" = "$rec" ] && echo ' (recommended)')"
         done
@@ -211,12 +215,12 @@ epic)
 - clean up — no code, no worktree" ;;
 gate2)
     title="Gate 2"
-    next="per the stage-stop rules"; case $lane in fast|light) next="gate 4" ;; esac
+    next="per the stage-stop rules"; case $lane in fast) next="gate 4" ;; esac
     i=$(arg issue)
     case $i in ''|new) iw="file the issue" ;; *) iw="rewrite issue #$i" ;; esac
     will="$bp- $iw
 - create worktree .claude/worktrees/$slug on branch ${branch:-<type>/$slug}
-- create $nstages stage cards and spawn the implementer at ${first:-s1}$(case $lane in fast|light) echo ' (commits and pushes on green, no per-stage stop)' ;; esac)
+- create $nstages stage cards and spawn the implementer at ${first:-s1}$(case $lane in fast) echo ' (commits and pushes on green, no per-stage stop)' ;; esac)
 - next stop: $next"
     if [ "$lane" = full ]; then opts="1. also stop after: <stages, e.g. s1,s3>
 2. switch to the fast lane"
@@ -244,8 +248,8 @@ gate4)
 - file the $k follow-up issues")
 - wait for CI, clean up"
     hold="stop (hold, e.g. for a manual run first)"
-    if [ "$k" -gt 0 ]; then opts="1. follow-ups: <numbers | none> — file only these (default: all)"; answer="approve [<n>[: <value>] …] · change <what> · $hold"
-    else answer="approve · change <what> · $hold"; fi ;;
+    if [ "$k" -gt 0 ]; then opts="1. follow-ups: <numbers | none> — file only these (default: all)"; answer="approve [<n>[: <value>] …] · change <what> · re-plan: <why> · $hold"
+    else answer="approve · change <what> · re-plan: <why> · $hold"; fi ;;
 esac
 [ -n "$opts" ] && [ "$kind" != gate4 ] && answer="approve [<n>[: <value>] …] · change <what> · stop"
 
@@ -282,6 +286,12 @@ gate2-notice)
     dec=$(sed -n 's/^Decide: //p' "$art/plan.summary.md" 2>/dev/null)
     i=$(arg issue); case $i in ''|new) i=new ;; *) i="reuse #$i" ;; esac
     echo "Gate 2 · $slug · $dec · issue $i · starting ${first:-s1} (pre-authorized — say stop to hold)"
+    quoted | awk '/^Confirm/ { on = 1; print; next } on && /^- / { print; next } { on = 0 }'
+    exit 0 ;;
+replan-notice)
+    from=$(arg from); [ -n "$from" ] || usage
+    dec=$(sed -n 's/^Decide: //p' "$art/plan.summary.md" 2>/dev/null)
+    echo "Re-plan from $from · $slug · $dec · starting $from (pre-authorized at gate 4 — say stop to hold)"
     quoted | awk '/^Confirm/ { on = 1; print; next } on && /^- / { print; next } { on = 0 }'
     exit 0 ;;
 esac

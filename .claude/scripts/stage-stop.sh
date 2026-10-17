@@ -8,7 +8,7 @@
 #   1 needs-user     review.verdict.md has a `Needs user` item
 #   2 verification   plan.summary.md's `Verification beyond unit tests:` names s<n>
 #   3 pr-threads     threads=<n> (pr-feedback.sh fetch) above 0
-#   4 last-stage     no stage card numbered above s<n> — its stop is gate 3's
+#   4 (retired)      the last code stage stops only by another rule; else gate 4's stop is its stop
 #   5 plan-marked    the card's frontmatter says `stop: yes`
 #   6 diff-size      the worktree's diff from the previous stage's commit (the
 #                    branch point for the first stage), untracked files
@@ -58,8 +58,6 @@ decide() {
     fi
     [ "$threads" -gt 0 ] 2>/dev/null && { echo "stop=3 reason=pr-threads detail=\"$threads threads\""; return; }
     me=${sid#s}
-    later=$(for c in "$board"/*/"$slug".s[0-9]*.md; do [ -f "$c" ] || continue; n=$(num "$c"); [ "$n" -gt "$me" ] && echo "$n"; done)
-    [ -z "$later" ] && { echo "stop=4 reason=last-stage"; return; }
     [ "$(fm "$card" stop)" = yes ] && { echo "stop=5 reason=plan-marked"; return; }
 
     wt=$(fm "$card" worktree); wt=${wt:-.claude/worktrees/$slug}
