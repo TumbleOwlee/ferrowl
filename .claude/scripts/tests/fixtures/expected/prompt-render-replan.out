@@ -1,0 +1,45 @@
+Re-plan from s2 · demo · spec-diff.md rev 5, architecture.summary.md rev 1, plan.summary.md rev 1, review.verdict.md
+Goal: A client tab reconnects on its own after the server drops the connection.
+Scenarios: 1 — S1
+Entries: 2 new — MB-R-161, MB-E-031 · 1 changed — MB-R-042 · 1 dropped — MB-E-007
+Deferred: 2 — 1 implementation · 1 unowned
+Architecture: 1 new, 1 changed components in ferrowl-modbus; `ReconnectPolicy` owned by the client task
+Interfaces: 1 new, 1 changed — sketches in architecture.md `## Interfaces`
+Surface:
+- `ClientError::Reconnecting`
+Plan: 3 stages, s0 → s1 → s2. Backoff before UI, the tab reads the new state.
+Spec since arch: +E1 ~R1 · fixed IDs 2
+Stops:
+- s1 — yes — new public error variant
+Verification:
+- s2 — demo TUI
+  - stop the demo server, see "reconnecting", restart it, polling resumes
+  - cannot be waived without asking
+Confirm:
+- MB-R-161 — reconnecting is its own state — the tab must tell it from disconnected (author)
+- MB-E-031 — drop it — a replayed write may apply twice (architect)
+- policy owned by the client task — RTU and TCP share it (architect)
+- MB-R-042 — reconnecting is its own state — the tab must tell it from disconnected (architect)
+- one stage per crate — the UI change is reviewed apart (planner)
+- backoff state lives in the client task — RTU and TCP share it (planner)
+- MB-R-161 — retry forever, no cap — the user never wants a dead tab (planner)
+- legacy line without a tag — skipped by every renderer (planner)
+Review: findings — 0 must fix, 1 needs you
+Not checked: s2 demo TUI run: needs a terminal
+Spec: 2 of 2 pinned
+Spec changes: MB-R-162 detail, MB-R-161 needs you
+Minors (folded into s2)
+- standards — ferrowl-modbus client_core.rs `next_delay`: comment restates the code; drop it
+Needs user:
+- MB-R-161 now gives up after 1 hour of retries; keep it?
+  - a) revert to retry forever (recommended: S1 decided by the user)
+  - b) keep the 1 hour limit
+Approving will:
+- replace the cards of s2 onward
+- update the draft PR
+- spawn a fresh implementer at s2
+Options:
+1. also stop after: <stages>
+2. switch to the fast lane
+Answer: approve [<n>[: <value>] …] · change <what> · stop
+exit=0

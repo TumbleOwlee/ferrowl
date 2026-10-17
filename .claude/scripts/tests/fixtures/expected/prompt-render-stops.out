@@ -1,0 +1,12 @@
+stop kind=approval gate=gate1
+stop kind=approval gate=gate1
+stop kind=approval gate=arch
+stop kind=approval gate=gate2
+stop kind=stage
+stop kind=approval gate=replan
+stop kind=approval gate=gate3
+stop kind=approval gate=gate4
+stop kind=question
+stop kind=blocked
+stop kind=approval gate=delta
+exit=0

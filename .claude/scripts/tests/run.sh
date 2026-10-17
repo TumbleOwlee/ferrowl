@@ -9,7 +9,8 @@
 # project's .claude/tasks/ and compares its stdout plus `exit=<code>` with
 # fixtures/expected/<name>.out; review every rewritten file in the diff
 # before committing it. Assertion tests check exit codes and deny decisions
-# where the exact output is not the contract. Scripts that only wrap gh
+# where the exact output is not the contract. replay.sh replays whole runs
+# through the decision scripts in workflow order. Scripts that only wrap gh
 # (issue-view, pr-view, pr-feedback, failed-workflow) are not covered.
 set -u
 here=$(cd "$(dirname -- "$0")" && pwd)
@@ -135,10 +136,10 @@ golden pr-body-mrcpr-draft-nobranch env CLAUDE_PROJECT_DIR="$P" sh "$scripts/pr-
 # --- prompt-lines.sh
 P=$(project); A=$P/.claude/tasks/artifacts/demo
 golden prompt-lines-spec-diff sh "$scripts/prompt-lines.sh" "$A/spec-diff.md"
-golden prompt-lines-since-rev env PROMPT_SINCE_REV=2 sh "$scripts/prompt-lines.sh" "$A/spec-diff.md"
+golden prompt-lines-decisions sh "$scripts/prompt-lines.sh" "$A/decisions.md"
+golden prompt-lines-decisions-seen env DECISIONS_SEEN=7 sh "$scripts/prompt-lines.sh" "$A/decisions.md"
 golden prompt-lines-architecture sh "$scripts/prompt-lines.sh" "$A/architecture.summary.md"
 golden prompt-lines-plan sh "$scripts/prompt-lines.sh" "$A/plan.summary.md"
-golden prompt-lines-plan-since-rev env PROMPT_SINCE_REV=3 sh "$scripts/prompt-lines.sh" "$A/plan.summary.md"
 golden prompt-lines-verdict sh "$scripts/prompt-lines.sh" "$A/review.verdict.md"
 golden prompt-lines-titles sh "$scripts/prompt-lines.sh" "$A/issue.md" "$A/split-issue.md" "$A/pr.md" "$A/follow-up-1.md"
 golden prompt-lines-question sh "$scripts/prompt-lines.sh" "$A/question.md"
@@ -218,6 +219,9 @@ NOW=2026-10-03T09:30 cl demo stop kind=question
 NOW=2026-10-03T10:40 cl demo replan from=s2
 NOW=2026-10-03T10:50 cl demo stop kind=approval
 NOW=2026-10-03T10:05 cl demo.s1 test-red MB-R-161 -- it_backoff_caps
+NOW=2026-10-03T11:05 cl demo overturned scope=stage count=2 -- comment restates the code
+NOW=2026-10-03T11:06 cl demo overturned scope=branch count=1 -- docs stale
+NOW=2026-10-03T11:07 cl demo.s1 read path=ferrowl-modbus/src/client_core.rs -- no signature for next_delay
 golden metrics env CLAUDE_PROJECT_DIR="$P" METRICS_NOW=2026-10-04T12:00 sh "$scripts/metrics.sh" demo
 [ "$(cat "$D/metrics.log")" = "$(sed -n 1p "$fx/expected/metrics.out")" ] && ok metrics-log || bad metrics-log "the printed line is appended to metrics.log"
 golden metrics-no-card env CLAUDE_PROJECT_DIR="$P" sh "$scripts/metrics.sh" nosuch
@@ -250,6 +254,9 @@ golden card-log-note cltail demo.s1 "$D/inreview/demo.s1.md" note -- renamed '"a
 golden card-log-note-parent cltail demo "$D/inprogress/demo.md" note -- plan amended after review
 golden card-log-note-empty clrej demo.s1 note
 golden card-log-accept-160 cltail demo.s1 "$D/inreview/demo.s1.md" stopped -- "$(printf 'x%.0s' $(seq 1 135))"
+for k in 1 2 3; do clrej demo.s2 read path=f$k.rs -- the plan names no signature; done
+golden card-log-read-budget clrej demo.s2 read path=f4.rs -- still thin
+golden card-log-read-no-text clrej demo.s1 read path=f1.rs
 
 # --- card-log.sh vocabulary covers every event the docs name
 root=$(cd "$scripts/../.." && pwd)
@@ -453,6 +460,143 @@ g "$tmp/ids" checkout -q main
 printf '**MB-R-002** — The server answers.\n' >> "$tmp/ids/docs/specs/r.md"; g "$tmp/ids" commit -q -am y
 g "$tmp/ids" checkout -q feat/x
 out=$(sh "$scripts/id-collisions.sh" "$tmp/ids" main); [ "$out" = "ids=collide MB-R-002" ] && ok ids-collide || bad ids-collide "$out"
+
+# --- decision scripts on a scratch run "ss": a main checkout with the board and the run's worktree
+is() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected '$2', got '$3'"; fi; }
+sscard() { # <n> <state> [<frontmatter line>]
+    b="[]"; [ "$1" -gt 0 ] && b="[ss.s$(($1 - 1))]"
+    printf -- '---\nid: ss.s%s\nparent: ss\ntitle: Stage %s\nblocked-by: %s\nfiles: [f%s.txt]\n%s---\n' "$1" "$1" "$b" "$1" "${3:+$3
+}" > "$SB/$2/ss.s$1.md"
+}
+ssrun() { # <number of stages besides s0>
+    rm -rf "$tmp/s"; git init -q -b main "$tmp/s"
+    printf '.claude/\n' > "$tmp/s/.gitignore"; g "$tmp/s" add .gitignore; g "$tmp/s" commit -q -m init
+    SB=$tmp/s/.claude/tasks; SW=$tmp/s/.claude/worktrees/ss
+    for d in open inprogress inreview done artifacts/ss; do mkdir -p "$SB/$d"; done
+    git -C "$tmp/s" worktree add -q "$SW" -b feat/ss main
+    printf -- '---\nid: ss\nbranch: feat/ss\nlane: full\ngate1: 2026-10-01\narch: 2026-10-02\ngate2: 2026-10-03\n---\n' > "$SB/inprogress/ss.md"
+    sscard 0 done; i=1; while [ "$i" -le "$1" ]; do sscard "$i" open; i=$((i + 1)); done
+    printf '# ss — plan summary (rev 1)\n\nDecide: x\n\nVerification beyond unit tests:\n- s3 — demo TUI\n  - see it\n' > "$SB/artifacts/ss/plan.summary.md"
+}
+run_s() { script=$1; shift; env CLAUDE_PROJECT_DIR="$tmp/s" CARD_LOG_NOW=2026-10-05T09:00 sh "$scripts/$script" "$@"; }
+
+ssrun 5
+is stage-stop-s0 auto "$(run_s stage-stop.sh ss s0)"
+is stage-stop-auto auto "$(run_s stage-stop.sh ss s1)"
+is stage-stop-auto-logged "2026-10-05T09:00 auto=yes" "$(tail -1 "$SB/open/ss.s1.md")"
+printf 'Verdict: findings — 0 must fix, 1 needs you\n\nNeeds user\n- keep it?\n  - a) yes\n' > "$SB/artifacts/ss/review.verdict.md"
+is stage-stop-needs-user "stop=1 reason=needs-user" "$(run_s stage-stop.sh ss s1)"
+is stage-stop-logged "2026-10-05T09:00 stop=1" "$(tail -1 "$SB/open/ss.s1.md")"
+printf 'Verdict: clean — ready for approval\n\nNeeds user\n- none\n' > "$SB/artifacts/ss/review.verdict.md"
+is stage-stop-verification 'stop=2 reason=verification detail="demo TUI"' "$(run_s stage-stop.sh ss s3)"
+is stage-stop-threads 'stop=3 reason=pr-threads detail="2 threads"' "$(run_s stage-stop.sh ss s1 threads=2)"
+is stage-stop-last "stop=4 reason=last-stage" "$(run_s stage-stop.sh ss s5)"
+sscard 2 open 'stop: yes'
+is stage-stop-plan-marked "stop=5 reason=plan-marked" "$(run_s stage-stop.sh ss s2)"
+printf 'a\n' > "$SW/a.txt"; printf 'b\nc\n' > "$SW/b.txt"
+is stage-stop-diff-size 'stop=6 reason=diff-size detail="3 lines, 2 files"' "$(STAGE_STOP_FILES=1 run_s stage-stop.sh ss s1)"
+is stage-stop-diff-under auto "$(STAGE_STOP_FILES=2 run_s stage-stop.sh ss s1)"
+rm -f "$SW/a.txt" "$SW/b.txt"
+ssrun 5; rm "$SB/artifacts/ss/plan.summary.md"
+for n in 1 2 3; do run_s stage-stop.sh ss s$n >/dev/null; done
+is stage-stop-checkpoint "stop=7 reason=checkpoint" "$(run_s stage-stop.sh ss s4)"
+ssrun 5
+run_s card-log.sh ss.s2 stop=5; run_s card-log.sh ss.s3 auto=yes
+is stage-stop-checkpoint-reset auto "$(run_s stage-stop.sh ss s4)"
+golden stage-stop-no-card run_s stage-stop.sh ss s9
+
+# sha-check.sh
+ssrun 2
+printf 'x\n' > "$SW/f1.txt"; g "$SW" add f1.txt; g "$SW" commit -q -m s1; S1=$(git -C "$SW" rev-parse --short HEAD)
+run_s card-log.sh ss.s1 "commit=$S1"
+is sha-check-ok sha=ok "$(run_s sha-check.sh ss s1 "$S1")"
+is sha-check-missing "sha=mismatch reason=missing" "$(run_s sha-check.sh ss s1 deadbee)"
+g "$tmp/s" commit -q --allow-empty -m on-main; M=$(git -C "$tmp/s" rev-parse --short HEAD)
+is sha-check-off-branch "sha=mismatch reason=off-branch" "$(run_s sha-check.sh ss s1 "$M")"
+printf 'y\n' >> "$SW/f1.txt"; g "$SW" commit -q -am s1b; S1B=$(git -C "$SW" rev-parse --short HEAD)
+is sha-check-card-commit "sha=mismatch reason=card-commit" "$(run_s sha-check.sh ss s1 "$S1B")"
+run_s sha-check.sh ss s1 "$S1B" >/dev/null; is sha-check-exit 1 "$?"
+
+# reconcile.sh, on the same run
+run_s card-log.sh ss.s0 "commit=$S1"
+is reconcile-clean "reconcile=clean next=s1" "$(run_s reconcile.sh ss)"
+run_s card-log.sh ss.s2 commit=deadbee
+run_s card-log.sh ss gauntlet=pass "sha=$M"
+out=$(run_s reconcile.sh ss)
+is reconcile-differ "differ row=commit s2 deadbee does not exist
+differ row=gauntlet $M not on feat/ss
+reconcile=differ n=2 next=s1" "$out"
+git -C "$tmp/s" worktree remove --force "$SW"
+is reconcile-worktree "differ row=worktree $SW missing" "$(run_s reconcile.sh ss | head -1)"
+
+# card-move.sh
+ssrun 2
+mv "$SB/done/ss.s0.md" "$SB/open/ss.s0.md"
+is card-move-blocked-by "card-move=refused from=open to=inprogress reason=blocked-by" "$(run_s card-move.sh ss.s1 inprogress)"
+run_s card-move.sh ss.s0 inprogress; run_s card-move.sh ss.s0 inreview
+is card-move-logged "2026-10-05T09:00 moved=inreview" "$(tail -1 "$SB/inreview/ss.s0.md")"
+is card-move-no-commit "card-move=refused from=inreview to=done reason=commit" "$(run_s card-move.sh ss.s0 done)"
+run_s card-log.sh ss.s0 commit=abc1234
+is card-move-unverified "card-move=refused from=inreview to=done reason=unverified" "$(run_s card-move.sh ss.s0 done)"
+run_s card-log.sh ss gauntlet=pass sha=abc1234
+run_s card-move.sh ss.s0 done; [ -f "$SB/done/ss.s0.md" ] && ok card-move-done || bad card-move-done "verified commit moves to done"
+run_s card-move.sh ss.s0 done; is card-move-same 0 "$?"
+run_s card-move.sh ss.s1 inprogress; [ -f "$SB/inprogress/ss.s1.md" ] && ok card-move-runnable || bad card-move-runnable "blocked-by done → inprogress"
+is card-move-skip "card-move=refused from=open to=done reason=transition" "$(run_s card-move.sh ss.s2 done)"
+is card-move-parent-done "card-move=refused from=inprogress to=done reason=transition" "$(run_s card-move.sh ss done)"
+mv "$SB/inprogress/ss.md" "$SB/open/ss.md"; sed -i '/^gate2:/d' "$SB/open/ss.md"
+is card-move-parent-gate2 "card-move=refused from=open to=inprogress reason=gate2" "$(run_s card-move.sh ss inprogress)"
+golden card-move-no-card run_s card-move.sh nosuch.s1 done
+P=$(project)
+hook shell-mv-card hook-guard-shell.sh 'mv .claude/tasks/open/demo.s2.md .claude/tasks/done/' deny
+hook shell-mv-card-into hook-guard-shell.sh 'mv /tmp/x.md .claude/tasks/done/demo.s9.md' deny
+hook shell-mv-other hook-guard-shell.sh 'mv notes.md docs/notes.md' allow
+hook shell-card-move hook-guard-shell.sh 'sh .claude/scripts/card-move.sh demo.s2 done' allow
+
+# --- replayed runs: the decision scripts in workflow order, fake agents (replay.sh)
+for sc in full fast-replan light resume; do golden "replay-$sc" sh "$here/replay.sh" "$sc"; done
+
+# --- prompt-render.sh, on the fixture board
+P=$(project); D=$P/.claude/tasks
+pr_() { env CLAUDE_PROJECT_DIR="$P" CARD_LOG_NOW=2026-10-05T09:00 SHOW_FILE_VIEWER=none sh "$scripts/prompt-render.sh" "$@"; }
+golden prompt-render-gate1 pr_ gate1 demo
+golden prompt-render-gate1-epic pr_ gate1 demo size=epic "reason=two areas, 14 entries"
+golden prompt-render-arch pr_ arch demo
+golden prompt-render-gate2 pr_ gate2 demo issue=new
+golden prompt-render-stage pr_ stage demo stage=s1 reason=verification "detail=demo TUI"
+golden prompt-render-replan pr_ replan demo from=s2
+golden prompt-render-gate3 pr_ gate3 demo
+golden prompt-render-gate4 pr_ gate4 demo
+golden prompt-render-question pr_ question demo where=gate1 agent=spec-author
+golden prompt-render-blocked pr_ blocked demo stage=s2 "reason=the parse_frame reference names no signature"
+golden prompt-render-delta pr_ delta demo stage=s1
+golden prompt-render-auto pr_ auto demo stage=s1
+golden prompt-render-gate2-notice pr_ gate2-notice demo issue=new
+golden prompt-render-epic pr_ epic lb
+golden prompt-render-stops sh -c 'grep " stop " "$0" | cut -d" " -f2-' "$D/inprogress/demo.md"
+P=$(project); D=$P/.claude/tasks
+pr_ gate2 demo >/dev/null
+golden prompt-render-approved pr_ approved demo
+golden prompt-render-since-rev pr_ arch demo
+sed -i '/^gate1:/d' "$D/inprogress/demo.md"; sed -i 's/^lane: full/lane: fast/' "$D/inprogress/demo.md"
+golden prompt-render-arch-fast pr_ arch demo
+seq 1 40 | sed 's/^/- line /' >> "$D/artifacts/demo/plan.summary.md"
+pr_ gate2 demo >/dev/null 2>&1; is prompt-render-cap 3 "$?"
+
+# --- size budget: the orchestrator's and the agents' docs never grow past their
+# ceiling (chars, ~4 per token). A change that must grow one lowers another or
+# raises the ceiling in the same PR, with the reason; lower a ceiling whenever a
+# file shrinks.
+budget() {
+    n=$(wc -c < "$root/$1")
+    if [ "$n" -le "$2" ]; then ok "budget $1"; else bad "budget $1" "$n chars, ceiling $2"; fi
+}
+budget .claude/AGENTS.workflow.md 53000
+budget .claude/agents/spec-author.md 12500
+budget .claude/agents/spec-architect.md 10000
+budget .claude/agents/spec-planner.md 11500
+budget .claude/agents/spec-implementer.md 11500
+budget .claude/agents/spec-reviewer.md 11000
 
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

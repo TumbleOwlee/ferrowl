@@ -1,0 +1,6 @@
+Question · demo · gate1 · spec-author · 1 decision
+
+## 1. Retry forever?
+Answer: a · b
+Answer: <1: a · 2: b · …> · other <text>
+exit=0

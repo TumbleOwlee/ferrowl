@@ -1,0 +1,19 @@
+Architecture · demo · spec-diff.md rev 5, architecture.summary.md rev 1, architecture.md rev 1 · fast lane
+Goal: A client tab reconnects on its own after the server drops the connection.
+Scenarios: 1 — S1
+Entries: 2 new — MB-R-161, MB-E-031 · 1 changed — MB-R-042 · 1 dropped — MB-E-007
+Deferred: 2 — 1 implementation · 1 unowned
+Architecture: 1 new, 1 changed components in ferrowl-modbus; `ReconnectPolicy` owned by the client task
+Interfaces: 1 new, 1 changed — sketches in architecture.md `## Interfaces`
+Surface:
+- `ClientError::Reconnecting`
+Confirm: nothing flagged
+Approving will:
+- approve the brief
+- hand brief and architecture to the planner
+- run gate 2 without a stop once the plan review is clean
+- next stop: gate 4
+Options:
+1. switch to the full lane
+Answer: approve [<n>[: <value>] …] · change <what> · stop
+exit=0

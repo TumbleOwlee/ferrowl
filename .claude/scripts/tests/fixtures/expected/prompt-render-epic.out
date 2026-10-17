@@ -1,0 +1,21 @@
+Epic · lb · spec-diff.md rev 2, architecture.summary.md rev 1, architecture.md rev 1, slices.md rev 1
+Goal: A site limit is shared across chargers and batteries.
+Scenarios: 3 — S1, S2, S3
+Entries: 4 new — R1, R2, R3, E1
+Deferred: 2 — 1 plan · 1 implementation
+Architecture: 3 new components in ferrowl-ocpp; an `Allocator` over a tree of `Node`s
+Interfaces: 3 new — sketches in architecture.md `## Interfaces`
+Surface:
+- config key `site_limit_a`
+Slices:
+- 1: Walking skeleton — depends on none — S1 · R1
+- 2: Batteries — depends on 1 — S2 · R2, E1
+- 3: Nested groups — depends on 1, 2 — S3 · R3
+Issue: new — Load balancing core
+Confirm: nothing flagged
+Approving will:
+- file the epic issue
+- file 3 slice issues in order and link them from the epic
+- clean up — no code, no worktree
+Answer: approve · change <what> · stop
+exit=0

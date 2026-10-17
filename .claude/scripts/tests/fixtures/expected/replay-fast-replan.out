@@ -1,0 +1,94 @@
+$ card-move.sh rp inprogress
+$ card-move.sh rp.s0 inprogress
+$ card-log.sh rp.s0 green
+$ card-move.sh rp.s0 inreview
+impl: status=inreview stage=s0 delta=0
+$ card-log.sh rp.s0 commit=1b8d0dd
+impl: status=committed stage=s0 sha=1b8d0dd delta=0
+$ sha-check.sh rp s0 1b8d0dd
+sha=ok
+$ card-log.sh rp gauntlet=pass cov=81% sha=1b8d0dd
+$ card-move.sh rp.s0 done
+
+## s1 blocked: a plan reference too thin to act on, the read budget spent
+$ card-move.sh rp.s1 inprogress
+$ card-log.sh rp.s1 read path=f1.txt -- no signature for parse_frame
+$ card-log.sh rp.s1 read path=f0.txt -- no signature for parse_frame
+$ card-log.sh rp.s1 read path=f1.txt -- no signature for parse_frame
+$ card-log.sh rp.s1 read path=src/lib.rs -- still nothing
+card-log=reject event=read reason=budget
+impl: status=blocked stage=s1 reason=parse_frame has no signature in the plan
+$ prompt-render.sh blocked rp stage=s1 reason=parse_frame has no signature in the plan
+Question · rp · s1 · spec-implementer · 1 decision
+## 1. s1 is blocked: parse_frame has no signature in the plan
+Options:
+- a) answer: <text> — relayed to the implementer
+- b) re-plan — a fresh planner rewrites the stages not yet committed
+- c) stop — the run halts, the board stays for a resume
+Answer: <1: a <text> | b | c>
+user: 1: b
+
+## re-plan from the lowest stage without a commit
+$ card-log.sh rp replan from=s1
+$ prompt-render.sh replan rp from=s1
+Re-plan from s1 · rp · plan.summary.md rev 2 · fast lane
+Plan: 3 stages.
+Confirm: nothing flagged
+Approving will:
+- replace the cards of s1 onward
+- update the draft PR
+- spawn a fresh implementer at s1
+Options:
+1. switch to the full lane
+Answer: approve [<n>[: <value>] …] · change <what> · stop
+user: approve
+$ prompt-render.sh approved rp
+approved
+$ card-log.sh rp replan=approved
+board:
+  open/rp.s1.md
+  open/rp.s2.md
+  open/rp.s3.md
+  inprogress/rp.md
+  done/rp.s0.md
+
+## the new stages land on green
+$ card-move.sh rp.s1 inprogress
+$ card-log.sh rp.s1 green
+$ card-move.sh rp.s1 inreview
+impl: status=inreview stage=s1 delta=0
+$ card-log.sh rp.s1 commit=0feb5e7
+impl: status=committed stage=s1 sha=0feb5e7 delta=0
+$ sha-check.sh rp s1 0feb5e7
+sha=ok
+$ card-log.sh rp gauntlet=pass cov=81% sha=0feb5e7
+$ card-move.sh rp.s1 done
+$ card-move.sh rp.s2 inprogress
+$ card-log.sh rp.s2 green
+$ card-move.sh rp.s2 inreview
+impl: status=inreview stage=s2 delta=0
+$ card-log.sh rp.s2 commit=dd0c1fb
+impl: status=committed stage=s2 sha=dd0c1fb delta=0
+$ sha-check.sh rp s2 dd0c1fb
+sha=ok
+$ card-log.sh rp gauntlet=pass cov=81% sha=dd0c1fb
+$ card-move.sh rp.s2 done
+$ card-move.sh rp.s3 inprogress
+$ card-log.sh rp.s3 green
+$ card-move.sh rp.s3 inreview
+impl: status=inreview stage=s3 delta=0
+$ card-log.sh rp.s3 commit=32d5a46
+impl: status=committed stage=s3 sha=32d5a46 delta=0
+$ sha-check.sh rp s3 32d5a46
+sha=ok
+$ card-log.sh rp gauntlet=pass cov=81% sha=32d5a46
+$ card-move.sh rp.s3 done
+board:
+  inprogress/rp.md
+  done/rp.s0.md
+  done/rp.s1.md
+  done/rp.s2.md
+  done/rp.s3.md
+$ metrics.sh rp
+rp start=2026-10-05T09:00 end=2026-10-05T18:00 first-red=- stages=4 stops=2 question=0 approval=1 stage=0 blocked=1 replans=1 overturned=0 reads=0 lane=fast
+exit=0

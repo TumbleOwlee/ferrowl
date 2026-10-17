@@ -10,6 +10,7 @@
 #   - raw `gh pr view` (always pr-view.sh — same GraphQL projectCards bug)
 #   - append onto a task card (`>>` or `tee -a` into
 #     `.claude/tasks/{open,inprogress,inreview,done}/*.md`): card-log.sh validates
+#   - `mv` of a task card out of a state directory: card-move.sh validates
 #   - `git commit` while the checkout is on `main` (branch off main, never
 #     commit to it — the safety net for an agent that missed the worktree)
 #   - `git push` whose destination is `main`, explicit or (on bare `git
@@ -32,6 +33,11 @@ cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty')
 
 if printf '%s' "$cmd" | grep -qE '(>>|tee[[:space:]]+(-[a-z]*a[a-z]*|--append)([[:space:]]+--)?)[[:space:]]*["'"'"']?[^[:space:]"'"'"']*tasks/(open|inprogress|inreview|done)/[^[:space:]"'"'"'/]+\.md'; then
   jq -n --arg reason "Raw append onto a task card bypasses its validation. Use: sh .claude/scripts/card-log.sh <card-id> <event> [k=v …] [-- <text>] (vocabulary in the script)." '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $reason}}'
+  exit 0
+fi
+
+if printf '%s' "$cmd" | grep -qE '(^|[;&|[:space:]])mv[[:space:]][^;&|]*tasks/(open|inprogress|inreview|done)/[^[:space:]"'"'"'/]+\.md'; then
+  jq -n --arg reason "Raw mv of a task card skips the transition rules. Use: sh .claude/scripts/card-move.sh <card-id> <open|inprogress|inreview|done>." '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $reason}}'
   exit 0
 fi
 

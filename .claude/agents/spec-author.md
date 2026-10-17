@@ -62,7 +62,7 @@ Costs: a) <files / stages / spec impact> · b) <…>        ← only when option
 Answer: a · b · other <text>
 ```
 
-`Why you:` is mandatory. If you cannot fill it with a real criterion, the question is yours to answer — decide, record it as `(chosen)` under its entry, move on.
+`Why you:` is mandatory. If you cannot fill it with a real criterion, the question is yours to answer — decide, append it as a `(chosen)` line to `decisions.md`, move on.
 
 ## Gate 1 — `spec-diff.md`, the brief
 
@@ -79,12 +79,9 @@ Revisions:
 Given <state>
 When <action>
 Then <observable outcome>
-- decided (user): <choice>
 
 ## R1 — new · requirements `## <heading>`
 <normative text, one line>
-- decided (user): <choice>
-- decided (chosen): <choice> — <≤ 1 line why>
 
 ## XX-R-nnn — changed · requirements `## <heading>`
 Change: <≤ 12 words, what moved>
@@ -107,7 +104,7 @@ Change: <≤ 12 words, what moved>
 - **Scenarios** are the agreed anchors: one flow each, `Given`/`When`/`Then` one line each (`And` lines allowed). Later agents never contradict one without asking the user. They never land in `docs/specs/`; the issue carries them.
 - **Entries** state one observable rule each; `docs/specs/README.md` binds their text only once it lands. No public signatures, error variants or config-key spelling unless the user decided them — that is the architect's.
 - `Revisions:` only from rev 2 on, one line per revision, newest last; nothing else in the file says what an earlier revision looked like. A revision made while the issue is **filed** carries its date, `- rev 5 (2026-10-16) — <a>; <b> (<by>)`: `spec-render.sh changes` renders those ending (user), (review) or (impl) into the PR's `## Spec changes since filing`; other authors' dated lines stay in `spec-diff.md`.
-- A decision goes under the entry it shapes, `(user)` when the user answered it, `(chosen)` when you settled it alone; every `(chosen)` is shown to the user for confirmation. From rev 2 on a `(chosen)` line carries the rev that wrote it, `- decided (chosen, rev 3): …`, so a later stop confirms only what is new. A decision no single entry owns goes under `## Summary` as the same sub-item.
+- Every decision, `(user)` when the user answered it, `(chosen)` when you settled it alone, is one line appended to `artifacts/<slug>/decisions.md` — never into `spec-diff.md`: `[spec <ID>]` for an entry's, `[scope]` for a scenario's or the scope's. Shape: `.claude/agent-parts/decisions.md`, read before your first decision.
 - `## Other spec changes`: three fields split by ` › ` (`spec-render.sh` makes them a File / Section / Change table row in the PR). A row or note that itself contains a backtick is wrapped in double backticks (`` ``…`` ``), never nested single ones — GitHub ends the span at the inner backtick.
 - `## Deferred`: every point you did not ask, with the agent that settles it. Later agents remove the items they resolve.
 - `no-diff`: the violated entries, each `## <ID> — violated · <file> `## <heading>`` with its current text; no `Change:`.

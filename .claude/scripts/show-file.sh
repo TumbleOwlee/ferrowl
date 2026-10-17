@@ -23,6 +23,8 @@
 # Output is one line per file naming how it was shown, followed by that file's
 # quotable prompt lines (`prompt-lines.sh`) — never the rest of its content;
 # the shown line of an artifact file ends with ` (approval marker: <dir>/approval)`.
+# SHOW_FILE_LINES=none prints only the shown lines (prompt-render.sh quotes
+# all files in one prompt-lines.sh call instead).
 #
 # A user-facing summary (`*.summary.md`, `*.verdict.md`) is capped at
 # SUMMARY_MAX_LINES lines and SUMMARY_MAX_BYTES bytes: over the cap the call is
@@ -121,6 +123,6 @@ for file in "$@"; do
     else
         echo "show-file: no viewer available (need tmux+glow, wslview, or tmux+less); open manually: $abs$suffix"
     fi
-    sh "$(dirname -- "$0")/prompt-lines.sh" "$abs"
+    [ "${SHOW_FILE_LINES:-}" = none ] || sh "$(dirname -- "$0")/prompt-lines.sh" "$abs"
 done
 exit $rc

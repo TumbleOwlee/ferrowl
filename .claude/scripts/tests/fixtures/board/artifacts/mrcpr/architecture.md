@@ -10,5 +10,3 @@
 | `ModbusViewOverlay` | enum | ferrowl › module::modbus::view | changed | new `Settings(Box<ModuleSettingsDialog>)` variant |
 | `PendingAction` | enum | ferrowl › module::modbus::view::overlay | changed | new `SetReadRanges(ReadRanges)` variant, applied in refresh |
 | `ModbusCmd` | enum | ferrowl › module::modbus::view | changed | new `Module` variant, 13 commands |
-
-## Decisions

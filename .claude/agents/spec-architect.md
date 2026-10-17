@@ -32,7 +32,7 @@ Edit `spec-diff.md` in place:
 - sharpen or drop a draft entry
 - resolve `## Deferred` items owned by `architecture`, removing each
 
-A change that contradicts a scenario or a `decided (user)` line is asked first (`Entry:` line quoting it). Every other change is recorded under its entry as `decided (chosen, rev N)` — the user confirms it at the architecture stop. Each pass bumps the rev and adds one `Revisions:` line ending `(spec-architect)`.
+A change that contradicts a scenario or a `(user)` line of `decisions.md` is asked first (`Entry:` line quoting it). Every other change is appended to `decisions.md` as a `(chosen)` `[spec <ID>]` line — the user confirms it at the architecture stop (`.claude/agent-parts/decisions.md`). Each pass bumps the rev and adds one `Revisions:` line ending `(spec-architect)`.
 
 No `spec-diff.md` (a non-behavior change): no spec edits. A structure that needs observable behavior to change → end turn on `status=behavior-change reason=<what and why>`; the orchestrator runs gate 1, then resumes you.
 
@@ -79,9 +79,6 @@ Both `pr-body.sh` forms, the draft re-rendered on every card move and the gate 4
 - `<existing type or module>` — <kept | changed: what | replaced by `<new>` | removed>
 - ARCHITECTURE.md — <section to update | none>
 
-## Decisions
-- <choice> (<chosen | user>[, rev M]) [<design | process | spec <ID>>] — <≤ 1 line why>
-
 ## Code map
 ### `<fn, type or quoted unique string>` — <crate> <file>
 <what the plan needs from it, one line>
@@ -93,13 +90,13 @@ Both `pr-body.sh` forms, the draft re-rendered on every card move and the gate 4
 - <open point> — <plan | implementation>
 ````
 
-- `## Decisions`: line shape and tags, `sh .claude/scripts/extract-section.sh '## Decision lines' .claude/agents/spec-planner.md`.
+- Decisions — every structure choice, asked or not — go to `decisions.md`, never into this file: `.claude/agent-parts/decisions.md`.
 - `## Interfaces`: one subsection per new or changed component of `## Components`, as Rust that would compile with bodies filled in: a trait with every method signature, a struct with every field and its type, an enum with every variant and its fields. A changed existing type shows only its new or changed members. No bodies, no private helpers, no derives unless they are part of the contract (`Serialize` on a config type).
 - `## Interactions`: one subsection per scenario of `spec-diff.md` (a non-behavior change: per affected flow).
-- `## Code map` is the code you read that the plan will need, so the planner never reads it again: one `###` entry per location the change touches or must match, anchored on a name or a quoted unique string (never a line number), with the exact lines copied verbatim — never paraphrased — at most 15 per entry. Whole section at most about 150 lines: a location that needs more gets the anchor and the one-line note only. Leave out what you read and ruled out.
+- `## Code map` is the code you read that the plan will need, so the planner never reads it again and the implementer pulls single entries by anchor (`extract-section.sh --prefix '### \`<anchor>\`'`) — an anchor never changes once the architecture stop is approved: one `###` entry per location the change touches or must match, anchored on a name or a quoted unique string (never a line number), with the exact lines copied verbatim — never paraphrased — at most 15 per entry. Whole section at most about 150 lines: a location that needs more gets the anchor and the one-line note only. Leave out what you read and ruled out.
 - `## Deferred`: the brief's `plan`/`implementation` items plus your own.
 
-`architecture.summary.md` — the user's file, written last, rewritten whole on every revision, **≤ 25 lines / 2 KB** (`show-file.sh` refuses more). Decisions and shape only. Blank line between blocks:
+`architecture.summary.md` — the user's file, written last, rewritten whole on every revision, **≤ 25 lines / 2 KB** (`show-file.sh` refuses more). Shape only — decisions live in `decisions.md`. Blank line between blocks:
 
 ```
 # <slug> — architecture summary (rev N)
@@ -116,9 +113,6 @@ Public surface:
 - `<signature | error variant | config key>`
 - none
 
-Decisions taken (confirm):
-- <choice> — <≤ 1 line why>        ← only the (chosen) ones
-
 Open: <decision the user still owes, or none>
 ```
 
@@ -132,7 +126,7 @@ The change adds, changes or removes no type, trait, enum or module and touches n
 
 ## Revisions
 
-Resumed (or spawned fresh after a resume — re-read `architecture.md` first) with the user's change request, a planner's `arch-gap` reason, or a deviation the user kept during implementation (record it as a `(user)` decision): revise `architecture.md` in place (rev N+1), rewrite the summary. After the architecture stop was approved, a change to `## Components`, `## Interfaces`, `## Public surface` or a `(user)` decision is asked first; `## Interactions`/`## Code map` detail is not.
+Resumed (or spawned fresh after a resume — re-read `architecture.md` first) with the user's change request, a planner's `arch-gap` reason, or a deviation the user kept during implementation (append it to `decisions.md` as a `(user)` line): revise `architecture.md` in place (rev N+1), rewrite the summary. After the architecture stop was approved, a change to `## Components`, `## Interfaces`, `## Public surface` or a `(user)` line of `decisions.md` is asked first; `## Interactions`/`## Code map` detail is not.
 
 ## Hand-off
 

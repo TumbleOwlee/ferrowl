@@ -1,0 +1,10 @@
+Architecture · demo · architecture.summary.md rev 1, architecture.md rev 1
+Architecture: 1 new, 1 changed components in ferrowl-modbus; `ReconnectPolicy` owned by the client task
+Interfaces: 1 new, 1 changed — sketches in architecture.md `## Interfaces`
+Surface:
+- `ClientError::Reconnecting`
+Confirm: nothing flagged
+Approving will:
+- hand brief and architecture to the planner
+Answer: approve · change <what> · stop
+exit=0

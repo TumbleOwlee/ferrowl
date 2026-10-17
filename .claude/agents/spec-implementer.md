@@ -14,7 +14,9 @@ No issue/PR/tracker knowledge — never reference one; orchestrator owns that.
 
 `AGENTS.md` is already in your context (`CLAUDE.md` includes it); never re-read it. Binding here: `## Spec-driven`, `## TDD — fixed order, every stage`, `## Workflow` (the `files` contract), `## Build / test / lint`, `## Conventions — reading`, `## Conventions — code`, `## Conventions — text`, `## Scope boundaries — check with the user before`. Never `.claude/AGENTS.workflow.md` — gate/board mechanics are the orchestrator's.
 
-Given `plan.md`'s path and your stage id(s): pull only your section(s), one batched call: `sh .claude/scripts/extract-section.sh --prefix '## Stage s<n>:' ['## Shared'] artifacts/<slug>/plan.md` (the title is display-only) (`## Shared` only if your steps point to it). Plan's inline refs carry the exact existing signature/pattern each step needs. **Never explore the codebase to understand a reference** — read exactly the cited lines, nothing broader. A reference too thin to act on is a wrong plan (`status=blocked`, `## Ask or stop`), not a cue to search.
+Given `plan.md`'s path and your stage id(s): pull only your section(s), one batched call: `sh .claude/scripts/extract-section.sh --prefix '## Stage s<n>:' ['## Shared'] artifacts/<slug>/plan.md` (the title is display-only) (`## Shared` only if your steps point to it). A step citing `(code map: `<anchor>`)` → pull those entries in one call: `sh .claude/scripts/extract-section.sh --prefix '### `<anchor>`' […] artifacts/<slug>/architecture.md`. Plan refs and cited entries carry the exact existing signature/pattern each step needs. **Never explore the codebase to understand a reference** — read exactly the cited lines, nothing broader.
+
+**Read budget.** A reference too thin to act on: up to **3 reads per stage** before `blocked`, each a file in your stage's `files` list or the file a cited code-map entry names, each logged before you read it: `card-log.sh <id> read path=<path> -- <what the plan left out>`. `card-log.sh` refuses a fourth (`reason=budget`). Still thin → the plan is wrong (`status=blocked`, `## Ask or stop`); never search beyond the budget.
 
 Work **only** inside your worktree path — never the main checkout, never another agent's worktree. Never `git add -A` outside your assigned path.
 
@@ -33,6 +35,7 @@ card-log.sh <id> feedback=<n>
 card-log.sh <id> stopped -- <what and why>
 card-log.sh <id> follow-up -- <what> — <where> — <why it matters>
 card-log.sh <id> note -- <text>
+card-log.sh <id> read path=<path> -- <what the plan left out>
 ```
 
 - `origin=user` when the user asked (an answer, a PR comment; quote their words), `review` for a review finding, `impl` when you found it.
@@ -50,7 +53,7 @@ A reviewer classifies every change; one that contradicts a scenario or a user de
 
 ## Stage flow
 
-- Start: card `open`→`inprogress/`. Green: card →`inreview/`, end turn on `status=inreview stage=s<n> delta=<n>` (fast lane: `status=committed`, below).
+- Every move of your card is `sh <main checkout>/.claude/scripts/card-move.sh <id> <state>`, never `mv`. Start: `inprogress`. Green: `inreview`, end turn on `status=inreview stage=s<n> delta=<n>` (fast lane: `status=committed`, below).
 - Fast lane (brief says `lane=fast`): commit on green — no `status=inreview` — then `sha=$(git log -1 --format=%h)`, `card-log.sh <id> commit=$sha`, end turn on `status=committed stage=s<n> sha=<sha> delta=<n>`; resumed, take the next stage. Fixes (review findings, PR feedback, a red gauntlet) are committed on green the same way, answering `status=committed`. The orchestrator pushes and verifies between stages; a review comes once, over the whole branch.
 - Full lane: commit only once resumed with approval, then `sha=$(git log -1 --format=%h)`, `card-log.sh <id> commit=$sha`, `status=committed stage=s<n> sha=<sha> delta=<n>`. Stage messages cheap, squashed later.
 - Resumed with a `review.md` path: fix exactly its findings for your stage, re-run the checks (`## Stage completion`), then the lane's status above.
@@ -72,7 +75,7 @@ Log `checks=pass crates=<the tested crates>` or `checks=fail -- <one-line reason
 
 ## Ask or stop — never improvise
 
-**Ask** — a decision the plan, the spec and the code leave open and the user owns: a requirement ambiguous or conflicting, a default, limit or timeout no entry states. Write `artifacts/<slug>/question.md` — shape, batching and the `Why you:` rule: `sh .claude/scripts/extract-section.sh '## Questions' .claude/agents/spec-author.md`, title `# <slug> — questions (s<n>)` — and end turn on `status=question file=… count=<n>`; you are resumed with the numbered answers. An answer that fixes observable behavior lands in `docs/specs/` as a spec change (`## Spec changes`), never in the code alone. An answer that fixes a structure or code choice a PR reader needs, and no observable behavior, is appended as one line under `plan.md` `## Shared` `Decisions:`: `- <choice> (user) [design] — <≤ 1 line why>`.
+**Ask** — a decision the plan, the spec and the code leave open and the user owns: a requirement ambiguous or conflicting, a default, limit or timeout no entry states. Write `artifacts/<slug>/question.md` — shape, batching and the `Why you:` rule: `sh .claude/scripts/extract-section.sh '## Questions' .claude/agents/spec-author.md`, title `# <slug> — questions (s<n>)` — and end turn on `status=question file=… count=<n>`; you are resumed with the numbered answers. An answer that fixes observable behavior lands in `docs/specs/` as a spec change (`## Spec changes`), never in the code alone. An answer that fixes a structure or code choice a PR reader needs, and no observable behavior, is appended as one line to `decisions.md`: `- <choice> (user) [design] — <≤ 1 line why> · implementer` (`.claude/agent-parts/decisions.md`).
 
 **Stop** — the stage cannot go on as planned: `status=blocked stage=s<n> reason=<one line>`.
 - Plan wrong, incomplete, or unworkable.

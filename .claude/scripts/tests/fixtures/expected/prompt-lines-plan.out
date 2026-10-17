@@ -6,8 +6,5 @@ Verification:
 - s2 — demo TUI
   - stop the demo server, see "reconnecting", restart it, polling resumes
   - cannot be waived without asking
-Confirm:
-- one stage per crate — the UI change is reviewed apart
-- MB-R-161 — retry forever, no cap (chosen) — the user never wants a dead tab
-- MB-E-031 — drop the in-flight request (user) — a replayed write may apply twice
+Confirm: nothing flagged
 exit=0

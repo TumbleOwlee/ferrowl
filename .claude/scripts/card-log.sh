@@ -3,7 +3,8 @@
 #   card-log.sh <card-id> <event> [<positional>...] [k=v ...] [-- <free text>]
 # Prints nothing on success. Exit 1: card not found or ambiguous
 # (`card-log=card`); exit 2: usage or a line the vocabulary rejects
-# (`card-log=reject event=<e> reason=<event|key|scope|value|length>`).
+# (`card-log=reject event=<e> reason=<event|key|scope|value|length|budget>`;
+# budget: a fourth `read` on one stage card, READ_BUDGET overrides 3).
 # Board: $CLAUDE_PROJECT_DIR/.claude/tasks, else the main checkout's, which
 # is also found from inside a worktree. CARD_LOG_NOW overrides the stamp.
 #
@@ -19,7 +20,9 @@
 # both   feedback=      any               -        -                     no
 # stage  stopped        -                 -        -                     required
 # stage  follow-up      -                 -        -                     required
+# stage  read           -                 -        path                  required
 # both   note           -                 -        -                     required
+# both   moved=         open|inprogress|inreview|done -  -              no
 # stage  minor=         any               -        -                     yes
 # stage  minor-moved=   any               -        -                     yes
 # stage  files+=        any               -        user,reason           no
@@ -27,6 +30,8 @@
 # stage  stop=          any               -        -                     no
 # parent stop           -                 -        kind,gate,agent,count no
 # parent spec-rev=      any               -        -                     no
+# parent arch-rev=      any               -        -                     no
+# parent decisions-seen= any              -        -                     no
 # parent spec-keep=     any               -        -                     no
 # parent pr=            draft|ready       -        -                     no
 # parent gauntlet=      pass|fail         -        cov,sha,step,reason   no
@@ -34,6 +39,7 @@
 # parent replan=        approved          -        -                     no
 # parent plan-review=   any               -        count,round           no
 # parent review=        any               -        scope                 no
+# parent overturned     -                 -        scope,count           yes
 # parent rebuild        -                 -        reason                no
 # parent follow-ups=    any               -        -                     no
 # parent ci=            any               -        -                     no
@@ -106,6 +112,7 @@ done
 [ "$pspec" != id,kind ] || [ $npos = 2 ] || rej value
 [ "$name" != stop ] || case $kvs in *' kind='*) ;; *) rej key ;; esac
 [ "$name" != spec-delta ] || [ -n "$origin" ] || rej value
+[ "$name" != read ] || [ "$(grep -c '^[^ ]* read path=' "$card")" -lt "${READ_BUDGET:-3}" ] || rej budget
 case $tspec in
     no) [ "$intext" = 0 ] || rej value ;;
     required) [ -n "$text" ] || rej value ;;

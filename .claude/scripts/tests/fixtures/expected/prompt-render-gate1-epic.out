@@ -1,0 +1,24 @@
+Gate 1 · demo · spec-diff.md rev 5
+Goal: A client tab reconnects on its own after the server drops the connection.
+Scenarios: 1 — S1
+Entries: 2 new — MB-R-161, MB-E-031 · 1 changed — MB-R-042 · 1 dropped — MB-E-007
+Deferred: 2 — 1 implementation · 1 unowned
+Size: epic recommended — two areas, 14 entries
+Confirm:
+- MB-R-161 — reconnecting is its own state — the tab must tell it from disconnected (author)
+- MB-E-031 — drop it — a replayed write may apply twice (architect)
+- policy owned by the client task — RTU and TCP share it (architect)
+- MB-R-042 — reconnecting is its own state — the tab must tell it from disconnected (architect)
+- one stage per crate — the UI change is reviewed apart (planner)
+- backoff state lives in the client task — RTU and TCP share it (planner)
+- MB-R-161 — retry forever, no cap — the user never wants a dead tab (planner)
+- legacy line without a tag — skipped by every renderer (planner)
+Approving will:
+- record the run as an epic (option 1) or a single run in the lane chosen
+- hand the brief to the architect
+Options:
+1. epic — a shared skeleton, one issue per slice (recommended)
+2. single run, full lane
+3. single run, fast lane
+Answer: approve [<n>[: <value>] …] · change <what> · stop
+exit=0
