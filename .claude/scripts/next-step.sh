@@ -110,7 +110,7 @@ gate2_decision() {
 
 replan_decision() {
     from=$(awk '/^---$/ { fm = !fm; next } !fm && $2 == "replan" { for (i = 3; i <= NF; i++) if (index($i, "from=") == 1) v = substr($i, 6) } END { print v }' "$parent")
-    laststop=$(awk '/^---$/ { fm = !fm; next } !fm { if ($2 == "replan" && index($3, "from=") == 1) exit; if ($2 == "stop") s = $0 } END { print s }' "$parent")
+    laststop=$(awk '/^---$/ { fm = !fm; next } !fm { if ($2 == "replan" && index($3, "from=") == 1) p = s; if ($2 == "stop") s = $0 } END { print p }' "$parent")
     reason=
     case $laststop in *' gate=gate4'*) ;; *) reason=not-gate4 ;; esac
     if [ -z "$reason" ]; then
@@ -192,7 +192,7 @@ case "$at:$status" in
 esac
 
 if [ "${branch_clean:-}" = 1 ]; then
-    first=$(printf '%s\n' "$win" | awk '$2 ~ /^review=[0-9]+-open$/ { v = $2; sub(/^review=/, "", v); sub(/-open$/, "", v); print v; exit }')
+    first=$(printf '%s\n' "$win" | awk '$2 == "review=clean" || $2 ~ /^review=[0-9]+-resolved$/ { v = "" } v == "" && $2 ~ /^review=[0-9]+-open$/ { v = $2; sub(/^review=/, "", v); sub(/-open$/, "", v) } END { print v }')
     if [ -n "$first" ]; then log "review=$first-resolved"; else log review=clean; fi
     os=$(open_stage)
     if [ -n "$os" ]; then

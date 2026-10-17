@@ -46,4 +46,11 @@ run: sh .claude/scripts/prompt-render.sh replan-notice ns from=s3
 do: show the notice without stopping, then continue with the re-planned stages
 see: #### Re-plan
 exit=0
+$ next-step.sh ns replan status=clean file=.claude/tasks/artifacts/ns/review.md
+logged: plan-review=clean round=1
+next=stop reason=not-gate4
+run: sh .claude/scripts/prompt-render.sh replan ns from=s5
+do: show the re-plan stop and wait for the user's approval
+see: #### Re-plan
+exit=0
 exit=0

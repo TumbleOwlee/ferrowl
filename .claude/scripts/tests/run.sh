@@ -602,6 +602,9 @@ nsreplan() {
     nsboard full 2026-10-02 3 clean
     nscl stop kind=approval gate=gate4; nscl replan from=s3
     ns ns replan status=clean file=$R/review.md
+    nsboard fast 2026-10-02 2 clean
+    nscl stop kind=approval gate=gate4; nscl replan from=s3; nscl stop kind=stage; nscl replan from=s5
+    ns ns replan status=clean file=$R/review.md
 }
 golden next-step-replan nsreplan
 nsbranch() {
@@ -618,6 +621,8 @@ nsbranch() {
     nsboard full 2026-10-02 2 clean
     printf -- '---\nid: ns.s1\nparent: ns\n---\n' > "$NB/done/ns.s1.md"; printf -- '---\nid: ns.s2\nparent: ns\n---\n' > "$NB/done/ns.s2.md"
     ns ns branch status=findings file=$R/review.md summary=$R/review.verdict.md count=1 user=0
+    ns ns branch status=clean file=$R/review.md summary=$R/review.verdict.md
+    ns ns branch status=findings file=$R/review.md summary=$R/review.verdict.md count=3 user=0
     ns ns branch status=clean file=$R/review.md summary=$R/review.verdict.md
     nslog
 }
