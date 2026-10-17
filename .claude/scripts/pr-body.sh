@@ -12,8 +12,8 @@
 # ## Scenarios covered), ## Requirements (with the Issue column), ## Spec
 # changes since filing, ## Architecture (the Decide line, the component table
 # of architecture.md, the public surface; no interfaces) and ## Decisions
-# (design choices and the chosen spec decisions not already under the spec
-# changes).
+# (decisions.md's design choices and its chosen spec decisions not already
+# under the spec changes).
 #
 # draft:  status line (lane, spec rev, last green sha), ## Why, ## Scenarios,
 #         ## Stages (a stage's verification beyond unit tests as indented
@@ -154,11 +154,8 @@ live_changes() {
 
 # $1: chg_ids
 decisions() {
-    dec=$({
-        [ -f "$a/architecture.md" ] && awk '/^## Decisions$/ { on = 1; next } /^## / { on = 0 } on && /^- /' "$a/architecture.md"
-        [ -f "$a/plan.md" ] && awk '/^## Shared$/ { sh = 1; next } /^## / { sh = 0 } sh && /^Decisions:/ { on = 1; next } on && /^- / { print; next } on { on = 0 }' "$a/plan.md"
-    } | awk -v ids=" $1" '
-        !match($0, / \((chosen|user)(, rev [0-9]+)?\) \[(design|process|spec [A-Z0-9-]+)\]( — .*)?$/) { next }
+    dec=$({ [ -f "$a/decisions.md" ] && grep '^- ' "$a/decisions.md"; } | awk -v ids=" $1" '
+        !match($0, / \((chosen|user)\) \[(design|process|scope|spec [A-Z0-9-]+)\]/) { next }
         {
             choice = substr($0, 3, RSTART - 3); meta = substr($0, RSTART + 2)
             who = meta; sub(/[,)].*/, "", who)

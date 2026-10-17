@@ -25,7 +25,7 @@ Scope token from caller: `plan` (no diff; `## Plan scope`), `plan from s<n>` (a 
 
 **`epic.md`** (slice run only, given by the caller): the epic's skeleton `## Interfaces`, then the epic's comments (kept changes, which override). Architecture conformance also checks the skeleton: a skeleton signature the slice changed without a `(user)` decision under `architecture.md` `## Decisions` → `Needs user`.
 
-**`architecture.md`** (absent when the run had no architecture step — skip the axis): stage scope → `## Components`, `## Interfaces`, `## Public surface`, `## Decisions`; `branch`/`plan` scope → whole file.
+**`architecture.md`** (absent when the run had no architecture step — skip the axis): stage scope → `## Components`, `## Interfaces`, `## Public surface`; `branch`/`plan` scope → whole file. **`decisions.md`** — the run's decisions, one line each; the `(user)` lines bind like approved text.
 
 ## Plan scope
 
@@ -47,7 +47,7 @@ Scope `plan` or `plan from s<n>`: read `.claude/agent-parts/spec-reviewer-plan.m
 
 Every change to `docs/specs/` after `s0` — `git diff <base>...HEAD -- docs/specs` against the card's `spec-delta` lines; an unlogged change is a major. No cards (caller says so): skip the log check; every branch spec text differing from the caller's approved baseline is a change to classify. Check each against `docs/specs/README.md` rules (a violation is a standards finding), then classify:
 
-- **meaningful** — contradicts a scenario, a `decided (user)` line or a `(user)` architecture decision; or widens or narrows what a user sees beyond a `## Deferred` item; or reaches outside the goal. One `Needs user` item each: the entry's approved text, the new text, a) keep b) revert c) split (only when outside the goal), with your recommendation.
+- **meaningful** — contradicts a scenario or a `(user)` line of `decisions.md`; or widens or narrows what a user sees beyond a `## Deferred` item; or reaches outside the goal. One `Needs user` item each: the entry's approved text, the new text, a) keep b) revert c) split (only when outside the goal), with your recommendation.
 - **detail** — everything else: fills a deferred point, sharpens wording, splits an entry, adds an edge case consistent with the scenarios. Listed on the verdict's `Spec changes` line; no decision.
 
 ## Follow-up pass

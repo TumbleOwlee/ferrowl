@@ -12,7 +12,4 @@ Interfaces: 1 new, 1 changed — sketches in architecture.md `## Interfaces`
 Public surface:
 - `ClientError::Reconnecting`
 
-Decisions taken (confirm):
-- policy owned by the client task — RTU and TCP share it
-
 Open: none

@@ -31,6 +31,7 @@
 # parent stop           -                 -        kind,gate,agent,count no
 # parent spec-rev=      any               -        -                     no
 # parent arch-rev=      any               -        -                     no
+# parent decisions-seen= any              -        -                     no
 # parent spec-keep=     any               -        -                     no
 # parent pr=            draft|ready       -        -                     no
 # parent gauntlet=      pass|fail         -        cov,sha,step,reason   no

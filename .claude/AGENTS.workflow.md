@@ -66,6 +66,7 @@ By running, never by reading:
 ```
 .claude/tasks/artifacts/<slug>/
   spec-diff.md       gate 1 brief, then the run's spec until s0 — local IDs until gate 2; synced from the branch at gate 4
+  decisions.md       every decision of the run, one line each, appended by every agent — the one source of Confirm: and the PR's ## Decisions
   architecture.md    components, structure, interactions, public surface, code map — the plan's target
   architecture.summary.md  architecture decisions the user approves, capped
   plan.md            gate 2 stages, steps, dependency tree — the implementer's contract
@@ -170,11 +171,11 @@ Two shapes, one answer grammar each:
 
 Notices (`auto`, `gate2-notice`) are one line, no answer awaited, never logged as a stop.
 
-Approved → `sh .claude/scripts/prompt-render.sh approved <slug>` first: it logs `spec-rev=`/`arch-rev=` for the files the stop showed, so the next stop quotes only what changed since.
+Approved → `sh .claude/scripts/prompt-render.sh approved <slug>` first: it logs `spec-rev=`/`arch-rev=` for the files the stop showed and `decisions-seen=` for `decisions.md`, so the next stop shows only the files that moved and confirms only the decisions written since.
 
 ### Relayed question
 
-An agent's `status=question` names `artifacts/<slug>/question.md` (shape: `spec-author.md` `## Questions`): `prompt-render.sh question <slug> where=<gate or s<n>> agent=<agent>` prints it whole as the prompt, never in the viewer. Answers go back to the agent that asked (*Principles — implementation*) in one message, numbered. An implementer's answered design-grade decision is appended by the implementer to `plan.md` `## Shared` `Decisions:` as `(user) [design]`; a behavioral answer lands as a spec change with its `spec-delta`; the next card move's draft render shows either. A decision marked `Assumes: <n> = <option>` is void when the user answered `<n>` otherwise; the agent asks it again in its next `question.md`, as it does a decision that depended on an answer and waited. A question without a real `Why you:` is sent back: the agent decides it and records `(chosen)`.
+An agent's `status=question` names `artifacts/<slug>/question.md` (shape: `spec-author.md` `## Questions`): `prompt-render.sh question <slug> where=<gate or s<n>> agent=<agent>` prints it whole as the prompt, never in the viewer. Answers go back to the agent that asked (*Principles — implementation*) in one message, numbered. An implementer's answered design-grade decision is appended by the implementer to `decisions.md` as `(user) [design]`; a behavioral answer lands as a spec change with its `spec-delta`; the next card move's draft render shows either. A decision marked `Assumes: <n> = <option>` is void when the user answered `<n>` otherwise; the agent asks it again in its next `question.md`, as it does a decision that depended on an answer and waited. A question without a real `Why you:` is sent back: the agent decides it and records `(chosen)`.
 
 ### Gate 1 — brief
 
@@ -291,9 +292,9 @@ The PR link is never added by hand: the PR's `Closes #<n>` line makes GitHub cro
 - A fresh `spec-implementer`, spawned with worktree path, plan path, its stage cards and `lane=fast|full`.
 - **At most 3 code stages per implementer** (`s0` does not count). The next stage gets a fresh one, which starts from its cards and plan sections, never from its predecessor's context. Fixes for an earlier stage (gate 3 findings, PR feedback, a red gauntlet) go to the current implementer, briefed with that stage's card.
 - Not done until the plan's Verification method has run and its outcome is reported. Waiving it requires asking.
-- **The draft PR body is the board, rendered** by `pr-body.sh <slug> draft` — regenerated and pushed with `gh pr edit <pr> --body-file <(tail -n +2 artifacts/<slug>/pr-draft.md)` on **every card move** once the PR exists. It is the living PR: status line, `## Why`, `## Scenarios`, `## Stages` (each stage's verification as sub-items under its line, stage ids only in HTML comments), `## Review here`, then the sections the gate 4 body shares: `## Requirements`, `## Spec changes since filing`, `## Architecture` (the current `architecture.md` rev) and `## Decisions` (`architecture.md` and `plan.md` `## Shared` `Decisions:`, implementer lines included).
+- **The draft PR body is the board, rendered** by `pr-body.sh <slug> draft` — regenerated and pushed with `gh pr edit <pr> --body-file <(tail -n +2 artifacts/<slug>/pr-draft.md)` on **every card move** once the PR exists. It is the living PR: status line, `## Why`, `## Scenarios`, `## Stages` (each stage's verification as sub-items under its line, stage ids only in HTML comments), `## Review here`, then the sections the gate 4 body shares: `## Requirements`, `## Spec changes since filing`, `## Architecture` (the current `architecture.md` rev) and `## Decisions` (`decisions.md`'s design lines and its chosen spec lines not already under spec changes).
 - `## Spec changes since filing` in the draft = the cards' `spec-delta` lines whose `**<ID>**` the committed `git diff main...<branch> -- docs/specs` touches, last line per ID; omitted without a `branch` or when git fails. IDs added after filing show only under spec changes until gate 4.
-- `pr-body.sh <slug> draft` exit 3 (`body=refused stage-ref=<token>`): the token sits in a card's `spec-delta` why or a `Decisions:` line; resume the agent that wrote it to re-log the `spec-delta` (last line per ID wins) or reword its line; never edit the body by hand; the PR keeps its previous body until then.
+- `pr-body.sh <slug> draft` exit 3 (`body=refused stage-ref=<token>`): the token sits in a card's `spec-delta` why or a `decisions.md` line; resume the agent that wrote it to re-log the `spec-delta` (last line per ID wins) or reword its line; never edit the body by hand; the PR keeps its previous body until then.
 - **The first push opens the draft PR** from that file; orchestrator records `pr` on the parent card, logs `pr=draft`. Every later push updates it; the user reviews there (*PR feedback*).
 
 ```sh

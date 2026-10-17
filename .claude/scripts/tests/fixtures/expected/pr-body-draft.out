@@ -45,8 +45,9 @@ Public surface:
 - `ClientError::Reconnecting`
 
 ## Decisions
-- policy owned by the client task (chosen)
 - reconnecting is its own state (chosen)
+- drop it (chosen)
+- policy owned by the client task (chosen)
 - backoff state lives in the client task (chosen)
 - retry forever, no cap (chosen)
 

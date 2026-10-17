@@ -1,0 +1,6 @@
+Confirm:
+- one stage per crate — the UI change is reviewed apart (planner)
+- backoff state lives in the client task — RTU and TCP share it (planner)
+- MB-R-161 — retry forever, no cap — the user never wants a dead tab (planner)
+- legacy line without a tag — skipped by every renderer (planner)
+exit=0

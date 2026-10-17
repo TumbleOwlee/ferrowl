@@ -13,7 +13,7 @@ Check `plan.md` against `spec-diff.md`, spec-fidelity axis only:
 - no local `R<n>`/`E<n>` left; every fixed ID new to the run is unused on `main` (`git grep -n <ID> main -- docs/specs`) and sequential within its prefix
 - every scenario `S<n>` is pinned by a test or a stage's Verification
 - the plan reaches `architecture.md`: every new or changed component has a stage, no stage builds one it doesn't name, and every signature in `## Interfaces` appears as written in the step that builds it
-- spec edits the planner made since the architecture stop are recorded (`Revisions:`, a `decided` line under each)
+- spec edits the planner made since the architecture stop are recorded (`Revisions:`, a `decisions.md` line each)
 - every stage's `files` list covers what its steps touch and matches `## Shared`
 - every stage title obeys `sh .claude/scripts/extract-section.sh '## Stage title' .claude/agents/spec-planner.md` and matches its heading and tree entry
 

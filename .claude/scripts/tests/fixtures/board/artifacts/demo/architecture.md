@@ -13,7 +13,3 @@
 ```rust
 pub struct ReconnectPolicy { pub max_backoff: Duration }
 ```
-
-## Decisions
-- policy owned by the client task (chosen) [design] — RTU and TCP share it
-- reconnecting is its own state (chosen, rev 3) [spec MB-R-042] — the tab must tell it from disconnected

@@ -29,13 +29,15 @@
 # Record:
 #   approved                                        logs `spec-rev=` / `arch-rev=` for the files
 #                                                   the last stop showed (its approval marker)
+#                                                   and `decisions-seen=` (decisions.md's line count)
 #
 # Which files a stop shows follows from the cards: spec-diff.md whenever the
 # brief is not approved yet (`gate1:` is no date) or its rev moved past the
 # last `spec-rev=`; architecture.summary.md at a re-plan only when its rev
 # moved past `arch-rev=`; review.verdict.md at gate 2 and a re-plan only with
-# a `Needs user` item; at gate 4 in the fast and light lanes. PROMPT_SINCE_REV
-# is the last `spec-rev=`. SHOW_FILE_VIEWER passes through to show-file.sh.
+# a `Needs user` item; at gate 4 in the fast and light lanes. Every stop that
+# confirms decisions quotes decisions.md below the last `decisions-seen=`.
+# SHOW_FILE_VIEWER passes through to show-file.sh.
 # Exit: show-file.sh's (3: a summary over its cap, the agent trims it), 2 usage.
 set -u
 usage() { echo "usage: $0 <gate1|arch|epic|gate2|stage|replan|gate3|gate4|question|blocked|delta|auto|gate2-notice|approved> <slug> [k=v ...]" >&2; exit 2; }
@@ -64,7 +66,7 @@ has_needs_user() { [ -f "$art/review.verdict.md" ] && awk '/^Needs user/ { on = 
 stages() { for c in "$board"/*/"$slug".s[0-9]*.md; do [ -f "$c" ] || continue; s=${c##*.s}; echo "${s%.md}"; done | sort -n; }
 
 lane=$(field lane); gate1=$(field gate1); branch=$(field branch); issue=$(field issue)
-since=$(field log:spec-rev); archrev=$(field log:arch-rev)
+since=$(field log:spec-rev); archrev=$(field log:arch-rev); seen=$(field log:decisions-seen)
 brief_pending=0
 case $gate1 in [0-9][0-9][0-9][0-9]-*) ;; *) [ -f "$art/spec-diff.md" ] && brief_pending=1 ;; esac
 spec_moved() { r=$(rev "$art/spec-diff.md"); [ -n "$r" ] && [ "$r" -gt "${since:-0}" ]; }
@@ -73,15 +75,16 @@ want_spec() { [ -f "$art/spec-diff.md" ] && { [ "$brief_pending" = 1 ] || spec_m
 
 case $kind in
 approved)
-    m=$art/approval
-    [ -f "$m" ] || { echo "approved=none"; exit 0; }
     out=approved
-    while IFS= read -r f; do
-        case $(basename "$f") in
-            spec-diff.md) r=$(rev "$f"); [ -n "$r" ] && { log "spec-rev=$r"; out="$out spec-rev=$r"; } ;;
-            architecture.summary.md) r=$(rev "$f"); [ -n "$r" ] && { log "arch-rev=$r"; out="$out arch-rev=$r"; } ;;
-        esac
-    done < "$m"
+    if [ -f "$art/approval" ]; then
+        while IFS= read -r f; do
+            case $(basename "$f") in
+                spec-diff.md) r=$(rev "$f"); [ -n "$r" ] && { log "spec-rev=$r"; out="$out spec-rev=$r"; } ;;
+                architecture.summary.md) r=$(rev "$f"); [ -n "$r" ] && { log "arch-rev=$r"; out="$out arch-rev=$r"; } ;;
+            esac
+        done < "$art/approval"
+    fi
+    [ -f "$art/decisions.md" ] && { n=$(wc -l < "$art/decisions.md" | tr -d ' '); log "decisions-seen=$n"; out="$out decisions-seen=$n"; }
     echo "$out"; exit 0 ;;
 auto)
     sid=$(arg stage); [ -n "$sid" ] || usage
@@ -99,12 +102,12 @@ show= quote=
 add() { [ -f "$art/$1" ] && show="$show $art/$1"; }
 addq() { [ -f "$art/$1" ] && quote="$quote $art/$1"; }
 case $kind in
-    gate1) add spec-diff.md ;;
-    arch) want_spec && add spec-diff.md; add architecture.summary.md; add architecture.md ;;
-    epic) want_spec && add spec-diff.md; add architecture.summary.md; add architecture.md; add slices.md; addq issue.md ;;
-    gate2|gate2-notice) want_spec && add spec-diff.md; add plan.summary.md; has_needs_user && add review.verdict.md; addq issue.md; addq split-issue.md ;;
+    gate1) add spec-diff.md; addq decisions.md ;;
+    arch) addq decisions.md; want_spec && add spec-diff.md; add architecture.summary.md; add architecture.md ;;
+    epic) addq decisions.md; want_spec && add spec-diff.md; add architecture.summary.md; add architecture.md; add slices.md; addq issue.md ;;
+    gate2|gate2-notice) addq decisions.md; want_spec && add spec-diff.md; add plan.summary.md; has_needs_user && add review.verdict.md; addq issue.md; addq split-issue.md ;;
     replan)
-        want_spec && add spec-diff.md
+        addq decisions.md; want_spec && add spec-diff.md
         ar=$(rev "$art/architecture.summary.md"); [ -n "$ar" ] && [ "$ar" -gt "${archrev:-0}" ] && add architecture.summary.md
         add plan.summary.md; has_needs_user && add review.verdict.md ;;
     stage|gate3) add review.verdict.md ;;
@@ -134,7 +137,7 @@ hdr_files() {
 quoted() {
     # shellcheck disable=SC2086
     [ -n "$show$quote$extra" ] || return 0
-    { [ -z "$show$quote" ] || PROMPT_SINCE_REV=${since:-0} sh "$here/prompt-lines.sh" $show $quote 2>/dev/null
+    { [ -z "$show$quote" ] || DECISIONS_SEEN=${seen:-0} sh "$here/prompt-lines.sh" $show $quote 2>/dev/null
       [ -z "$extra" ] || printf '%s\n' "$extra"; } | awk -v iss="$(arg issue)" '
         function rank(l) {
             if (l ~ /^Goal: /) return 1;      if (l ~ /^Scenarios: /) return 2; if (l ~ /^Entries:/) return 3

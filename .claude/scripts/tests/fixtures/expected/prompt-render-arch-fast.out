@@ -7,11 +7,7 @@ Architecture: 1 new, 1 changed components in ferrowl-modbus; `ReconnectPolicy` o
 Interfaces: 1 new, 1 changed — sketches in architecture.md `## Interfaces`
 Surface:
 - `ClientError::Reconnecting`
-Confirm:
-- MB-R-161 — reconnecting is its own state — the tab must tell it from disconnected
-- MB-E-031 — drop it — a replayed write may apply twice
-- policy owned by the client task — RTU and TCP share it
-- MB-R-042 — reconnecting is its own state (chosen) — the tab must tell it from disconnected
+Confirm: nothing flagged
 Approving will:
 - approve the brief
 - hand brief and architecture to the planner

@@ -136,10 +136,10 @@ golden pr-body-mrcpr-draft-nobranch env CLAUDE_PROJECT_DIR="$P" sh "$scripts/pr-
 # --- prompt-lines.sh
 P=$(project); A=$P/.claude/tasks/artifacts/demo
 golden prompt-lines-spec-diff sh "$scripts/prompt-lines.sh" "$A/spec-diff.md"
-golden prompt-lines-since-rev env PROMPT_SINCE_REV=2 sh "$scripts/prompt-lines.sh" "$A/spec-diff.md"
+golden prompt-lines-decisions sh "$scripts/prompt-lines.sh" "$A/decisions.md"
+golden prompt-lines-decisions-seen env DECISIONS_SEEN=7 sh "$scripts/prompt-lines.sh" "$A/decisions.md"
 golden prompt-lines-architecture sh "$scripts/prompt-lines.sh" "$A/architecture.summary.md"
 golden prompt-lines-plan sh "$scripts/prompt-lines.sh" "$A/plan.summary.md"
-golden prompt-lines-plan-since-rev env PROMPT_SINCE_REV=3 sh "$scripts/prompt-lines.sh" "$A/plan.summary.md"
 golden prompt-lines-verdict sh "$scripts/prompt-lines.sh" "$A/review.verdict.md"
 golden prompt-lines-titles sh "$scripts/prompt-lines.sh" "$A/issue.md" "$A/split-issue.md" "$A/pr.md" "$A/follow-up-1.md"
 golden prompt-lines-question sh "$scripts/prompt-lines.sh" "$A/question.md"
