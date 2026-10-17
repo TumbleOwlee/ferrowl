@@ -7,7 +7,7 @@
 #
 # Prints: <slug> start=<ts> end=<ts> first-red=<ts|-> stages=<n> stops=<n>
 #         question=<n> approval=<n> stage=<n> blocked=<n> replans=<n>
-#         overturned=<n> reads=<n> lane=<fast|full|light|epic|->
+#         overturned=<n> reads=<n> lane=<fast|full|epic|->
 # start = the earliest log line on any card of the run, first-red = the
 # earliest `test-red` on a stage card, stops = the parent card's `stop kind=`
 # lines, overturned = the sum of the parent's `overturned count=` lines

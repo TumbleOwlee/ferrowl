@@ -6,9 +6,9 @@
 # fixtures/expected/replay-<scenario>.out. Deterministic: fixed clock,
 # identity and commit dates, so shas are stable.
 #
-#   sh .claude/scripts/tests/replay.sh <full|fast-replan|light|resume>
+#   sh .claude/scripts/tests/replay.sh <full|fast-replan|fast-noarch|pr-replan|resume>
 set -u
-scenario=${1:?usage: replay.sh <full|fast-replan|light|resume>}
+scenario=${1:?usage: replay.sh <full|fast-replan|fast-noarch|pr-replan|resume>}
 scripts=$(cd "$(dirname -- "$0")/.." && pwd)
 tmp=$(mktemp -d) || exit 1
 trap 'rm -rf "$tmp"' EXIT INT TERM
@@ -81,10 +81,12 @@ full)
     impl 2; run stage-stop.sh rp s2
     run prompt-render.sh stage rp stage=s2 reason=verification "detail=demo TUI"
     echo "user: approve"; run prompt-render.sh approved rp; commit 2
-    step "s3 green: the last code stage is gate 3's stop"
-    impl 3; run stage-stop.sh rp s3; run prompt-render.sh gate3 rp
-    echo "user: approve"; commit 3
+    step "s3 green, clean branch review: commits without a stop, gate 4's stop is its stop"
+    impl 3; run stage-stop.sh rp s3; commit 3; run prompt-render.sh auto rp stage=s3
     run card-move.sh rp inreview; board
+    step "gate 4 shows the branch verdict"
+    printf '# Read register 65535\n\n## Why\nThe last register reads.\n' > "$A/pr.md"
+    run prompt-render.sh gate4 rp pr=9
     step "end of run"
     run reconcile.sh rp
     run metrics.sh rp ;;
@@ -115,12 +117,12 @@ fast-replan)
     for i in 1 2 3; do impl "$i"; commit "$i"; done
     board
     run metrics.sh rp ;;
-light)
-    setup light 1
+fast-noarch)
+    setup fast 1
     sed -i 's/^gate1: .*/gate1: with-plan/; s/^arch: .*/arch: skipped/' "$B/open/rp.md"
     printf '# rp — spec diff (rev 1)\n\n## Summary\nGoal: Register 65535 reads correctly.\n\n## S1 — Read the last register\n\n## R1 — changed · requirements `## Addressing`\nAddresses span 0 to 65535 inclusive.\n' > "$A/spec-diff.md"
     printf '# Read register 65535\n' > "$A/issue.md"
-    step "no architecture step, no plan review: gate 2 is the first stop and approves the brief"
+    step "no architecture step: gate 2 is the first stop and approves the brief"
     run prompt-render.sh gate2 rp issue=new
     echo "user: approve"; run prompt-render.sh approved rp
     sed -i 's/^gate1: .*/gate1: 2026-10-03\ngate2: 2026-10-03/' "$B/open/rp.md"
@@ -128,9 +130,34 @@ light)
     run card-move.sh rp inprogress
     step "one code stage, committed on green"
     impl 0; commit 0; impl 1; commit 1; board
-    step "gate 3's branch review is the only review; gate 4 shows its verdict"
+    step "gate 3's branch review is the only code review; gate 4 shows its verdict"
     run card-move.sh rp inreview
     printf '# Read register 65535\n\n## Why\nThe last register reads.\n' > "$A/pr.md"
+    run prompt-render.sh gate4 rp pr=9
+    run metrics.sh rp ;;
+pr-replan)
+    setup full 1
+    sed -i 's/^arch: .*/&\ngate2: 2026-10-03/' "$B/open/rp.md"
+    git -C "$R" worktree add -q "$W" -b feat/rp main
+    run card-move.sh rp inprogress
+    impl 0; run stage-stop.sh rp s0; commit 0
+    step "s1, the last code stage, clean branch review: commits without a stop"
+    impl 1; run stage-stop.sh rp s1; commit 1; run prompt-render.sh auto rp stage=s1
+    run card-move.sh rp inreview
+    printf '# Read register 65535\n\n## Why\nThe last register reads.\n' > "$A/pr.md"
+    step "gate 4 shows the verdict; the user asks for a re-plan"
+    run prompt-render.sh gate4 rp pr=9
+    echo "user: re-plan: split the parser out"
+    step "re-plan from s2, pre-authorized at gate 4: a notice, no stop"
+    run card-move.sh rp inprogress
+    run card-log.sh rp replan from=s2
+    printf -- '---\nid: rp.s2\nparent: rp\ntitle: Stage 2\nblocked-by: [rp.s1]\nfiles: [f2.txt]\n---\n' > "$B/open/rp.s2.md"
+    printf '# rp — plan summary (rev 2)\n\nDecide: 1 more stage.\n' > "$A/plan.summary.md"
+    run prompt-render.sh replan-notice rp from=s2
+    run card-log.sh rp replan=pre-authorized; board
+    step "s2 lands on its clean branch review; gate 4 shows verdict, new plan and PR"
+    impl 2; run stage-stop.sh rp s2; commit 2; run prompt-render.sh auto rp stage=s2
+    run card-move.sh rp inreview
     run prompt-render.sh gate4 rp pr=9
     run metrics.sh rp ;;
 resume)

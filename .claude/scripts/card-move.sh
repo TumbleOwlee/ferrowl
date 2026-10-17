@@ -15,7 +15,7 @@
 #   open → inprogress        `gate2:` is set
 #   open → inreview          `kind: epic` (an epic has no implementation)
 #   inprogress → inreview    gate 3 starts
-#   inreview → inprogress    a fix after gate 3
+#   inreview → inprogress    a fix after gate 3, a re-plan asked at gate 4
 #   never done — the run ends in run-cleanup.sh
 # Moving a card to the state it is in is a no-op. Prints nothing on success.
 # Exit 1: card not found or ambiguous (`card-move=card`); exit 2: usage or a

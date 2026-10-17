@@ -490,9 +490,11 @@ is stage-stop-logged "2026-10-05T09:00 stop=1" "$(tail -1 "$SB/open/ss.s1.md")"
 printf 'Verdict: clean — ready for approval\n\nNeeds user\n- none\n' > "$SB/artifacts/ss/review.verdict.md"
 is stage-stop-verification 'stop=2 reason=verification detail="demo TUI"' "$(run_s stage-stop.sh ss s3)"
 is stage-stop-threads 'stop=3 reason=pr-threads detail="2 threads"' "$(run_s stage-stop.sh ss s1 threads=2)"
-is stage-stop-last "stop=4 reason=last-stage" "$(run_s stage-stop.sh ss s5)"
+is stage-stop-last "auto" "$(run_s stage-stop.sh ss s5)"
 sscard 2 open 'stop: yes'
 is stage-stop-plan-marked "stop=5 reason=plan-marked" "$(run_s stage-stop.sh ss s2)"
+sscard 5 open 'stop: yes'
+is stage-stop-last-plan-marked "stop=5 reason=plan-marked" "$(run_s stage-stop.sh ss s5)"
 printf 'a\n' > "$SW/a.txt"; printf 'b\nc\n' > "$SW/b.txt"
 is stage-stop-diff-size 'stop=6 reason=diff-size detail="3 lines, 2 files"' "$(STAGE_STOP_FILES=1 run_s stage-stop.sh ss s1)"
 is stage-stop-diff-under auto "$(STAGE_STOP_FILES=2 run_s stage-stop.sh ss s1)"
@@ -554,7 +556,7 @@ hook shell-mv-other hook-guard-shell.sh 'mv notes.md docs/notes.md' allow
 hook shell-card-move hook-guard-shell.sh 'sh .claude/scripts/card-move.sh demo.s2 done' allow
 
 # --- replayed runs: the decision scripts in workflow order, fake agents (replay.sh)
-for sc in full fast-replan light resume; do golden "replay-$sc" sh "$here/replay.sh" "$sc"; done
+for sc in full fast-replan fast-noarch pr-replan resume; do golden "replay-$sc" sh "$here/replay.sh" "$sc"; done
 
 # --- prompt-render.sh, on the fixture board
 P=$(project); D=$P/.claude/tasks
@@ -572,6 +574,7 @@ golden prompt-render-blocked pr_ blocked demo stage=s2 "reason=the parse_frame r
 golden prompt-render-delta pr_ delta demo stage=s1
 golden prompt-render-auto pr_ auto demo stage=s1
 golden prompt-render-gate2-notice pr_ gate2-notice demo issue=new
+golden prompt-render-replan-notice pr_ replan-notice demo from=s3
 golden prompt-render-epic pr_ epic lb
 golden prompt-render-stops sh -c 'grep " stop " "$0" | cut -d" " -f2-' "$D/inprogress/demo.md"
 P=$(project); D=$P/.claude/tasks
