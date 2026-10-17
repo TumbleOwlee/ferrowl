@@ -122,11 +122,12 @@ P=$(project); gp() { git -C "$P" -c user.name=t -c user.email=t@t -c commit.gpgs
 gp init -q -b main; mkdir -p "$P/docs/specs/modbus"
 printf '**MB-R-001** — A register has exactly five properties.\n' > "$P/docs/specs/modbus/requirements.md"
 gp add docs; gp commit -qm base; gp checkout -q -b feat/mrcpr
-printf '**MB-R-294** — `Esc` opens the close-confirmation popup.\n**MB-R-301** — The error box tracks the inputs live.\n**MB-R-293** — The inputs are trimmed.\n' >> "$P/docs/specs/modbus/requirements.md"
+printf '**MB-R-294** — `Esc` opens the close-confirmation popup.\n**MB-R-301** — The error box tracks the inputs live.\n**MB-R-293** — The inputs are trimmed.\n**MB-R-292** — `Enter` is refused while an input fails.\n' >> "$P/docs/specs/modbus/requirements.md"
 gp commit -qam branch
 printf '**MB-R-295** — Polling continues.\n' >> "$P/docs/specs/modbus/requirements.md"
 CLAUDE_PROJECT_DIR="$P" CARD_LOG_NOW=2026-10-16T20:31 sh "$scripts/card-log.sh" mrcpr.s3 spec-delta MB-R-295 added origin=impl -- polls on >/dev/null
-CLAUDE_PROJECT_DIR="$P" CARD_LOG_NOW=2026-10-16T20:30 sh "$scripts/card-log.sh" mrcpr.s3 spec-delta MB-R-294 changed quote=Yes origin=review -- popup on Esc >/dev/null
+CLAUDE_PROJECT_DIR="$P" CARD_LOG_NOW=2026-10-16T20:30 sh "$scripts/card-log.sh" mrcpr.s3 spec-delta MB-R-294 changed quote=Yes origin=user -- popup on Esc >/dev/null
+CLAUDE_PROJECT_DIR="$P" CARD_LOG_NOW=2026-10-16T20:32 sh "$scripts/card-log.sh" mrcpr.s3 spec-delta MB-R-292 changed "quote=Keep it open." origin=user -- refuse on Enter >/dev/null
 golden pr-body-mrcpr-draft-live env CLAUDE_PROJECT_DIR="$P" sh "$scripts/pr-body.sh" mrcpr draft
 sed -i '/^branch:/d' "$P/.claude/tasks/inreview/mrcpr.md"
 golden pr-body-mrcpr-draft-nobranch env CLAUDE_PROJECT_DIR="$P" sh "$scripts/pr-body.sh" mrcpr draft

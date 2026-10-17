@@ -7,7 +7,7 @@
 #   sh spec-render.sh <spec-diff.md> entries [--only "<ids>"] [--first 0|1]  # ### Requirements table + ### Other spec changes
 #   sh spec-render.sh <spec-diff.md> entries --issue-ids <card-dir>
 #                                   # PR form: `| ID | Issue | Kind | Requirement |`, Issue = `R<n>` from `· was R<n>`;
-#                                   # Kind gains `, reworded after filing` when a card of the run holds `spec-delta <ID> changed origin=`
+#                                   # Kind gains `, reworded after filing` when a card of the run holds a `spec-delta <ID> changed` line with an `origin=` field (any field order)
 #   sh spec-render.sh <spec-diff.md> changes                       # dated Revisions lines ending (user), (review) or (impl)
 #   sh spec-render.sh <spec-diff.md> deferred                      # ### Deferred list
 #
@@ -35,7 +35,16 @@ done
 deltas=
 if [ -n "$cards" ]; then
     slug=$(basename "$(cd "$(dirname "$file")" && pwd)")
-    deltas=$(cat "$cards"/*/"$slug".md "$cards"/*/"$slug".s*.md 2>/dev/null | sed -n 's/.* spec-delta \([^ ]*\) changed origin=.*/\1/p' | tr '\n' ' ')
+    deltas=$(cat "$cards"/*/"$slug".md "$cards"/*/"$slug".s*.md 2>/dev/null | awk '$2 == "spec-delta" && $4 == "changed" {
+        rest = $0; sub(/^[^ ]+ spec-delta [^ ]+ [^ ]+/, "", rest)
+        while (match(rest, /^ +(origin|quote)=/)) {
+            field = substr(rest, 1, RLENGTH)
+            rest = substr(rest, RLENGTH + 1)
+            if (substr(rest, 1, 1) == "\"") { rest = substr(rest, 2); i = index(rest, "\""); rest = substr(rest, i + 1) }
+            else { i = index(rest, " "); if (i == 0) i = length(rest) + 1; rest = substr(rest, i) }
+            if (field ~ /origin=$/) { print $3; break }
+        }
+    }' | tr '\n' ' ')
 fi
 
 spec_awk='

@@ -25,7 +25,7 @@ The 6 scenarios of #398: S1 Change read ranges on a running client · S2 A malfo
 | MB-R-289 | R2 | new | Each input of the module settings dialog (MB-R-288) opens prefilled with the tab's current `read_ranges` value for its field, empty where that field is unset. |
 | MB-R-290 | R3 | new | A Modbus monitor tab does not handle `:module`, so the application logs the unknown-command warning of UI-R-348. |
 | MB-R-291 | R4 | new | A module settings dialog input (MB-R-288) whose text holds a malformed or reversed range entry paints the error border (UI-R-068) while that text stands. |
-| MB-R-292 | R5 | new | `Enter` in the module settings dialog is refused while any input fails MB-R-291's check: the dialog stays open and the tab's `read_ranges` are unchanged. |
+| MB-R-292 | R5 | new, reworded after filing | `Enter` in the module settings dialog is refused while any input fails MB-R-291's check: the dialog stays open and the tab's `read_ranges` are unchanged. |
 | MB-R-293 | R6 | new, reworded after filing | Confirming a module settings dialog whose inputs all parse sets the tab's in-memory device-config `read_ranges` to the inputs' trimmed text, a blank input leaving its field unset. |
 | MB-R-294 | R7 | new, reworded after filing | Closing the module settings dialog through its close-confirmation popup (UI-R-023) leaves the tab's `read_ranges` unchanged, whether or not an input fails MB-R-291's check. |
 | MB-R-295 | R8 | new | A running client polls with the `read_ranges` confirmed through the module settings dialog (MB-R-293, MB-R-083) from its next poll cycle on, without reconnecting. |

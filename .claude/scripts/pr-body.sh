@@ -87,6 +87,30 @@ requirements() {
     [ -n "$req" ] && printf '%s\n\n' "$req"
 }
 
+# Card spec-delta lines in timestamp order: ID, kind, origin, quote, why, tab-separated
+delta_lines() {
+    cat "$board"/*/"$slug".md "$board"/*/"$slug".s*.md 2>/dev/null | awk '$2 == "spec-delta"' | sort -s -k1,1 | awk '
+        {
+            rest = $0; sub(/^[^ ]+ spec-delta [^ ]+ [^ ]+/, "", rest)
+            origin = ""; quote = ""
+            while (match(rest, /^ +(origin|quote)=/)) {
+                field = substr(rest, 1, RLENGTH); sub(/^ +/, "", field)
+                rest = substr(rest, RLENGTH + 1)
+                if (substr(rest, 1, 1) == "\"") {
+                    rest = substr(rest, 2); i = index(rest, "\"")
+                    val = substr(rest, 1, i - 1); rest = substr(rest, i + 1)
+                } else {
+                    i = index(rest, " "); if (i == 0) i = length(rest) + 1
+                    val = substr(rest, 1, i - 1); rest = substr(rest, i)
+                }
+                if (field == "origin=") origin = val
+                if (field == "quote=") quote = val
+            }
+            sub(/^ +/, "", rest)
+            printf "%s\t%s\t%s\t%s\t%s\n", $3, $4, origin, quote, rest
+        }'
+}
+
 # $1: the change lines; sets chg_ids (call directly, never inside $(…))
 spec_changes() {
     chg_ids=
@@ -95,7 +119,7 @@ spec_changes() {
     printf '## Spec changes since filing\n'
     {
         awk '/^## / && match($0, / · was [RE][0-9]+$/) { v = substr($0, RSTART); sub(/.* was /, "", v); print "M " $2 " " v }' "$a/spec-diff.md"
-        cat "$board"/*/"$slug".md "$board"/*/"$slug".s*.md 2>/dev/null | sed -n 's/.* spec-delta \([^ ]*\) .*quote="\([^"]*\)".*/Q \1 \2/p'
+        delta_lines | awk -F '\t' '$4 != "" { print "Q " $1 " " $4 }'
         printf '%s\n' "$1" | sed 's/^/L /'
     } | awk '
         $1 == "M" { m[$2] = $3; next }
@@ -119,27 +143,11 @@ live_changes() {
     d=$(git -C "$root" diff "main...$br" -- docs/specs 2>/dev/null) || return 0
     touched=$(printf '%s\n' "$d" | grep '^[+-]' | grep -v '^+++\|^---' | grep -o '\*\*[A-Z][A-Z]-[RE]-[0-9]*\*\*' | tr -d '*' | sort -u | tr '\n' ' ')
     [ -n "$touched" ] || return 0
-    cat "$board"/*/"$slug".md "$board"/*/"$slug".s*.md 2>/dev/null | awk '$2 == "spec-delta"' | sort -s -k1,1 | awk -v touched=" $touched" '
-        index(touched, " " $3 " ") == 0 { next }
+    delta_lines | awk -F '\t' -v touched=" $touched" '
+        index(touched, " " $1 " ") == 0 { next }
         {
-            id = $3; kind = $4
-            rest = $0; sub(/^[^ ]+ spec-delta [^ ]+ [^ ]+/, "", rest)
-            origin = ""
-            while (match(rest, /^ +(origin|quote)=/)) {
-                field = substr(rest, 1, RLENGTH); sub(/^ +/, "", field)
-                rest = substr(rest, RLENGTH + 1)
-                if (substr(rest, 1, 1) == "\"") {
-                    rest = substr(rest, 2); i = index(rest, "\"")
-                    val = substr(rest, 1, i - 1); rest = substr(rest, i + 1)
-                } else {
-                    i = index(rest, " "); if (i == 0) i = length(rest) + 1
-                    val = substr(rest, 1, i - 1); rest = substr(rest, i)
-                }
-                if (field == "origin=") origin = val
-            }
-            sub(/^ +/, "", rest)
-            n++; if (id in seq) delete byseq[seq[id]]
-            seq[id] = n; byseq[n] = "- " id " " kind ": " rest " — " origin
+            n++; if ($1 in seq) delete byseq[seq[$1]]
+            seq[$1] = n; byseq[n] = "- " $1 " " $2 ": " $5 " — " $3
         }
         END { for (i = 1; i <= n; i++) if (i in byseq) print byseq[i] }'
 }
