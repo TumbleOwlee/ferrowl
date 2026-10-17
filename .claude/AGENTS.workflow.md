@@ -28,23 +28,26 @@ Gate 2 onward.
 - **Every state change moves a task-board card.** State living only in conversation dies with the session.
 - **Every stop is logged** — `prompt-render.sh` logs `stop kind=<question|approval|stage|blocked>` on the parent card as it renders the stop (`approval`: gate, architecture, epic, delta and re-plan stops). `metrics.sh` counts them at the end of the run. A workflow change that adds stops or agents names its expected effect on `metrics.log` in its PR; one that changes a card move, a stop rule or a prompt updates the replayed runs (`.claude/scripts/tests/replay.sh`) in the same PR.
 
-### Lane — fast or full
+### Lane — light, fast or full
 
 The lane sets how many approval stops the run makes. An epic run (*Epic*) has no lane: it stops at its brief and at the epic stop; each slice picks its own lane. Proposed by size when the first agent output of the run is ready; the user settles it at the run's first approval stop, recommended lane first.
 
 Recommended default, by size:
-- **fast** — `no-diff`, or ≤ 3 `R`/`E` entries in the brief (gate 1 `count=`); non-behavior change: `no-arch`, or ≤ 3 new or changed components (architecture `count=`).
+- **light** — `no-diff`, or at most 1 `R`/`E` entry in the brief (gate 1 `count=` ≤ 1). Behavior runs only.
+- **fast** — ≤ 3 `R`/`E` entries in the brief; non-behavior change: `no-arch`, or ≤ 3 new or changed components (architecture `count=`).
 - **full** — anything bigger.
 
-| | fast | full |
-|---|---|---|
-| Brief (gate 1) | no stop of its own — approved at the architecture stop | own stop, settles the lane |
-| Architecture | one stop: brief + architecture + lane; approving pre-authorizes gate 2's *On approval* steps | own stop |
-| Gate 2 | no stop unless the plan review leaves a `Needs user` item or the plan outgrows the fast default; else a notice | plan summary + issue draft |
-| Stages | *Fast lane* | *Full lane*, stops per *Stage stop* |
-| End | one stop, *Gate 4 — pull request* | *Gate 3 — review* stop, then *Gate 4 — pull request* stop |
+| | light | fast | full |
+|---|---|---|---|
+| Brief (gate 1) | no stop of its own — approved at gate 2's stop | no stop of its own — approved at the architecture stop | own stop, settles the lane |
+| Architecture | none: the planner starts from the brief (`arch: skipped`) | one stop: brief + architecture + lane; approving pre-authorizes gate 2's *On approval* steps | own stop |
+| Gate 2 | no plan review; one stop: brief + plan + issue | no stop unless the plan review leaves a `Needs user` item or the plan outgrows the fast default; else a notice | plan summary + issue draft |
+| Stages | one code stage, *Fast lane* without its delta review | *Fast lane* | *Full lane*, stops per *Stage stop* |
+| End | one stop, *Gate 4 — pull request* | one stop, *Gate 4 — pull request* | *Gate 3 — review* stop, then *Gate 4 — pull request* stop |
 
-Recommended full, user picks fast at the brief stop: the architecture stop is fast's (without the brief). The fast default for a plan is at most 2 stages besides `s0` (*Gate 2*). The user may switch lanes at any later stop; a lane never switches silently.
+Light is one author, one planner, one implementer stage, one review (gate 3's branch review) and one PR. It becomes fast, with a notice line and the architecture stop fast has, when the planner answers `arch-gap` (a structural change after all: spawn `spec-architect` fresh with the brief and the reason, then resume the planner) or plans more than one code stage (gate 2's stop recommends fast).
+
+Recommended full, user picks fast at the brief stop: the architecture stop is fast's (without the brief); picks light: no architecture step, gate 2's stop as light's (without the brief). The fast default for a plan is at most 2 stages besides `s0` (*Gate 2*). The user may switch lanes at any later stop; a lane never switches silently.
 
 ### Verify before an approval stop
 
@@ -120,7 +123,7 @@ Stage frontmatter `title` = the stage's display name, the text after `## Stage s
 
 Log line = `<ISO minute> <event> [key=value …]`; the implementer's own file carries the stage-event vocabulary. Every line on any card is written by `sh .claude/scripts/card-log.sh <card-id> <event> [k=v …] [-- <text>]` (vocabulary in the script; `hook-guard-shell.sh` denies a raw `>>`/`tee -a` onto a card); "log <event>" in this file means that call. A free-text remark on any card (a rename, a correction) is `note -- <text>`. A mid-run addition to a stage's `files` is logged on its card as `files+=<path>[, <path>] user=approved reason=…`, a minor handed to another stage as `minor-moved=<verdict line>` (on the stage that gave it up). `card-log.sh` stamps every line with `date -u +%FT%H:%M` — UTC on every card, so a resumed session can order events across cards.
 
-Parent frontmatter: `kind: epic|slice` (absent on a plain run), `epic` (slice run: the epic's issue number), `slices: [<n>, …]` (epic run: the child issues, in slice order), `issue`, `pr` (number, set when the draft opens), `branch`, `lane: fast|full` (set at the first approval stop), `gate1` approval date, `with-arch` (fast lane, until the architecture stop) or `skipped`, `arch` approval date or `no-arch`, `gate2` approval date, `split: [<n>, …]` (issues split off), `upstream: [<repo>#<n>, …]`, `artifacts`. `card-field.sh <slug> <field>` reads one. Never the goal or normative text — issue holds the goal, `artifacts/` the spec.
+Parent frontmatter: `kind: epic|slice` (absent on a plain run), `epic` (slice run: the epic's issue number), `slices: [<n>, …]` (epic run: the child issues, in slice order), `issue`, `pr` (number, set when the draft opens), `branch`, `lane: light|fast|full` (set at the first approval stop), `gate1` approval date, `with-arch` (fast lane, until the architecture stop), `with-plan` (light lane, until gate 2's stop) or `skipped`, `arch` approval date, `no-arch` or `skipped` (light lane), `gate2` approval date, `split: [<n>, …]` (issues split off), `upstream: [<repo>#<n>, …]`, `artifacts`. `card-field.sh <slug> <field>` reads one. Never the goal or normative text — issue holds the goal, `artifacts/` the spec.
 
 | Card | `open` | `inprogress` | `inreview` | `done` |
 |---|---|---|---|---|
@@ -183,7 +186,8 @@ An agent's `status=question` names `artifacts/<slug>/question.md` (shape: `spec-
 - `status=ready` or `status=no-diff` (spec already covers the goal; the file names the violated requirements) → recommend the lane by `count=` (*Lane — fast or full*):
   - **full** recommended → `prompt-render.sh gate1 <slug>`: approval **and lane** in one prompt. Change requested → relay to the same agent. Approved → record `gate1` and `lane` on the parent card.
   - **fast** recommended → no stop: record `gate1: with-arch` and `lane: fast`; the brief is approved at the architecture stop.
-  - Then *Architecture*.
+  - **light** recommended → no stop: record `gate1: with-plan`, `lane: light` and `arch: skipped`; the brief is approved at gate 2's stop.
+  - Then *Architecture* (light: *Gate 2*).
 - The agent stays alive for *Tracking issue*, *Spec changes* and gate 4.
 
 ### Architecture
@@ -226,12 +230,13 @@ The human closes the epic once its last slice merges.
 
 ### Gate 2 — plan and tracking issue
 
-Spawn `spec-planner` with: `artifacts/<slug>/spec-diff.md` path (none for a non-behavior change), `artifacts/<slug>/architecture.md` path (none on `no-arch`), affected area(s), anything the user volunteered. Nothing else; the agent explores the repo itself, starting from the architecture's code map. It writes `plan.md` (shape: `spec-planner.md`'s `## Output`) and `plan.summary.md`, edits `spec-diff.md` and assigns its fixed IDs.
+Spawn `spec-planner` with: `artifacts/<slug>/spec-diff.md` path (none for a non-behavior change), `artifacts/<slug>/architecture.md` path (none on `no-arch` and in the light lane), `lane=light` in the light lane, affected area(s), anything the user volunteered. Nothing else; the agent explores the repo itself, starting from the architecture's code map. It writes `plan.md` (shape: `spec-planner.md`'s `## Output`) and `plan.summary.md`, edits `spec-diff.md` and assigns its fixed IDs.
 
 - `status=question` → *Relayed question*.
 - `status=arch-gap` → resume `spec-architect` with the reason verbatim; it may relay a question; its `ready` → resume the planner. No stop of its own.
 - `status=split` → *Split*.
 - `status=behavior-change` (non-behavior run) → *Principles — implementation*.
+- `status=ready`, light lane → no plan review: straight to the issue draft below.
 - `status=ready` → fresh `spec-reviewer`, scope `plan`. Any finding, minors included → snapshot `plan.prev.md`, resume the planner with the `review.md` path, it revises the plan, the same reviewer runs a follow-up pass — no user interaction; rounds and their end per *Verify before an approval stop*.
 - The plan's `Stop` column (which stages stop for approval beyond the *Stage stop* rules) is settled at this stop: the user may tick or untick stages in the answer.
 - `clean`, or `findings` with `count=0` → `spec-author` drafts `issue.md` (*Tracking issue*, no stop of its own; a non-behavior run spawns the author now with the goal verbatim, `plan.summary.md`, `artifacts/<slug>/`).
@@ -239,7 +244,7 @@ Spawn `spec-planner` with: `artifacts/<slug>/spec-diff.md` path (none for a non-
   - **Fast lane, pre-authorized at the architecture stop:** no stop unless the verdict has a `Needs user` item, the plan outgrows the fast default, or the author answered `reuse` (an existing issue's body is about to be rewritten). Else `prompt-render.sh gate2-notice <slug>`, no answer awaited, then *On approval*.
 
 **On approval, in order:**
-1. File or rewrite the issue (*Tracking issue*); record `issue` on the parent card. Fast lane with `no-arch`: record `gate1` too.
+1. File or rewrite the issue (*Tracking issue*); record `issue` on the parent card. Fast lane with `no-arch`, light lane: record `gate1` too.
 2. Create the worktree: `git worktree add .claude/worktrees/<slug> -b <type>/<slug> main`.
 3. Record `gate2` (and `lane`, for a non-behavior change with `no-arch`) on parent card, move parent → `inprogress/`, then the status-line update (*Tracking issue*).
 4. Create `open/<slug>.s<n>.md` per plan stage (`s0` only when the plan has one), `title`/`files`/`blocked-by` copied from the tree (`title` is display-only — agents find a stage by `--prefix '## Stage s<n>:'`) and `stop: yes|no` from `plan.summary.md`'s `Stop` column as the user settled it — `sh .claude/scripts/extract-section.sh '## Shared' artifacts/<slug>/plan.md` is the one plan read the orchestrator makes, for exactly those three fields. Stage ids match plan ids.
@@ -247,7 +252,7 @@ Spawn `spec-planner` with: `artifacts/<slug>/spec-diff.md` path (none for a non-
 
 ### Tracking issue
 
-Drafted inside gate 2 once the plan review is clean (the IDs are fixed by then), approved at gate 2's stop (fast lane: pre-authorized at the architecture stop), filed on approval.
+Drafted inside gate 2 once the plan review is clean (light lane: once the plan is ready; the IDs are fixed by then), approved at gate 2's stop (fast lane: pre-authorized at the architecture stop), filed on approval.
 
 Orchestrator searches existing issues (`gh issue list --state all --search …`) for the same goal and passes candidate numbers — plus the one the user named at gate 1 — to `spec-author`, which writes `artifacts/<slug>/issue.md` (title + goal; shape: its file) and answers `status=reuse issue=<n> file=…` or `status=new file=…` in one turn. Reuse, never duplicate. On reuse the orchestrator stores the issue's original body once (unless gate 1 already did) with `sh .claude/scripts/issue-request.sh <n> > artifacts/<slug>/request.md` — the body as filed, or, when that body is one this workflow assembled (it carries `## Scenarios` or `## Spec (rev`), the text inside its `<details>` block.
 
@@ -297,6 +302,8 @@ gh pr create --draft --title "$(head -1 artifacts/<slug>/pr-draft.md | sed 's/^#
 ```
 
 #### Fast lane
+
+The light lane runs this too, minus step 2's delta review: its one stage's spec changes go to gate 3's branch review.
 
 Per stage:
 
@@ -380,7 +387,7 @@ The spec is drafted best effort and settles as the run learns:
 
 Before `s0` the agents ask the user through their question batches; what they decided alone shows in the next stop's `Confirm:` block.
 
-**After `s0`.** The implementer logs `spec-delta` on its card and reports `delta=<n>`. The stage's reviewer (full lane: the per-stage review; fast lane: a fresh `spec-reviewer` in scope `delta s<n>` whenever `delta>0`) classifies each change (`spec-reviewer.md` `## Spec changes`):
+**After `s0`.** The implementer logs `spec-delta` on its card and reports `delta=<n>`. The stage's reviewer (full lane: the per-stage review; fast lane: a fresh `spec-reviewer` in scope `delta s<n>` whenever `delta>0`; light lane: gate 3's branch review) classifies each change (`spec-reviewer.md` `## Spec changes`):
 - **detail** → listed on the verdict and the auto-continue line; no decision. Kept: `spec-author` writes `issue-comment.md`, posted (*Tracking issue*).
 - **meaningful** → a `Needs user` item: keep, revert, or split. Stage-stop rule 1 fires. The answer goes to the implementer.
   - **keep**, issue filed → resume `spec-author` for `issue-comment.md`, post it (*Tracking issue*), log `spec-keep=<IDs>` on the parent card. A kept architecture deviation → also a fresh `spec-architect` records it in `architecture.md` and its summary, no stop.
@@ -403,7 +410,7 @@ Before proposing a PR, whole-branch pass — cross-stage bugs, spec drift across
 - Orchestrator runs `gauntlet.sh` on the branch, forwards both status lines.
 - `count>0` → as *Per-stage review*, the same implementer, then a fresh branch review — never a follow-up pass here. Findings needing a user decision are relayed as questions, never fixed unasked.
 - Log `review=clean` or `review=<n>-resolved` on the parent card once the branch review is clean (the PR status line reads it). Minors (*Verify before an approval stop*) are resolved before `spec-author` writes `pr.md`; gauntlet re-run, `gauntlet=pass sha=<sha>` logged on the parent card.
-- **Fast lane:** no stop here — clean goes straight to gate 4, whose stop shows the verdict.
+- **Fast and light lanes:** no stop here — clean goes straight to gate 4, whose stop shows the verdict.
 - **Stop (full lane):** `prompt-render.sh gate3 <slug>`.
 - **Board:** reviewer appends to `artifacts/<slug>/review.md`, keyed to stage id, and rewrites `review.verdict.md`. Parent card → `inreview/` when review starts.
 
@@ -470,4 +477,4 @@ Report differences first. Agree → resume. Disagree → stop and report.
 
 A `replan from=` line with no later `replan=approved` on the parent card → the re-plan is pending: rerun *Re-plan* from step 2 with a fresh planner; `plan.prev.md` is already the snapshot.
 
-Clean reconcile → resume only no-approval work (respawn the implementer for approved stages, CI wait and *Clean up* after `pr=ready`); halt at the first gate needing the user. Recorded `gate1`/`arch`/`gate2` approvals stay valid — the fast lane's pre-authorization too: `arch` set, `lane: fast`, no `gate2` → plan, then gate 2's *On approval* without a stop. A resumed run spawns every agent fresh (the architect, the author and the planner re-read their files).
+Clean reconcile → resume only no-approval work (respawn the implementer for approved stages, CI wait and *Clean up* after `pr=ready`); halt at the first gate needing the user. Recorded `gate1`/`arch`/`gate2` approvals stay valid — the fast lane's pre-authorization too: `arch` set, `lane: fast`, no `gate2` → plan, then gate 2's *On approval* without a stop; `lane: light`, no `gate2` → plan, then gate 2's stop. A resumed run spawns every agent fresh (the architect, the author and the planner re-read their files).

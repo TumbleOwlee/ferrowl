@@ -39,8 +39,7 @@ Approving will:
 - update the draft PR
 - spawn a fresh implementer at s1
 Options:
-1. also stop after: <stages>
-2. switch to the full lane
+1. switch to the full lane
 Answer: approve [<n>[: <value>] …] · change <what> · stop
 user: approve
 $ prompt-render.sh approved rp

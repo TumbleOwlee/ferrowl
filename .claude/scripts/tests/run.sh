@@ -554,7 +554,7 @@ hook shell-mv-other hook-guard-shell.sh 'mv notes.md docs/notes.md' allow
 hook shell-card-move hook-guard-shell.sh 'sh .claude/scripts/card-move.sh demo.s2 done' allow
 
 # --- replayed runs: the decision scripts in workflow order, fake agents (replay.sh)
-for sc in full fast-replan resume; do golden "replay-$sc" sh "$here/replay.sh" "$sc"; done
+for sc in full fast-replan light resume; do golden "replay-$sc" sh "$here/replay.sh" "$sc"; done
 
 # --- prompt-render.sh, on the fixture board
 P=$(project); D=$P/.claude/tasks

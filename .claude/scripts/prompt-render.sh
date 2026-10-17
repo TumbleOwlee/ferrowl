@@ -161,7 +161,7 @@ extra=
 nstages=$(awk -F'|' '/^\| s[0-9]/' "$art/plan.summary.md" 2>/dev/null | grep -c .)
 first=$(awk -F'|' '/^\| s[0-9]/ { s = $2; gsub(/ /, "", s); print s; exit }' "$art/plan.summary.md" 2>/dev/null)
 entries=$(awk '/^## ([A-Z][A-Z]-[RE]-[0-9]+|[RE][0-9]+) — / && !/ — dropped/' "$art/spec-diff.md" 2>/dev/null | grep -c .)
-other_lane() { case $lane in full) echo fast ;; *) echo full ;; esac; }
+other_lane() { case $lane in full|light) echo fast ;; *) echo full ;; esac; }
 
 title= will= opts= answer="approve · change <what> · stop"
 bp=; [ "$brief_pending" = 1 ] && bp="- approve the brief
@@ -215,8 +215,9 @@ gate2)
 - create worktree .claude/worktrees/$slug on branch ${branch:-<type>/$slug}
 - create $nstages stage cards and spawn the implementer at ${first:-s1}$(case $lane in fast|light) echo ' (commits and pushes on green, no per-stage stop)' ;; esac)
 - next stop: $next"
-    opts="1. also stop after: <stages, e.g. s1,s3>
-2. switch to the $(other_lane) lane" ;;
+    if [ "$lane" = full ]; then opts="1. also stop after: <stages, e.g. s1,s3>
+2. switch to the fast lane"
+    else opts="1. switch to the $(other_lane) lane"; fi ;;
 stage)
     sid=$(arg stage); title="Stage $sid"
     will="- commit $sid, push, update the draft PR
@@ -226,8 +227,9 @@ replan)
     will="- replace the cards of $from onward
 - update the draft PR
 - spawn a fresh implementer at $from"
-    opts="1. also stop after: <stages>
-2. switch to the $(other_lane) lane" ;;
+    if [ "$lane" = full ]; then opts="1. also stop after: <stages>
+2. switch to the fast lane"
+    else opts="1. switch to the $(other_lane) lane"; fi ;;
 gate3)
     title="Gate 3"
     will="- hand the branch to spec-author for the PR body (gate 4)" ;;
@@ -238,8 +240,9 @@ gate4)
     will="- push, replace the draft's title and body, mark #${pr:-<pr>} ready$([ "$k" -gt 0 ] && echo "
 - file the $k follow-up issues")
 - wait for CI, clean up"
-    [ "$k" -gt 0 ] && opts="1. follow-ups: <numbers | none> — file only these (default: all)"
-    answer="approve [<n>[: <value>] …] · change <what> · stop (hold, e.g. for a manual run first)" ;;
+    hold="stop (hold, e.g. for a manual run first)"
+    if [ "$k" -gt 0 ]; then opts="1. follow-ups: <numbers | none> — file only these (default: all)"; answer="approve [<n>[: <value>] …] · change <what> · $hold"
+    else answer="approve · change <what> · $hold"; fi ;;
 esac
 [ -n "$opts" ] && [ "$kind" != gate4 ] && answer="approve [<n>[: <value>] …] · change <what> · stop"
 

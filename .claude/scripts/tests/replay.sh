@@ -6,9 +6,9 @@
 # fixtures/expected/replay-<scenario>.out. Deterministic: fixed clock,
 # identity and commit dates, so shas are stable.
 #
-#   sh .claude/scripts/tests/replay.sh <full|fast-replan|resume>
+#   sh .claude/scripts/tests/replay.sh <full|fast-replan|light|resume>
 set -u
-scenario=${1:?usage: replay.sh <full|fast-replan|resume>}
+scenario=${1:?usage: replay.sh <full|fast-replan|light|resume>}
 scripts=$(cd "$(dirname -- "$0")/.." && pwd)
 tmp=$(mktemp -d) || exit 1
 trap 'rm -rf "$tmp"' EXIT INT TERM
@@ -29,7 +29,9 @@ setup() { # <lane> <stages besides s0>
     git -C "$R" add .gitignore; git -C "$R" -c commit.gpgsign=false commit -q -m init
     for d in open inprogress inreview done artifacts/rp; do mkdir -p "$B/$d"; done
     printf -- '---\nid: rp\nbranch: feat/rp\nlane: %s\nissue: 7\ngate1: 2026-10-01\narch: 2026-10-02\n---\n' "$1" > "$B/open/rp.md"
-    printf '# rp — plan summary (rev 1)\n\nDecide: %s stages.\n\nVerification beyond unit tests:\n- s2 — demo TUI\n  - see it\n' "$2" > "$A/plan.summary.md"
+    { printf '# rp — plan summary (rev 1)\n\nDecide: %s code stages.\n\n| Stage | What | Pins | Files | Stop |\n|---|---|---|---|---|\n' "$2"
+      i=0; while [ "$i" -le "$2" ]; do printf '| s%s | stage %s | R1 (1) | 1 (x) | — |\n' "$i" "$i"; i=$((i + 1)); done
+      [ "$2" -ge 2 ] && printf '\nVerification beyond unit tests:\n- s2 — demo TUI\n  - see it\n'; } > "$A/plan.summary.md"
     printf 'Verdict: clean — ready for approval\n\nSpec — 2 of 2 pinned\nNot checked — nothing\n' > "$A/review.verdict.md"
     i=0
     while [ "$i" -le "$2" ]; do
@@ -112,6 +114,24 @@ fast-replan)
     step "the new stages land on green"
     for i in 1 2 3; do impl "$i"; commit "$i"; done
     board
+    run metrics.sh rp ;;
+light)
+    setup light 1
+    sed -i 's/^gate1: .*/gate1: with-plan/; s/^arch: .*/arch: skipped/' "$B/open/rp.md"
+    printf '# rp — spec diff (rev 1)\n\n## Summary\nGoal: Register 65535 reads correctly.\n\n## S1 — Read the last register\n\n## R1 — changed · requirements `## Addressing`\nAddresses span 0 to 65535 inclusive.\n' > "$A/spec-diff.md"
+    printf '# Read register 65535\n' > "$A/issue.md"
+    step "no architecture step, no plan review: gate 2 is the first stop and approves the brief"
+    run prompt-render.sh gate2 rp issue=new
+    echo "user: approve"; run prompt-render.sh approved rp
+    sed -i 's/^gate1: .*/gate1: 2026-10-03\ngate2: 2026-10-03/' "$B/open/rp.md"
+    git -C "$R" worktree add -q "$W" -b feat/rp main
+    run card-move.sh rp inprogress
+    step "one code stage, committed on green"
+    impl 0; commit 0; impl 1; commit 1; board
+    step "gate 3's branch review is the only review; gate 4 shows its verdict"
+    run card-move.sh rp inreview
+    printf '# Read register 65535\n\n## Why\nThe last register reads.\n' > "$A/pr.md"
+    run prompt-render.sh gate4 rp pr=9
     run metrics.sh rp ;;
 resume)
     setup full 2

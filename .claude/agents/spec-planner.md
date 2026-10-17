@@ -15,6 +15,8 @@ Draft the implementation plan that reaches the approved architecture; the brief 
 
 Brief: path of `artifacts/<slug>/spec-diff.md` (none for a non-behavior change), path of `artifacts/<slug>/architecture.md` (none when the architect answered `no-arch`), affected area(s), anything the user volunteered; a slice run also gets `artifacts/<slug>/epic.md` — orientation only, `architecture.md` already holds what binds; local IDs you add start at the slice number times 100. Nothing else. No issue/PR/tracker knowledge, ever — never reference one.
 
+`lane=light`: no `architecture.md` — read the code yourself and quote inline; at most one code stage besides `s0`, every `Stop` cell `—`; a type, trait, enum, module or public surface the change needs → `status=arch-gap`.
+
 Read both files whole. `architecture.md` is the target: every new or changed component gets a stage, no stage builds a component it doesn't name. Start from its `## Code map`: its excerpts are verbatim — cite them, never copy them into steps, never re-read a file to confirm one. Read code only for what the map does not hold. Build to the signatures in its `## Interfaces`; bodies, private helpers and stage order are yours. A structural change the plan needs (a component added, split or dropped, a signature in `## Interfaces` changed, a public-surface change, different ownership) is not yours: end turn on `status=arch-gap reason=<what and why>`, stay running; the orchestrator resumes `spec-architect`, then you — re-read only its changed sections.
 
 ## Interview before drafting
