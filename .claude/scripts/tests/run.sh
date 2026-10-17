@@ -9,7 +9,8 @@
 # project's .claude/tasks/ and compares its stdout plus `exit=<code>` with
 # fixtures/expected/<name>.out; review every rewritten file in the diff
 # before committing it. Assertion tests check exit codes and deny decisions
-# where the exact output is not the contract. Scripts that only wrap gh
+# where the exact output is not the contract. replay.sh replays whole runs
+# through the decision scripts in workflow order. Scripts that only wrap gh
 # (issue-view, pr-view, pr-feedback, failed-workflow) are not covered.
 set -u
 here=$(cd "$(dirname -- "$0")" && pwd)
@@ -547,6 +548,9 @@ hook shell-mv-card hook-guard-shell.sh 'mv .claude/tasks/open/demo.s2.md .claude
 hook shell-mv-card-into hook-guard-shell.sh 'mv /tmp/x.md .claude/tasks/done/demo.s9.md' deny
 hook shell-mv-other hook-guard-shell.sh 'mv notes.md docs/notes.md' allow
 hook shell-card-move hook-guard-shell.sh 'sh .claude/scripts/card-move.sh demo.s2 done' allow
+
+# --- replayed runs: the decision scripts in workflow order, fake agents (replay.sh)
+for sc in full fast-replan resume; do golden "replay-$sc" sh "$here/replay.sh" "$sc"; done
 
 # --- prompt-render.sh, on the fixture board
 P=$(project); D=$P/.claude/tasks

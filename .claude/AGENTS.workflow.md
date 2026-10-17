@@ -26,7 +26,7 @@ Gate 2 onward.
 - **A follow-up in the same scope resumes the agent that did the first pass** (`SendMessage`) — reviewer, planner, architect, author — never a respawn; fresh only when that agent is gone (a resumed session) and where a section says so: every gate 3 `branch` review, a re-plan's planner, each new implementer.
 - **The run ends when the PR is ready and CI is green** — then *Clean up* removes the worktree and local branch and archives the board. Merge happens outside the workflow.
 - **Every state change moves a task-board card.** State living only in conversation dies with the session.
-- **Every stop is logged** — `prompt-render.sh` logs `stop kind=<question|approval|stage|blocked>` on the parent card as it renders the stop (`approval`: gate, architecture, epic, delta and re-plan stops). `metrics.sh` counts them at the end of the run. A workflow change that adds stops or agents names its expected effect on `metrics.log` in its PR.
+- **Every stop is logged** — `prompt-render.sh` logs `stop kind=<question|approval|stage|blocked>` on the parent card as it renders the stop (`approval`: gate, architecture, epic, delta and re-plan stops). `metrics.sh` counts them at the end of the run. A workflow change that adds stops or agents names its expected effect on `metrics.log` in its PR; one that changes a card move, a stop rule or a prompt updates the replayed runs (`.claude/scripts/tests/replay.sh`) in the same PR.
 
 ### Lane — fast or full
 
@@ -329,7 +329,7 @@ Full lane. Every green stage, before its approval stop:
 #### Stage stop
 
 A green, clean-reviewed stage: `sh .claude/scripts/stage-stop.sh <slug> s<n> threads=<n>` (`threads=` from *PR feedback*'s fetch) decides and logs it on the card. Its rules, first hit wins: a `Needs user` item, Verification beyond unit tests, open PR threads, the last code stage (its stop is gate 3's), a plan-marked stage, a diff over 400 lines or 8 files, three auto-continues since the last stop; `s0` never stops.
-- `auto` → `prompt-render.sh auto <slug> stage=s<n>`: one line, no answer awaited, then the draft PR update. A user message while a stage is running is read before the next auto-continue; `stop` holds at the next green.
+- `auto` → the commit and push of *Full lane* steps 2–3, then `prompt-render.sh auto <slug> stage=s<n>`: one line naming the pushed sha, no answer awaited, then the draft PR update. A user message while a stage is running is read before the next auto-continue; `stop` holds at the next green.
 - `stop=<rule> reason=<word> [detail=…]` → `prompt-render.sh stage <slug> stage=s<n> reason=<word> [detail=…]`.
 
 #### Question and blocked stage
