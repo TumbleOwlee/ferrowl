@@ -32,7 +32,7 @@ Ferrowl — Rust TUI simulator for Modbus (client/server, TCP/RTU) and OCPP (Cha
 
 Triggers on **behavior change, any size**: new public function, changed default, new error variant, any observable semantics. Size sets stage count, never gate existence. Non-behavior change (refactor, rename, perf with identical semantics, test-only, docs, tooling): gate 1 skipped, rest runs. Trivial edit (one file, no semantics, no test/CI/build effect — typo, comment, doc wording): no gates, branch + PR.
 
-Gate/task-board mechanics (Gate 1 through Merge, Resume) are served by `ferrule guide` (`ferrule guide --list`; the *Workflow — ferrule* block below); start a run with `/fe-feature`.
+Gate/task-board mechanics (Gate 1 through Merge, Resume): *Workflow — ferrule* below.
 
 A plan stage's `files` list is a contract: the stage touches exactly the files it names — tooling, test helpers, config, scripts, a flaky-test fix, a drive-by rename included; the `docs/specs/` files its logged spec changes touch count as named.
 
@@ -78,7 +78,7 @@ Dev loop: `cargo run --release -- --demo` (built-in demo tabs, no config) or `ca
 
 ## Conventions — reading
 
-- **Never read a whole file when only part is needed.** Any `.md` (specs, `SKILL.md`s, other repos' docs): `ferrule spec section '<heading>' ['<heading>' ...] <file>` (unknown heading: `ferrule spec sections <file>` first). Other large files: `sed -n '<start>,<end>p' <file>`. **Enforced:** `PreToolUse` hook (`ferrule hook shell`) denies an unpiped Bash `cat` of a `.md` file or any file over 80 lines, pointing at `ferrule spec section`/`sed -n`/Read. On denial, follow the redirect, never retry the `cat` differently.
+- **Never read a whole file when only part is needed.** Any `.md` (specs, `SKILL.md`s, other repos' docs): by section, per *Workflow — ferrule*; several headings batch into one `ferrule spec section` call. Other large files: `sed -n '<start>,<end>p' <file>`. **Enforced:** `PreToolUse` hook (`ferrule hook shell`) denies an unpiped Bash `cat` of a `.md` file or any file over 80 lines, pointing at `ferrule spec section`/`sed -n`/Read. On denial, follow the redirect, never retry the `cat` differently.
 - **Filter shell output before it lands in context.** `find -name`/`-path`, `git show --stat` or a path filter before full content, `grep`/`tail -N`/`head -N` on `cargo test`/`cargo llvm-cov` output.
 - **Don't re-run a read-only command whose output is already in context** (`git diff`, `git log`, `git show` on the same refs/paths). Scroll back.
 
@@ -103,7 +103,7 @@ Dev loop: `cargo run --release -- --demo` (built-in demo tabs, no config) or `ca
 
 ## Conventions — GitHub
 
-- Read an existing issue with `ferrule issue view <number|key>` and an existing PR's body/comments with `ferrule pr view <number>`, never raw `gh issue view`/`gh pr view` — both hit the GitHub Projects-Classic GraphQL bug (`projectCards`), with or without `--comments`. Inline review threads go through `ferrule pr feedback route|fetch|reply` (`ferrule guide feedback`) — into a file, one status line in context.
+- Never raw `gh issue view`/`gh pr view` (read per *Workflow — ferrule*) — both hit the GitHub Projects-Classic GraphQL bug (`projectCards`), with or without `--comments`. Inline review threads go through `ferrule pr feedback route|fetch|reply` (`ferrule guide feedback`) — into a file, one status line in context.
 
 ## Scope boundaries — check with the user before
 

@@ -59,7 +59,7 @@ A feature too big for one run (many scenarios, several areas) becomes an **epic*
 **Stops.** Every stop is one message: a header (`Gate 2 · <slug> · plan.summary.md rev 2`), the lines that matter from the files it opened in your viewer, `Approving will:` and how to answer. Two shapes only:
 
 ```
-Approving will:                                Question · <slug> · gate 1 · spec-author · 2 decisions
+Approving will:                                Question · <slug> · gate 1 · fe-author · 2 decisions
 - file the issue                               ## 1. Retry forever or give up after an hour?
 - create worktree … on branch feat/x           Options:
 Options:                                       - a) retry forever (recommended: …)

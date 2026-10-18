@@ -28,8 +28,16 @@ steps:
 
   # The generated workflow files match .ferrule/ferrule.lock and the ferrule
   # version pinned in .ferrule/ferrule.toml; the tag moves with that pin.
+  # Woodpecker has no cache here, so the from-source build runs only when a
+  # file `ferrule install --check` covers changed (manual runs always).
   workflow:
     image: rust:latest
+    when:
+      - path:
+          - ".ferrule/**"
+          - ".claude/**"
+          - "AGENTS.md"
+          - ".lefthook.yml"
     commands:
       - cargo install --git https://github.com/TumbleOwlee/ferrule --tag v0.1.0 --locked ferrule
       - ferrule install --check

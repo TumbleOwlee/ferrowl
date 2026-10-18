@@ -48,14 +48,21 @@ jobs:
 
   # The generated workflow files (.claude/agents/fe-*, .claude/skills/fe-*,
   # the hooks) match .ferrule/ferrule.lock and the ferrule version pinned in
-  # .ferrule/ferrule.toml; the tag moves with that pin.
+  # .ferrule/ferrule.toml; the tag and the cache key move with that pin.
+  # ferrule publishes no release binaries, so the built one is cached.
   workflow:
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v7
-      - run: cargo install --git https://github.com/TumbleOwlee/ferrule --tag v0.1.0 --locked ferrule
+      - id: ferrule-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/ferrule
+          key: ferrule-v0.1.0-${{ runner.os }}
+      - if: steps.ferrule-cache.outputs.cache-hit != 'true'
+        run: cargo install --git https://github.com/TumbleOwlee/ferrule --tag v0.1.0 --locked ferrule
       - run: ferrule install --check
 
   # Advisories, licenses, and banned/duplicate crates. Policy lives in deny.toml.

@@ -19,9 +19,9 @@ For each agent/skill file, grep its text for "Read `X`" / "pull `Y` section"; no
 
 ## 3. Flag split candidates
 
-- **Heading cited by exactly one agent type, sharing a file with headings cited by others** — that agent pays for the whole file (or whole minus `extract-section.sh`'s slice). Candidate: move to its own file, or confirm already sliceable and fix the pointer.
-- **No heading structure, or headings not matching what agents ask for** — e.g. an agent says "the part about X" where X spans two headings. `extract-section.sh` pulls one heading's span. Fix: re-head along the boundary agents cite, not more headings blindly. `list-sections.sh <file>` (if present) dumps the heading list.
-- **Whole-file read where the citing instruction already says "pull only section Y"** — structure fine, instruction not yet wired to `extract-section.sh`. Wiring fix, not a split; note separately.
+- **Heading cited by exactly one agent type, sharing a file with headings cited by others** — that agent pays for the whole file (or whole minus `ferrule spec section`'s slice). Candidate: move to its own file, or confirm already sliceable and fix the pointer.
+- **No heading structure, or headings not matching what agents ask for** — e.g. an agent says "the part about X" where X spans two headings. `ferrule spec section` pulls one heading's span. Fix: re-head along the boundary agents cite, not more headings blindly. `ferrule spec sections <file>` dumps the heading list.
+- **Whole-file read where the citing instruction already says "pull only section Y"** — structure fine, instruction not yet wired to `ferrule spec section`. Wiring fix, not a split; note separately.
 - **Section reused by every agent type touching the file** (e.g. `AGENTS.md`'s `## Conventions — code`, pulled by heading) — correctly shared; note as a working example, don't propose copying it out.
 
 ## 4. Check prose density per candidate section
@@ -56,6 +56,6 @@ Three tables, most costly first (`token-rank.sh` order where available):
 
 **Duplicates** — the rule in a few words, every file:heading holding a copy, which copy to keep and why (that reader already loads it).
 
-One line each, no praise, no summary; an empty table is "none". A proposed split under ~10 lines: say so, recommend a heading instead — `extract-section.sh` already pulls it cheaply.
+One line each, no praise, no summary; an empty table is "none". A proposed split under ~10 lines: say so, recommend a heading instead — `ferrule spec section` already pulls it cheaply.
 
 If the user approves a split, make the new file's headings match exactly what the citing instructions name (or update those instructions in the same change).
