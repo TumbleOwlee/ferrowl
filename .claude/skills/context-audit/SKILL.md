@@ -43,7 +43,7 @@ jq -s '
 
 ## 3. Flag waste patterns
 
-- **Full-file re-read, same file, ≥3 times in one session, no `Edit` between two of them.** Check the file's structure (headings, JSON keys, log sections) against what was quoted after each Read — only one part ever used = `ferrule spec section` candidate (or `jq`/`awk` slice for JSON/log). `sh .claude/skills/spec-coverage-audit/scripts/token-rank.sh <file>...` ranks repeat offenders by cost.
+- **Full-file re-read, same file, ≥3 times in one session, no `Edit` between two of them.** Check the file's structure (headings, JSON keys, log sections) against what was quoted after each Read — only one part ever used = `ferrule spec section` candidate (or `jq`/`awk` slice for JSON/log). `wc -c <file>... | sort -rn` ranks repeat offenders by cost (~chars/4 tokens).
 - **Large file (`wc -l`) read whole when the same heading/keyword recurs across sessions** — same pattern over time.
 - **Repeated identical `Bash` command** — deterministic output (`git log`, version check) re-run instead of reasoned from context. Behavioral fix, not a script; note separately.
 - **`Grep` with a large match count, re-run later with `-l`/path filter** — narrowing came a call too late.

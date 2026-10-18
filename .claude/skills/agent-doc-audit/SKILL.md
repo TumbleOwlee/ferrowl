@@ -33,7 +33,7 @@ Before proposing a split, the section must justify the extra file. Scan for:
 - Explaining *what* code does where names suffice — only *why* (non-obvious constraint, workaround, invariant) earns a sentence.
 - Every trim: zero information loss. Fewer words, same fact — never a dropped constraint, edge case, or rule.
 
-`sh .claude/skills/spec-coverage-audit/scripts/token-rank.sh <file>...` gives per-file cost to prioritize. Trim first, split second: a bloated section split is two bloated files — flag the trim regardless.
+`wc -c <file>... | sort -rn` gives per-file cost (~chars/4 tokens) to prioritize. Trim first, split second: a bloated section split is two bloated files — flag the trim regardless.
 
 ## 5. Check duplication across all in-scope files
 
@@ -48,7 +48,7 @@ Method: for each rule-bearing sentence, grep its distinctive noun or verb across
 
 ## 6. Report
 
-Three tables, most costly first (`token-rank.sh` order where available):
+Three tables, most costly first (`wc -c` order):
 
 **Split candidates** — file, heading(s), citing agent(s), current shared readers, proposed new file/heading, rough token cost avoided per off-target read.
 

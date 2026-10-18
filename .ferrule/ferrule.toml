@@ -7,9 +7,9 @@ main_branch = "main"
 tracker = "github"
 ci = "github"
 
-# One full set per tree: fmt, clippy and the workspace tests, then the
-# coverage floor (NF-R-055). No `cargo check` step: clippy type-checks the
-# same crates.
+# One full set per tree, the same steps CI runs: fmt, clippy, the workspace
+# tests, the coverage floor (NF-R-055) and cargo-deny. No
+# `cargo check` step: clippy type-checks the same crates.
 [[gauntlet.step]]
 name = "fmt"
 cmd = ["cargo", "fmt", "--check"]
@@ -30,6 +30,11 @@ name = "cov"
 cmd = ["cargo", "llvm-cov", "--workspace", "--fail-under-lines", "80"]
 timeout = "30m"
 coverage = "llvm-cov"
+
+[[gauntlet.step]]
+name = "deny"
+cmd = ["cargo", "deny", "check"]
+timeout = "15m"
 
 [viewer]
 command = ["glow"]
