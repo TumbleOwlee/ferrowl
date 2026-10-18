@@ -48,21 +48,23 @@ jobs:
 
   # The generated workflow files (.claude/agents/fe-*, .claude/skills/fe-*,
   # the hooks) match .ferrule/ferrule.lock and the ferrule version pinned in
-  # .ferrule/ferrule.toml; the tag and the cache key move with that pin.
-  # ferrule publishes no release binaries, so the built one is cached.
+  # .ferrule/ferrule.toml. The release binary of that pin is downloaded and
+  # checked against its published checksum.
   workflow:
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v7
-      - id: ferrule-cache
-        uses: actions/cache@v6
-        with:
-          path: ~/.cargo/bin/ferrule
-          key: ferrule-v0.1.0-${{ runner.os }}
-      - if: steps.ferrule-cache.outputs.cache-hit != 'true'
-        run: cargo install --git https://github.com/TumbleOwlee/ferrule --tag v0.1.0 --locked ferrule
+      - name: Install the pinned ferrule release
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' .ferrule/ferrule.toml)
+          asset="ferrule_v${version}_x86_64-unknown-linux-musl.zip"
+          url="https://github.com/TumbleOwlee/ferrule/releases/download/v${version}"
+          curl -fsSLO "$url/$asset" -O "$url/$asset.sha256sum"
+          sha256sum -c "$asset.sha256sum"
+          mkdir -p "$HOME/.local/bin" && unzip -qo "$asset" ferrule -d "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: ferrule install --check
 
   # Advisories, licenses, and banned/duplicate crates. Policy lives in deny.toml.
