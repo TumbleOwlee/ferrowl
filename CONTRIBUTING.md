@@ -26,7 +26,6 @@ Crate graph and responsibilities: [`ARCHITECTURE.md`](./ARCHITECTURE.md). Produc
 ```sh
 cargo fmt --check
 cargo clippy --workspace -- -D warnings
-cargo check --workspace
 cargo test --workspace
 cargo llvm-cov --workspace --fail-under-lines 80
 ferrule install --check           # when .ferrule/ or a generated fe-* file changed

@@ -56,7 +56,6 @@ A plan stage's `files` list is a contract: the stage touches exactly the files i
 ```sh
 cargo fmt --check
 cargo clippy --workspace -- -D warnings
-cargo check --workspace
 cargo test --workspace
 cargo llvm-cov --workspace --fail-under-lines 80
 ferrule install --check              # generated workflow files match .ferrule/ferrule.lock

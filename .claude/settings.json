@@ -41,7 +41,6 @@
       "Bash(gh pr comment:*)",
       "Bash(gh issue view:*)",
       "Bash(gh pr view:*)",
-      "Bash(gh run view:*)",
       "Edit(**/.ferrule/state.db)",
       "Edit(**/.ferrule/ferrule.lock)",
       "Edit(**/.claude/agents/fe-*.md)",
