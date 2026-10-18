@@ -1,5 +1,0 @@
-Issue: Reconnect dropped Modbus clients
-Split: RTU clients reconnect
-PR: Reconnect dropped Modbus clients
-Follow-up 1: Share the backoff helper with the RTU client
-exit=0

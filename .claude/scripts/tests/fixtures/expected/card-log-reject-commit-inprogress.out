@@ -1,2 +1,0 @@
-card-log=reject event=commit reason=inprogress move=inreview
-exit=2

@@ -1,6 +1,6 @@
 ---
 name: context-audit
-description: Analyze Claude Code session transcripts for repeated full-file reads, large re-derived tool output and other context-cost waste; recommend small scripts (like extract-section.sh), or a PreToolUse guard / convention edit where the waste bypasses an existing convention. Use for "audit context cost", "reduce context bloat", "what scripts should we add", "analyze tool usage", or /context-audit.
+description: Analyze Claude Code session transcripts for repeated full-file reads, large re-derived tool output and other context-cost waste; recommend small scripts or ferrule commands (like `ferrule spec section`), or a PreToolUse guard / convention edit where the waste bypasses an existing convention. Use for "audit context cost", "reduce context bloat", "what scripts should we add", "analyze tool usage", or /context-audit.
 ---
 
 # Context cost audit
@@ -43,23 +43,23 @@ jq -s '
 
 ## 3. Flag waste patterns
 
-- **Full-file re-read, same file, ≥3 times in one session, no `Edit` between two of them.** Check the file's structure (headings, JSON keys, log sections) against what was quoted after each Read — only one part ever used = `extract-section.sh` candidate (or `jq`/`awk` slice for JSON/log). `.claude/scripts/token-rank.sh <file>...` (if present) ranks repeat offenders by cost.
+- **Full-file re-read, same file, ≥3 times in one session, no `Edit` between two of them.** Check the file's structure (headings, JSON keys, log sections) against what was quoted after each Read — only one part ever used = `ferrule spec section` candidate (or `jq`/`awk` slice for JSON/log). `wc -c <file>... | sort -rn` ranks repeat offenders by cost (~chars/4 tokens).
 - **Large file (`wc -l`) read whole when the same heading/keyword recurs across sessions** — same pattern over time.
 - **Repeated identical `Bash` command** — deterministic output (`git log`, version check) re-run instead of reasoned from context. Behavioral fix, not a script; note separately.
 - **`Grep` with a large match count, re-run later with `-l`/path filter** — narrowing came a call too late.
-- **`Bash` dominates section 2b** — a raw `gh`/`git`/`curl`/API command dumping full JSON/log when only a few fields get used is a script candidate shaped like `.claude/scripts/failed-workflow.sh`/`issue-view.sh` (compact, pre-filtered). Require repetition across sessions before recommending.
+- **`Bash` dominates section 2b** — a raw `gh`/`git`/`curl`/API command dumping full JSON/log when only a few fields get used is a ferrule command candidate shaped like `ferrule pr failed`/`ferrule issue view` (compact, pre-filtered). Require repetition across sessions before recommending.
 
 ## 4. Report
 
-Ranked table: file/pattern, count, rough cost (`lines × occurrences` for Reads), proposed fix. One line each, no praise, no summary. Precede with section 2b's per-tool ranking, unabridged. `.claude/scripts/extract-section.sh` (if present) already covers markdown-heading slicing — recommend *extending its use*, never a duplicate. New script only when the data shape doesn't fit (JSON, log tail, CSV column).
+Ranked table: file/pattern, count, rough cost (`lines × occurrences` for Reads), proposed fix. One line each, no praise, no summary. Precede with section 2b's per-tool ranking, unabridged. `ferrule spec section` already covers markdown-heading slicing — recommend *extending its use*, never a duplicate. New script only when the data shape doesn't fit (JSON, log tail, CSV column).
 
 ## 5. Propose enforcement when the pattern is a bypassed convention
 
-A recurring waste pattern that `AGENTS.md` Conventions already forbid (e.g. raw Bash `cat` of a whole `.md`/large file when `extract-section.sh`/`sed -n`/Read exist) is not a missing script — the fix exists and is routed around. For each, propose as a numbered list, most costly first:
+A recurring waste pattern that `AGENTS.md` Conventions already forbid (e.g. raw Bash `cat` of a whole `.md`/large file when `ferrule spec section`/`sed -n`/Read exist) is not a missing script — the fix exists and is routed around. For each, propose as a numbered list, most costly first:
 
-- **A `PreToolUse` hook** detecting the exact bypass shape at the tool-call boundary and denying with a message pointing at the intended path — shape of `.claude/scripts/hook-guard-shell.sh` if present (`ls .claude/scripts/hook-guard-*.sh`; extend an existing guard covering an overlapping shape before adding one). State matcher (tool name), detection condition, redirect message.
+- **A `PreToolUse` hook** detecting the exact bypass shape at the tool-call boundary and denying with a message pointing at the intended path — shape of `ferrule hook shell` (extend an existing guard covering an overlapping shape before adding one). State matcher (tool name), detection condition, redirect message.
 - **A convention-wording gap**, if the bypass happened because the bullet didn't cover the observed shape (wrong tool, file type, ambiguous wording) — quote current bullet and proposed edit.
 
-One line each: pattern → proposed fix → which file changes (`.claude/settings.json` + new/edited `.claude/scripts/hook-guard-*.sh`, or the Conventions bullet).
+One line each: pattern → proposed fix → which file changes (a `ferrule hook shell` rule — an issue on ferrule — or the Conventions bullet).
 
-If the user approves a specific recommendation, draft that one script the same way `extract-section.sh` was built: POSIX `sh`, single file, one clear job, tested against a real sample before reporting done.
+If the user approves a specific recommendation, draft that one script: POSIX `sh`, single file, one clear job, tested against a real sample before reporting done. A recommendation that belongs in ferrule itself (a new subcommand or hook rule) is an issue on ferrule, not a script here.

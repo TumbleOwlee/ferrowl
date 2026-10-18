@@ -84,7 +84,7 @@ See [`README.md`](./README.md).
 
 **NF-R-041** — Unit tests are colocated with the code under test (`#[cfg(test)] mod tests`, `ut_*` naming where practical); integration tests in each crate's `tests/`.
 
-**NF-R-055** — CI runs `cargo check` + `cargo test` on every push; a tag-triggered nightly workflow additionally builds and publishes release binaries.
+**NF-R-055** — CI runs on every push to and every pull request against `main`: `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`, `cargo check --workspace`, `cargo test --workspace`, `cargo llvm-cov --workspace --fail-under-lines 80`, `cargo deny check` and `ferrule install --check`; every push to `main` additionally moves the `nightly` tag and refreshes its release, and creating a release builds and publishes the release binaries.
 
 **NF-R-056** — `lefthook` enforces `cargo fmt --check` and `cargo clippy -D warnings` pre-commit.
 

@@ -26,11 +26,19 @@ steps:
     commands:
       - cargo test --workspace
 
-  # Fixture tests for the agent-workflow scripts in .claude/scripts/.
-  scripts:
+  # The generated workflow files match .ferrule/ferrule.lock and the ferrule
+  # version pinned in .ferrule/ferrule.toml. The release binary of that pin
+  # is downloaded and checked against its published checksum.
+  workflow:
     image: rust:latest
     commands:
-      - sh .claude/scripts/tests/run.sh
+      - version=$(sed -n 's/^version = "\(.*\)"/\1/p' .ferrule/ferrule.toml)
+      - asset="ferrule_v$${version}_x86_64-unknown-linux-musl.zip"
+      - url="https://github.com/TumbleOwlee/ferrule/releases/download/v$${version}"
+      - curl -fsSLO "$$url/$$asset" -O "$$url/$$asset.sha256sum"
+      - sha256sum -c "$$asset.sha256sum"
+      - mkdir -p "$$HOME/.local/bin" && unzip -qo "$$asset" ferrule -d "$$HOME/.local/bin"
+      - $$HOME/.local/bin/ferrule install --check
 
   # Advisories, licenses, and banned/duplicate crates. Policy lives in deny.toml.
   deny:
