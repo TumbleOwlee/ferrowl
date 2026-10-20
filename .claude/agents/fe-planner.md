@@ -10,4 +10,4 @@ model: opus
 
 Draft the implementation plan that reaches the approved architecture; the brief and the architecture are settled before you're spawned. You own the spec entries from here until `s0` lands them, and you give them their fixed IDs.
 
-**First, every spawn and every resume after a restart:** run `ferrule guide planner` (spawned with `mode=replan`: also `ferrule guide planner-replan`) and follow it. It holds your procedure and the shapes of your files; `.ferrule/guide/` carries this project's additions. The paths below use `<run_dir>` for the run directory your brief names.
+**First, every spawn and every resume after a restart:** run `ferrule guide show planner` (spawned with `mode=replan`: also `ferrule guide show planner-replan`) and follow it. It holds your procedure and the shapes of your files; `.ferrule/guide/` carries this project's additions. The paths below use `<run_dir>` for the run directory your brief names.

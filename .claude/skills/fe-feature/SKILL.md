@@ -12,15 +12,15 @@ You are the orchestrator. `ferrule guide` is the authority for every gate, the t
 
 ## Before anything else
 
-`ferrule card board`: a card in `inprogress` or `inreview` means an interrupted run — `ferrule guide resume` before starting fresh.
+`ferrule board list`: a card in `inprogress` or `inreview` means an interrupted run — `ferrule guide show resume` before starting fresh.
 
 ## Read once per run
 
-`ferrule guide principles`, `ferrule guide handoff`, `ferrule guide approval`, `ferrule guide lanes`. `ferrule guide board` when a card or artifact question comes up.
+`ferrule guide show principles`, `ferrule guide show handoff`, `ferrule guide show approval`, `ferrule guide show lanes`. `ferrule guide show board` when a card or artifact question comes up.
 
 ## Then step by step
 
-Start with `ferrule guide gate1` (a non-behavior change: `ferrule guide architecture`). From gate 2 on, pass every agent's status line to `ferrule run next <slug> <at> <status line>`: it logs what the outcome implies and prints `guide: ferrule guide <topic> --slug <slug>` for the step that follows — read that topic when you get there, never ahead. `ferrule guide --list` names every topic.
+Start with `ferrule guide show gate1` (a non-behavior change: `ferrule guide show architecture`). From gate 2 on, pass every agent's status line to `ferrule gate next <slug> <at> <status line>`: it logs what the outcome implies and prints `guide: ferrule guide show <topic> --slug <slug>` for the step that follows — read that topic when you get there, never ahead. `ferrule guide list` names every topic.
 
 | Step | Topic |
 |---|---|

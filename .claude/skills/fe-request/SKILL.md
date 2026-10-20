@@ -8,14 +8,14 @@ description: PO-facing entrypoint — grill a requirement into an approved brief
 
 **Concise, compact, facts only.**
 
-`ferrule guide gate1` and `ferrule guide issue` are the authority for the brief and the tracking issue; read `ferrule guide principles` and `ferrule guide handoff` once first.
+`ferrule guide show gate1` and `ferrule guide show issue` are the authority for the brief and the tracking issue; read `ferrule guide show principles` and `ferrule guide show handoff` once first.
 
 Single session, no resume: `ferrule run init <slug> [--issue <n>]` gives `fe-author` its run directory; skip gate 1's lane question (always the full-lane brief approval) and every other card step. The ticket is the only surviving artifact: its spec carries local IDs and a `### Deferred` list, the architect and planner refine both, and the planner fixes the IDs. Approved spec text never lands in `docs/specs/` here.
 
 ## Steps
 
-1. Gate 1 — `ferrule guide gate1`, dialogue only.
-2. Tracking issue — right after gate 1's approval (no architecture, no plan): `fe-author` writes `issue.md`; show its body (`ferrule issue body <slug>`), file it on approval with `ferrule issue file <slug>` (`--reuse <n>` when the author answered `reuse`).
+1. Gate 1 — `ferrule guide show gate1`, dialogue only.
+2. Tracking issue — right after gate 1's approval (no architecture, no plan): `fe-author` writes `issue.md`; show its body (`ferrule issue body <slug>`), file it on approval with `ferrule issue post <slug>` (`--reuse <n>` when the author answered `reuse`).
 3. `ferrule run cleanup <slug>` — the run directory is archived; the ticket holds what outlives it.
 
 ## Stop condition
