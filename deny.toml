@@ -18,7 +18,11 @@ all-features = true
 version = 2
 # Every entry here needs a comment saying why it is accepted and what would let us drop it.
 # An unexplained ignore is indistinguishable from an unnoticed vulnerability.
-ignore = []
+ignore = [
+    # webpki-roots 0.26.11, pulled by tokio-tungstenite's `rustls-tls-webpki-roots` feature, is a re-export
+    # shim over the fixed webpki-roots 1.0.10. Drop when tokio-tungstenite depends on webpki-roots 1.x.
+    "RUSTSEC-2026-0381",
+]
 
 [licenses]
 version = 2

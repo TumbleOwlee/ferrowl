@@ -45,6 +45,7 @@ In a Modbus module's sim, and via `C_Module:Get(name):Register()` from the sessi
 | `Get` | `Get(name)` | decoded value as `number`/`string`/`boolean` | unknown name; fixed-address register whose cells are not readable; decode failure; virtual register not yet set | SC-R-019, SC-R-027 |
 | `Set` | `Set(name, value)` | nothing | unknown name; type/range mismatch between `value` and the format (``## Type coercion on `C_Register:Set` ``); `nil` value; fixed-address write the store rejects as not writable | SC-R-019, SC-R-027, SC-R-028 |
 | `Has` | `Has(name)` | `boolean` — whether a register of that name is defined | never (missing name → `false`) | SC-R-019 |
+| `ConnectionStatus` | `ConnectionStatus()` | `string` — `"CONNECTED"`/`"RECONNECTING"`/`"DISCONNECTED"` | never in the module's own sim; on a `Register()` accessor of a removed module, `unknown module '<name>'` | SC-R-082, SC-R-083 |
 
 `name` is the configured register name, not an address, resolved against the module's register definitions current at each call, so runtime adds, edits and deletes take effect on the next call without a sim restart (SC-R-067, SC-R-068, SC-R-069, SC-R-070). `Get`/`Set` exchange the **raw, unscaled** stored value (display resolution not applied), so a `Set` value round-trips through `Get` unchanged (SC-R-027).
 
@@ -60,17 +61,23 @@ In an OCPP module's sim, and via `C_Module:Get(name):OCPP()` from the session-le
 
 | Method | Signature | Returns | Errors | Req |
 |---|---|---|---|---|
-| `Get` | `Get(name)` | state field as `number`/`string`/`boolean` | unknown field for this scope | SC-R-019, SC-R-027 |
-| `Set` | `Set(name, value)` | nothing | field not settable for this scope | SC-R-019, SC-R-027, SC-R-028 |
+| `Get` | `Get(name)` | state field as `number`/`string`/`boolean` | unknown field for this scope | SC-R-019, SC-R-027, SC-R-085 |
+| `Set` | `Set(name, value)` | nothing | field not settable for this scope | SC-R-019, SC-R-027, SC-R-028, SC-R-085 |
 | `<Action>` | `<Action>(overrides?)` | `boolean` — `true` if enqueued | malformed override table (non-string key or non-scalar value) raises | SC-R-042 |
 
 One `<Action>` method per action name the host module exposes for its version; the set is version-specific, defined by the OCPP area (`ocpp/api-contract.md`). Calling an action **enqueues** it on the module's action queue for the owning view (or headless runner) to send; the Lua call does not perform the request and returns once queued (SC-R-009).
 
 `overrides` is an optional flat table of `name = scalar` pairs merged over the action's default payload. Missing table = no overrides. Nested tables or non-scalar values raise (SC-R-042).
 
+`name` is the label the module's view shows for the field at that scope, compared verbatim — listed in `ocpp/data-contract.md` `### Charge-point level`, `### Connector level` and ``## CSMS state model (server role)``; any other name, a former field name or a differently cased label included, raises the unknown-field error (SC-R-085, SC-E-046, SC-E-047).
+
 ### Flat shape
 
 Bare `Get`/`Set`/`<Action>` address a single state scope. No scoping methods.
+
+| Method | Signature | Returns | Req |
+|---|---|---|---|
+| `ConnectionStatus` | `ConnectionStatus()` | `string`, as on `C_Register` | SC-R-082, SC-R-083 |
 
 ### Client shape (charging station)
 
@@ -80,6 +87,7 @@ Bare `Get`/`Set`/`<Action>` address the charge-point (CS) level. Additionally:
 |---|---|---|---|
 | `Connector` | `Connector(id)` | `Accessor` scoped to connector `id`, with its own `Get`/`Set`/`<Action>` | — |
 | `GetConnectors` | `GetConnectors()` | array of connector ids (`number`) | — |
+| `ConnectionStatus` | `ConnectionStatus()` | `string`, as on `C_Register` | SC-R-082, SC-R-083 |
 
 An action on a connector `Accessor` is enqueued at that connector's scope; on the bare module at CS scope.
 
@@ -93,12 +101,13 @@ Access keyed by station identity.
 | `GetConnectors` | `GetConnectors(cs)` | sorted array of connector ids for station `cs` (empty if unknown) | — |
 | `ChargingStation` | `ChargingStation(cs)` | CS-level `Accessor` for `cs`, or `nil` if unknown | — |
 | `Connector` | `Connector(cs, id)` | connector `Accessor` for `(cs, id)`, or `nil` if unknown | — |
+| `ConnectionStatus` | `ConnectionStatus()` | `string`, as on `C_Register` — the listener status only, never one station's | SC-R-082, SC-R-083 |
 
 Unknown stations/connectors resolve to `nil` (not an error); indexing that `nil` is the script's own error (SC-R-019).
 
 ### `Accessor`
 
-Returned by `Connector(...)` / `ChargingStation(...)`. Not a global. Exposes exactly ``### Shared surface (all shapes, and every `Accessor`)``'s surface scoped to one connector or station.
+Returned by `Connector(...)` / `ChargingStation(...)`. Not a global. Exposes exactly ``### Shared surface (all shapes, and every `Accessor`)``'s surface scoped to one connector or station. An `Accessor` has no `ConnectionStatus()` (SC-R-082).
 
 ---
 
@@ -119,6 +128,7 @@ Session-level sim only. Resolves session modules by name, live: a handle re-reso
 | `Role` | `Role()` | role (`"client"` / `"server"`) | same staleness error | SC-R-020 |
 | `Register` | `Register()` | `C_Register`-shaped accessor | raises `module '<name>' is not a modbus module` for non-modbus; staleness error | SC-R-019, SC-R-020 |
 | `OCPP` | `OCPP()` | `C_OCPP`-shaped accessor (client or server shape) | raises `module '<name>' is not an ocpp module` for non-ocpp; staleness error; calls on an accessor returned from an instance no longer behind the name (role/version change, close, close and reopen) raise `module '<name>' was replaced; call OCPP() again` | SC-R-019, SC-R-020, SC-R-080 |
+| `ConnectionStatus` | `ConnectionStatus()` | `string`, as on `C_Register` | same staleness error | SC-R-084, SC-E-045 |
 
 The accessor from `Register()` / `OCPP()` behaves exactly as ``## `C_Register` — Modbus register access`` / ``## `C_OCPP` — OCPP state access and action dispatch``.
 
