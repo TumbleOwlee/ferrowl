@@ -11,7 +11,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use parking_lot::RwLock;
 
 use ferrowl_lua::module::{
-    ModuleDirectory, ModuleHost, OcppClient, OcppGuard, OcppServer, RegisterAccess,
+    ConnectionStatus, ModuleDirectory, ModuleHost, OcppClient, OcppGuard, OcppServer,
+    RegisterAccess, StatusSource,
 };
 use mlua::{AnyUserData, Lua, Result as LuaResult};
 
@@ -91,6 +92,12 @@ impl ModuleHost for ModbusHost {
         )))
     }
 
+    fn connection_status(&self) -> ConnectionStatus {
+        self.status
+            .connection_status()
+            .unwrap_or(ConnectionStatus::Disconnected)
+    }
+
     fn ocpp_accessor(&self, _lua: &Lua, _guard: OcppGuard) -> LuaResult<Option<AnyUserData>> {
         Ok(None)
     }
@@ -123,6 +130,12 @@ impl<S: ClientFields + Send + Sync + 'static> ModuleHost for OcppClientEntry<S> 
 
     fn register_access(&self) -> Option<Arc<dyn RegisterAccess>> {
         None
+    }
+
+    fn connection_status(&self) -> ConnectionStatus {
+        self.status
+            .connection_status()
+            .unwrap_or(ConnectionStatus::Disconnected)
     }
 
     fn ocpp_accessor(&self, lua: &Lua, guard: OcppGuard) -> LuaResult<Option<AnyUserData>> {
@@ -161,6 +174,12 @@ impl<V: ServerVersion + Send + Sync + 'static> ModuleHost for OcppServerEntry<V>
 
     fn register_access(&self) -> Option<Arc<dyn RegisterAccess>> {
         None
+    }
+
+    fn connection_status(&self) -> ConnectionStatus {
+        self.status
+            .connection_status()
+            .unwrap_or(ConnectionStatus::Disconnected)
     }
 
     fn ocpp_accessor(&self, lua: &Lua, guard: OcppGuard) -> LuaResult<Option<AnyUserData>> {
@@ -227,6 +246,9 @@ mod tests {
         }
         fn register_access(&self) -> Option<Arc<dyn RegisterAccess>> {
             None
+        }
+        fn connection_status(&self) -> ConnectionStatus {
+            ConnectionStatus::Disconnected
         }
         fn ocpp_accessor(&self, _lua: &Lua, _guard: OcppGuard) -> LuaResult<Option<AnyUserData>> {
             Ok(None)
@@ -575,5 +597,45 @@ mod tests {
         registry.replace_all(HashMap::new());
         let err = ctx.call(&"probe".to_string()).unwrap_err();
         assert!(err.to_string().contains("unknown module"));
+    }
+
+    #[test]
+    /// SC-R-084 — each module host reports the status its view last published to its cell.
+    fn ut_entries_connection_status_reads_cell() {
+        use crate::module::ocpp::client::v1_6::state::CsState as Cs16;
+        use crate::view::status_bar::ConnStatus;
+        use ferrowl_ocpp::V1_6;
+
+        let modbus_cell = StatusCell::default();
+        let modbus = ModbusHost {
+            memory: evse_memory(),
+            virtual_store: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            registers: Arc::new(parking_lot::RwLock::new(HashMap::new())),
+            role: "client",
+            instance_id: next_instance_id(),
+            status: modbus_cell.clone(),
+        };
+        let client_cell = StatusCell::default();
+        let client = OcppClientEntry {
+            state: Arc::new(RwLock::new(Cs16::default())),
+            queue: Arc::new(parking_lot::Mutex::new(Default::default())),
+            instance_id: next_instance_id(),
+            status: client_cell.clone(),
+        };
+        let server_cell = StatusCell::default();
+        let server = OcppServerEntry::<V1_6> {
+            states: Arc::new(RwLock::new(Default::default())),
+            queue: Arc::new(parking_lot::Mutex::new(Default::default())),
+            instance_id: next_instance_id(),
+            status: server_cell.clone(),
+        };
+
+        assert_eq!(modbus.connection_status(), ConnectionStatus::Disconnected);
+        modbus_cell.publish(ConnStatus::Connected);
+        client_cell.publish(ConnStatus::Reconnecting);
+        server_cell.publish(ConnStatus::Connected);
+        assert_eq!(modbus.connection_status(), ConnectionStatus::Connected);
+        assert_eq!(client.connection_status(), ConnectionStatus::Reconnecting);
+        assert_eq!(server.connection_status(), ConnectionStatus::Connected);
     }
 }

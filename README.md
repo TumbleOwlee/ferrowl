@@ -690,6 +690,10 @@ Return:   `C_Register`-shaped accessor for modbus modules; raises for others.
 
 Method:   ModuleHandle:OCPP()
 Return:   Role-specific `C_OCPP`-shaped accessor for ocpp modules; raises for others. A held accessor raises `module '<name>' was replaced; call OCPP() again` once the module instance behind the name changed (role or version change, or the module closed); call `OCPP()` again for the current one.
+
+Method:   ModuleHandle:ConnectionStatus()
+Return:   The module's displayed connection status at the moment of the call: "CONNECTED",
+          "RECONNECTING" or "DISCONNECTED". Raises `unknown module '<name>'` if the module was removed.
 ```
 
 #### Example: mirror a register between two modbus modules
@@ -794,6 +798,12 @@ Arguments:
 
 Return: nil
 ```
+```
+Method:   C_Register:ConnectionStatus()
+
+Return: The module's displayed connection status at the moment of the call:
+        "CONNECTED", "RECONNECTING" or "DISCONNECTED".
+```
 
 ### Module C_OCPP
 
@@ -864,6 +874,13 @@ Arguments:
 
 Return: true when the action was queued, false on an argument error.
 ```
+```
+Method:   C_OCPP:ConnectionStatus()
+
+Return: The module's displayed connection status at the moment of the call:
+        "CONNECTED", "RECONNECTING" or "DISCONNECTED". On the server role this is
+        the listener status, never one station's. Not available on scope accessors.
+```
 
 #### Scope accessors
 
@@ -874,6 +891,9 @@ connectors are enumerated and then addressed by id.
 ```
 Method:   C_OCPP:Connector(id)                 -- client role
 Return:   accessor scoped to connector `id`, exposing Get/Set/<Action>.
+
+Method:   C_OCPP:GetConnectors()               -- client role
+Return:   list of connector ids (numbers).
 
 Method:   C_OCPP:GetChargingStations()         -- server role
 Return:   list of connected charging-station ids.

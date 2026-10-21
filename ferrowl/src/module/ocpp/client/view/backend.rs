@@ -1820,6 +1820,107 @@ mod tests {
         );
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    /// SC-R-082, SC-R-083 — a running client sim reads the status as it stands at each call through connect, CSMS loss and `:stop`, on one sim that is never restarted.
+    async fn it_client_sim_reads_connection_status() {
+        let server = csms::ServerBuilder::<ferrowl_ocpp::V1_6>::new(
+            csms::Config {
+                host: "127.0.0.1".to_owned(),
+                port: 0,
+                timeout_ms: 2000,
+                reconnect: true,
+                basic_auth: None,
+                tls: Default::default(),
+            },
+            ferrowl_ocpp::new_self_signed_cache(),
+        )
+        .spawn(
+            RecordingCsms16 {
+                calls: Arc::new(Mutex::new(Vec::new())),
+                notify: Arc::new(Notify::new()),
+            },
+            sink(),
+        )
+        .await
+        .expect("server failed to bind");
+        let addr = wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || server.local_addr(),
+        )
+        .await;
+
+        let mut v = client_view::<ferrowl_ocpp::V1_6>(OcppVersion::V1_6, addr.port());
+        v.spec.timeout_ms = Some(200);
+        v.spec.reconnect = Some(true);
+        v.device.script_interval = 0.02;
+        v.device.scripts = vec![crate::config::script::ScriptDef {
+            name: "status".into(),
+            code: r#"C_Log:Info("status=" .. C_OCPP:ConnectionStatus())"#.into(),
+            enabled: true,
+        }];
+        v.start_sim();
+        let handler = v.make_handler();
+        v.backend
+            .start(&v.spec, &v.device, &v.log, handler)
+            .await
+            .expect("start");
+
+        async fn saw(v: &mut ClientView<ferrowl_ocpp::V1_6>, want: &str) -> Option<()> {
+            v.refresh().await;
+            v.script_log
+                .read()
+                .await
+                .peek_n(crate::app::LOG_SIZE)
+                .into_iter()
+                .any(|(_, _, line)| line.contains(want))
+                .then_some(())
+        }
+        async fn wait_for(v: &mut ClientView<ferrowl_ocpp::V1_6>, want: &'static str) {
+            wait_until_async(
+                want,
+                std::time::Duration::from_millis(20),
+                std::time::Duration::from_secs(15),
+                async || saw(v, want).await,
+            )
+            .await;
+        }
+
+        wait_for(&mut v, "status=CONNECTED").await;
+        server.terminate().await.expect("terminate CSMS");
+        wait_for(&mut v, "status=RECONNECTING").await;
+
+        v.handle_command("stop").await;
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
+        wait_for(&mut v, "status=DISCONNECTED").await;
+
+        let stopped = v
+            .script_log
+            .read()
+            .await
+            .peek_n(crate::app::LOG_SIZE)
+            .into_iter()
+            .any(|(_, _, line)| line.contains("stopped"));
+        assert!(
+            !stopped,
+            "the sim must keep running across the status changes"
+        );
+        v.stop_sim();
+    }
+
     /// CSMS handler answering every 2.0.1 action used by these tests and recording the ordered
     /// list of received action names into `calls`, notifying `notify` once `StatusNotification`
     /// lands.

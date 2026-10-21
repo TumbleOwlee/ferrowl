@@ -259,6 +259,7 @@ pub fn run_sim(
 /// Errors are logged under `[run]`, not `[sim]`, so a dialog-driven test run is never mistaken for
 /// a sim failure by headless `--exit-on-error` (CL-R-031). The thread is detached — a script with
 /// no execution ceiling (SC-R-034) must not be able to block the UI by hanging.
+// Lifted once the module handles (memory, virtual store, registers, status) travel as one bundle.
 #[allow(clippy::too_many_arguments)]
 pub fn run_script_once(
     memory: ModuleMemory,
@@ -1119,5 +1120,47 @@ mod tests {
             )
             .expect("read setpoint");
         assert_eq!(setpoint, vec![5]);
+    }
+
+    #[test]
+    /// SC-R-082, SC-R-083 — a running sim reads the status as it stands at each call: one sim, no restart.
+    fn ut_sim_connection_status_tracks_cell() {
+        use crate::view::status_bar::ConnStatus;
+
+        let log = script_log();
+        let status = StatusCell::default();
+        let mut handle = run_sim(
+            evse_memory(),
+            vstore(),
+            Arc::new(MemLock::new(evse_registers())),
+            vec![(
+                "status".to_string(),
+                r#"C_Log:Info("status=" .. C_Register:ConnectionStatus())"#.to_string(),
+            )],
+            Duration::ZERO,
+            log.clone(),
+            no_sink(),
+            status.clone(),
+        )
+        .expect("a non-empty script set spawns a sim thread");
+
+        for (published, want) in [
+            (ConnStatus::Connected, "status=CONNECTED"),
+            (ConnStatus::Reconnecting, "status=RECONNECTING"),
+        ] {
+            status.publish(published);
+            wait_until_blocking(
+                want,
+                Duration::from_millis(10),
+                Duration::from_secs(10),
+                || {
+                    log_lines(&log)
+                        .iter()
+                        .any(|l| l.ends_with(want))
+                        .then_some(())
+                },
+            );
+        }
+        handle.stop();
     }
 }

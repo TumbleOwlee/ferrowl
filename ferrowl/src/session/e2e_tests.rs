@@ -443,6 +443,52 @@ fn it_module_removal_mid_run_logs_error_and_keeps_looping() {
     );
 }
 
+#[test]
+/// SC-R-084, SC-E-045 — a session script reads another module's displayed status through a held `C_Module` handle, and the handle raises `unknown module` once the module is gone.
+fn it_session_reads_module_connection_status() {
+    use crate::view::status_bar::ConnStatus;
+
+    let host = modbus_host(evse_memory(), "client");
+    host.status.publish(ConnStatus::Connected);
+    let registry = registry_from(vec![("m", Arc::new(host))]);
+
+    let log = log();
+    let mut sim = SessionSim::new(
+        Arc::new(registry.clone()) as Arc<dyn ModuleDirectory>,
+        log.clone(),
+    );
+    sim.set_interval(Duration::from_millis(20));
+    sim.set_scripts(vec![script(
+        "status",
+        r#"h = h or C_Module:Get("m"); C_Log:Info("st=" .. h:ConnectionStatus())"#,
+    )]);
+
+    wait_until_blocking(
+        "status read through the handle",
+        Duration::from_millis(10),
+        Duration::from_secs(10),
+        || {
+            log_lines(&log)
+                .iter()
+                .any(|l| l.contains("st=CONNECTED"))
+                .then_some(())
+        },
+    );
+
+    registry.replace_all(HashMap::new());
+    wait_until_blocking(
+        "removed module raises through the same handle",
+        Duration::from_millis(10),
+        Duration::from_secs(10),
+        || {
+            log_lines(&log)
+                .iter()
+                .any(|l| l.contains("[sim]") && l.contains("unknown module 'm'"))
+                .then_some(())
+        },
+    );
+}
+
 // --- 6. Rename -----------------------------------------------------------------
 
 #[test]

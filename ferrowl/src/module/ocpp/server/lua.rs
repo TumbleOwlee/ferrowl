@@ -459,4 +459,42 @@ mod tests {
             "stop() blocked instead of the hook interrupting the runaway script"
         );
     }
+
+    #[test]
+    /// SC-R-082 — the server sim's bare `C_OCPP:ConnectionStatus()` reports the published listener status.
+    fn ut_server_sim_connection_status() {
+        use crate::view::status_bar::ConnStatus;
+
+        let states: SharedServerStates<V1_6> = Arc::new(RwLock::new(ServerStates::default()));
+        let queue: ServerActionQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let log = log();
+        let status = StatusCell::default();
+        status.publish(ConnStatus::Connected);
+        let mut handle = run_server_sim(
+            states,
+            queue,
+            vec![(
+                "status".to_string(),
+                r#"C_Log:Info("status=" .. C_OCPP:ConnectionStatus())"#.to_string(),
+            )],
+            Duration::ZERO,
+            log.clone(),
+            status,
+        )
+        .expect("a non-empty script set spawns a sim thread");
+
+        ferrowl_test_support::wait_until_blocking(
+            "sim logs the published status",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || {
+                log.blocking_read()
+                    .peek_n(crate::app::LOG_SIZE)
+                    .into_iter()
+                    .any(|(_, _, line)| line.ends_with("status=CONNECTED"))
+                    .then_some(())
+            },
+        );
+        handle.stop();
+    }
 }
