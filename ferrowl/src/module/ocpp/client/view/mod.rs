@@ -56,6 +56,7 @@ use crate::module::ocpp::setup::OcppSetupView;
 use crate::module::ocpp::setup_dialog::OcppSetupDialog;
 use crate::module::type_descriptor::SetupView;
 use crate::module::view::{CommandDescriptor, CommandSpec, ModuleView, SharedLog};
+use crate::view::status_bar::StatusCell;
 
 pub use render::{choice, number, text_input};
 
@@ -422,6 +423,8 @@ struct SimRuntime {
     was_online: bool,
     logged_seq: u64,
     applied_log_file: Option<String>,
+    /// Displayed connection status, published each refresh and read by Lua.
+    status: StatusCell,
 }
 
 #[focusable]
@@ -737,6 +740,7 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
             state: self.state.clone(),
             queue: self.runtime.action_queue.clone(),
             instance_id: self.instance_id,
+            status: self.runtime.status.clone(),
         }))
     }
 }

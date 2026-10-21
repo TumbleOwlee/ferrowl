@@ -20,6 +20,7 @@ use crate::module::modbus::{ModuleMemory, VirtualStore};
 use crate::module::ocpp::client::lua_sim::{ClientCsHandle, ClientFields, ScopedActionQueue};
 use crate::module::ocpp::server::lua::{ServerActionQueue, ServerHost, SharedServerStates};
 use crate::module::ocpp::server::view::ServerVersion;
+use crate::view::status_bar::StatusCell;
 
 /// Mints the identity of one module instance in the registry (SC-R-080).
 pub fn next_instance_id() -> u64 {
@@ -65,6 +66,7 @@ pub struct ModbusHost {
     pub registers: SharedRegisters,
     pub role: &'static str,
     pub instance_id: u64,
+    pub status: StatusCell,
 }
 
 impl ModuleHost for ModbusHost {
@@ -85,6 +87,7 @@ impl ModuleHost for ModbusHost {
             self.memory.clone(),
             self.virtual_store.clone(),
             self.registers.clone(),
+            self.status.clone(),
         )))
     }
 
@@ -102,6 +105,7 @@ pub struct OcppClientEntry<S: ClientFields + Send + Sync + 'static> {
     pub state: Arc<parking_lot::RwLock<S>>,
     pub queue: ScopedActionQueue,
     pub instance_id: u64,
+    pub status: StatusCell,
 }
 
 impl<S: ClientFields + Send + Sync + 'static> ModuleHost for OcppClientEntry<S> {
@@ -122,7 +126,8 @@ impl<S: ClientFields + Send + Sync + 'static> ModuleHost for OcppClientEntry<S> 
     }
 
     fn ocpp_accessor(&self, lua: &Lua, guard: OcppGuard) -> LuaResult<Option<AnyUserData>> {
-        let handle = ClientCsHandle::new(self.state.clone(), self.queue.clone());
+        let handle =
+            ClientCsHandle::new(self.state.clone(), self.queue.clone(), self.status.clone());
         Ok(Some(lua.create_userdata(OcppClient::init_guarded(
             handle, guard,
         ))?))
@@ -138,6 +143,7 @@ pub struct OcppServerEntry<V: ServerVersion + Send + Sync + 'static> {
     pub states: SharedServerStates<V>,
     pub queue: ServerActionQueue,
     pub instance_id: u64,
+    pub status: StatusCell,
 }
 
 impl<V: ServerVersion + Send + Sync + 'static> ModuleHost for OcppServerEntry<V> {
@@ -158,7 +164,7 @@ impl<V: ServerVersion + Send + Sync + 'static> ModuleHost for OcppServerEntry<V>
     }
 
     fn ocpp_accessor(&self, lua: &Lua, guard: OcppGuard) -> LuaResult<Option<AnyUserData>> {
-        let host = ServerHost::new(self.states.clone(), self.queue.clone());
+        let host = ServerHost::new(self.states.clone(), self.queue.clone(), self.status.clone());
         Ok(Some(
             lua.create_userdata(OcppServer::init_guarded(host, guard))?,
         ))
@@ -382,6 +388,7 @@ mod tests {
             registers: Arc::new(parking_lot::RwLock::new(registers)),
             role: "client",
             instance_id: next_instance_id(),
+            status: StatusCell::default(),
         };
 
         let registry = ModuleRegistry::new();
@@ -433,6 +440,7 @@ mod tests {
             state: state.clone(),
             queue: queue.clone(),
             instance_id: next_instance_id(),
+            status: StatusCell::default(),
         };
 
         let registry = ModuleRegistry::new();
@@ -496,6 +504,7 @@ mod tests {
             states: states.clone(),
             queue: queue.clone(),
             instance_id: next_instance_id(),
+            status: StatusCell::default(),
         };
 
         let registry = ModuleRegistry::new();

@@ -46,6 +46,7 @@ impl<V: ClientVersion> ClientView<V> {
             self.enabled_scripts(),
             self.device.script_interval_duration(),
             self.script_log.clone(),
+            self.runtime.status.clone(),
         );
     }
 
@@ -64,6 +65,7 @@ impl<V: ClientVersion> ClientView<V> {
             name,
             code,
             self.script_log.clone(),
+            self.runtime.status.clone(),
         );
     }
 
@@ -435,6 +437,10 @@ impl<V: ClientVersion> ClientView<V> {
                     None => unreachable!("outer condition checked pending_lifecycle.is_some()"),
                 }
             }
+
+            self.runtime
+                .status
+                .publish(self.backend.connection_status());
 
             if let Some((spec, path, extra_headers)) = self.deferred.setup.take() {
                 let mut device = OcppDeviceConfig::from_spec(&spec, self.device.scripts.clone());
@@ -926,6 +932,41 @@ mod tests {
             terminal.backend().buffer()[(0, last_row)].bg,
             COLOR_SCHEME.warning,
             "RECONNECTING row must use the warning background"
+        );
+
+        v.backend.stop().await.expect("cleanup stop");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn it_client_refresh_publishes_reconnecting() {
+        use crate::view::status_bar::ConnStatus;
+        use ferrowl_lua::module::{ConnectionStatus, StatusSource};
+
+        let port = reserve_tcp_port().release();
+        let mut v = client_view::<ferrowl_ocpp::V1_6>(OcppVersion::V1_6, port);
+        v.spec.timeout_ms = Some(200);
+        v.spec.reconnect = Some(true);
+        let handler = v.make_handler();
+        v.backend
+            .start(&v.spec, &v.device, &v.log, handler)
+            .await
+            .expect("start must not fail synchronously against an unreachable CSMS");
+        assert_eq!(
+            v.runtime.status.connection_status().unwrap(),
+            ConnectionStatus::Disconnected
+        );
+
+        wait_until(
+            "task backs off in Reconnecting",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || (v.backend.connection_status() == ConnStatus::Reconnecting).then_some(()),
+        )
+        .await;
+        v.refresh().await;
+        assert_eq!(
+            v.runtime.status.connection_status().unwrap(),
+            ConnectionStatus::Reconnecting
         );
 
         v.backend.stop().await.expect("cleanup stop");

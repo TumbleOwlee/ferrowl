@@ -87,6 +87,7 @@ where
             self.enabled_scripts(),
             self.device.script_interval_duration(),
             self.script_log.clone(),
+            self.runtime.status.clone(),
         );
     }
 
@@ -99,6 +100,7 @@ where
             name,
             code,
             self.script_log.clone(),
+            self.runtime.status.clone(),
         );
     }
 
@@ -709,6 +711,10 @@ where
                 }
             }
 
+            self.runtime
+                .status
+                .publish(self.backend.connection_status());
+
             // Apply a resolved `:edit`.
             if let Some((spec, path, extra_headers)) = self.deferred.setup.take() {
                 let mut device = OcppDeviceConfig::from_spec(&spec, self.device.scripts.clone());
@@ -1106,6 +1112,47 @@ mod tests {
         assert!(text.contains("ca_files = [\"ca.pem\"]"));
 
         let _: OcppDeviceConfig = Converter::load(path, FileType::Toml).expect("load");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn it_server_refresh_publishes_connected() {
+        use ferrowl_lua::module::{ConnectionStatus, StatusSource};
+
+        let port = ferrowl_test_support::reserve_tcp_port().release();
+        let mut v = server_view(port);
+        v.handle_command("start").await;
+        wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || v.backend.bound_addr(),
+        )
+        .await;
+        v.refresh().await;
+        assert_eq!(
+            v.runtime.status.connection_status().unwrap(),
+            ConnectionStatus::Connected
+        );
+
+        v.handle_command("stop").await;
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
+        v.refresh().await;
+        assert_eq!(
+            v.runtime.status.connection_status().unwrap(),
+            ConnectionStatus::Disconnected
+        );
     }
 
     /// UI-R-314 — `:stop` against a CSMS whose listener task is genuinely alive signals

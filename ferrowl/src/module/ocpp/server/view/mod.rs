@@ -53,6 +53,7 @@ use crate::module::ocpp::setup::OcppSetupView;
 use crate::module::ocpp::setup_dialog::OcppSetupDialog;
 use crate::module::type_descriptor::SetupView;
 use crate::module::view::{CommandDescriptor, CommandSpec, ModuleView, SharedLog};
+use crate::view::status_bar::StatusCell;
 
 /// Build the runtime RFID store from a persisted device config (CS list + per-connector lists).
 fn rfid_store_from_device(device: &OcppDeviceConfig) -> RfidStore {
@@ -303,6 +304,8 @@ struct SimRuntime {
     logged_seq: u64,
     /// The `log_file` currently applied to the `SharedLog`, to detect `:log`/edit changes.
     applied_log_file: Option<String>,
+    /// Displayed connection status, published each refresh and read by Lua.
+    status: StatusCell,
 }
 
 /// The single modal overlay over the server view (mutually exclusive by construction: entering `:`
@@ -573,6 +576,7 @@ where
             states: self.lua_states.clone(),
             queue: self.runtime.lua_queue.clone(),
             instance_id: self.instance_id,
+            status: self.runtime.status.clone(),
         }))
     }
 }

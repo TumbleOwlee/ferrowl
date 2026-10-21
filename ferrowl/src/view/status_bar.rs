@@ -4,6 +4,10 @@
 // wired to `render_status_bar` yet.
 #![allow(dead_code)]
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
+
+use ferrowl_lua::module::{ConnectionStatus, StatusSource};
 use ferrowl_ui::{COLOR_SCHEME, style::TextStyle, widgets::TextBuilder};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{HorizontalAlignment, Rect};
@@ -35,6 +39,46 @@ impl ConnStatus {
             ConnStatus::Reconnecting => COLOR_SCHEME.warning,
             ConnStatus::Disconnected => COLOR_SCHEME.error,
         }
+    }
+}
+
+impl From<ConnStatus> for ConnectionStatus {
+    fn from(s: ConnStatus) -> Self {
+        match s {
+            ConnStatus::Connected => ConnectionStatus::Connected,
+            ConnStatus::Reconnecting => ConnectionStatus::Reconnecting,
+            ConnStatus::Disconnected => ConnectionStatus::Disconnected,
+        }
+    }
+}
+
+/// The displayed status a view publishes on every refresh and a module's sim threads and
+/// session accessors read from, never touching the view.
+#[derive(Clone, Default)]
+pub struct StatusCell(Arc<AtomicU8>);
+
+impl StatusCell {
+    const CONNECTED: u8 = 1;
+    const RECONNECTING: u8 = 2;
+    const DISCONNECTED: u8 = 0;
+
+    pub fn publish(&self, status: ConnStatus) {
+        let raw = match status {
+            ConnStatus::Connected => Self::CONNECTED,
+            ConnStatus::Reconnecting => Self::RECONNECTING,
+            ConnStatus::Disconnected => Self::DISCONNECTED,
+        };
+        self.0.store(raw, Ordering::Relaxed);
+    }
+}
+
+impl StatusSource for StatusCell {
+    fn connection_status(&self) -> mlua::Result<ConnectionStatus> {
+        Ok(match self.0.load(Ordering::Relaxed) {
+            Self::CONNECTED => ConnectionStatus::Connected,
+            Self::RECONNECTING => ConnectionStatus::Reconnecting,
+            _ => ConnectionStatus::Disconnected,
+        })
     }
 }
 
@@ -83,6 +127,30 @@ mod tests {
         let text = buffer_text(&buf);
         assert!(text.contains("CONNECTED"), "missing label:\n{text}");
         assert_eq!(buf[(0, 0)].bg, COLOR_SCHEME.success);
+    }
+
+    #[test]
+    fn ut_status_cell_defaults_to_disconnected() {
+        let cell = StatusCell::default();
+        assert_eq!(
+            cell.connection_status().unwrap(),
+            ConnectionStatus::Disconnected
+        );
+    }
+
+    #[test]
+    fn ut_status_cell_returns_published_status() {
+        let cell = StatusCell::default();
+        let reader = cell.clone();
+        for (published, want) in [
+            (ConnStatus::Connected, ConnectionStatus::Connected),
+            (ConnStatus::Reconnecting, ConnectionStatus::Reconnecting),
+            (ConnStatus::Disconnected, ConnectionStatus::Disconnected),
+            (ConnStatus::Reconnecting, ConnectionStatus::Reconnecting),
+        ] {
+            cell.publish(published);
+            assert_eq!(reader.connection_status().unwrap(), want);
+        }
     }
 
     #[test]

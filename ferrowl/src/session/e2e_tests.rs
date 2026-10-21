@@ -34,6 +34,7 @@ use crate::module::view::SharedLog;
 use crate::registry::next_instance_id;
 use crate::registry::{ModbusHost, ModuleRegistry, OcppClientEntry, OcppServerEntry};
 use crate::session::SessionSim;
+use crate::view::status_bar::StatusCell;
 
 fn log() -> SharedLog {
     Arc::new(tokio::sync::RwLock::new(crate::app::LogRing::init()))
@@ -117,6 +118,7 @@ fn modbus_host_with(
         registers,
         role,
         instance_id: next_instance_id(),
+        status: StatusCell::default(),
     }
 }
 
@@ -147,6 +149,7 @@ fn client_entry_with_id(
         state: state.clone(),
         queue: queue.clone(),
         instance_id,
+        status: StatusCell::default(),
     };
     (state, queue, entry)
 }
@@ -176,6 +179,7 @@ fn server_entry_with_station(
         states: states.clone(),
         queue: queue.clone(),
         instance_id: next_instance_id(),
+        status: StatusCell::default(),
     };
     (states, queue, entry)
 }
@@ -648,6 +652,7 @@ fn it_held_ocpp_accessor_follows_in_place_rebuild() {
             state: state.clone(),
             queue: queue.clone(),
             instance_id: id,
+            status: StatusCell::default(),
         }),
     )]));
     wait_until_blocking(

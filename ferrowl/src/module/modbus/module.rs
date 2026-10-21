@@ -22,6 +22,7 @@ use crate::config::{
 use crate::instance::Instance;
 use crate::instance::error::Error;
 use crate::lua::{SharedRegisters, SimHandle, run_script_once, run_sim};
+use crate::view::status_bar::StatusCell;
 
 use super::build::{
     Timing, build_instance, build_read_operations, declare_or_reject_msg, default_value,
@@ -82,6 +83,8 @@ pub struct ModbusModule {
     /// The running simulation thread, if any. Runs iff at least one script is enabled
     /// (see `ensure_sim`), independent of the network instance's start/stop state.
     sim: Option<SimHandle>,
+    /// Displayed connection status, published by the view each refresh and read by Lua.
+    status: StatusCell,
     /// Shared values for virtual registers (no Modbus address), keyed by register name.
     virtual_values: VirtualStore,
     /// Cached self-signed TLS material (MB-R-138), reused across `reconfigure()` calls as long
@@ -209,6 +212,7 @@ impl ModbusModule {
             read_ranges: device.read_ranges.clone(),
             script_interval: device.script_interval_duration(),
             sim: None,
+            status: StatusCell::default(),
             virtual_values: Arc::new(RwLock::new(virtual_init)),
             self_signed_cache,
             serial_paths: SerialPathRegistry::default(),
@@ -417,6 +421,7 @@ impl ModbusModule {
             self.script_interval,
             self.script_log.clone(),
             self.file_sink.clone(),
+            self.status.clone(),
         );
     }
 
@@ -460,6 +465,7 @@ impl ModbusModule {
             code,
             self.script_log.clone(),
             self.file_sink.clone(),
+            self.status.clone(),
         );
     }
 
@@ -538,6 +544,15 @@ impl ModbusModule {
     /// MB-R-137/153 — the tri-state connection status shown by this module's status bar.
     pub fn connection_status(&self) -> crate::view::status_bar::ConnStatus {
         self.instance.connection_status()
+    }
+
+    pub(crate) fn status_cell(&self) -> StatusCell {
+        self.status.clone()
+    }
+
+    /// Publishes the displayed status for the module's sim threads and session accessors.
+    pub(crate) fn publish_status(&self) {
+        self.status.publish(self.connection_status());
     }
 }
 

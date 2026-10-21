@@ -13,8 +13,8 @@ use std::time::Duration;
 use parking_lot::{Mutex, RwLock};
 
 use ferrowl_lua::module::{
-    LogModule, OcppActions, OcppServer, OcppServerHost, Read, TestModule, TimeModule, ValueType,
-    Write,
+    ConnectionStatus, LogModule, OcppActions, OcppServer, OcppServerHost, Read, StatusSource,
+    TestModule, TimeModule, ValueType, Write,
 };
 use ferrowl_lua::{ContextBuilder, Error};
 
@@ -26,6 +26,7 @@ use crate::module::ocpp::lock::{with_state, with_state_mut};
 use crate::module::ocpp::scope::Scope;
 use crate::module::ocpp::server::view::ServerVersion;
 use crate::module::view::SharedLog;
+use crate::view::status_bar::StatusCell;
 
 /// Actions enqueued by the server Lua sim: `(identity, scope, action, overrides-json)`, drained by
 /// the view each refresh and routed to the matching connection/entry.
@@ -154,14 +155,29 @@ impl<V: ServerVersion> OcppActions for ConnHandle<V> {
 pub struct ServerHost<V: ServerVersion> {
     states: SharedServerStates<V>,
     queue: ServerActionQueue,
+    status: StatusCell,
 }
 
 impl<V: ServerVersion> ServerHost<V> {
     /// Builds a host over the shared state registry and its action queue (used by both the
     /// running sim thread and the session-level [`crate::registry::OcppServerEntry`] `C_Module`
     /// bridge).
-    pub(crate) fn new(states: SharedServerStates<V>, queue: ServerActionQueue) -> Self {
-        Self { states, queue }
+    pub(crate) fn new(
+        states: SharedServerStates<V>,
+        queue: ServerActionQueue,
+        status: StatusCell,
+    ) -> Self {
+        Self {
+            states,
+            queue,
+            status,
+        }
+    }
+}
+
+impl<V: ServerVersion> StatusSource for ServerHost<V> {
+    fn connection_status(&self) -> ferrowl_lua::Result<ConnectionStatus> {
+        self.status.connection_status()
     }
 }
 
@@ -230,9 +246,10 @@ pub fn run_server_script_once<V: ServerVersion>(
     name: String,
     code: String,
     log: SharedLog,
+    status: StatusCell,
 ) {
     std::thread::spawn(move || {
-        let host = ServerHost { states, queue };
+        let host = ServerHost::new(states, queue, status);
         let context = ContextBuilder::<String>::default()
             .with_stdlib()
             .with_module(OcppServer::init(host))
@@ -263,6 +280,7 @@ pub fn run_server_sim<V: ServerVersion>(
     scripts: Vec<(String, String)>,
     interval: Duration,
     log: SharedLog,
+    status: StatusCell,
 ) -> Option<OcppSimHandle> {
     if scripts.is_empty() {
         return None;
@@ -270,7 +288,7 @@ pub fn run_server_sim<V: ServerVersion>(
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = stop.clone();
     let handle = std::thread::spawn(move || {
-        let host = ServerHost { states, queue };
+        let host = ServerHost::new(states, queue, status);
         let mut builder = ContextBuilder::<String>::default()
             .with_stdlib()
             .with_module(OcppServer::init(host))
@@ -324,10 +342,7 @@ mod tests {
                 .push((Scope::connector(1), Arc::new(RwLock::new(Conn::default()))));
         });
         let queue: ServerActionQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let host = ServerHost {
-            states,
-            queue: queue.clone(),
-        };
+        let host = ServerHost::new(states, queue.clone(), StatusCell::default());
 
         // Enumeration + resolution.
         assert_eq!(host.stations(), vec!["CP1".to_string()]);
@@ -361,10 +376,7 @@ mod tests {
         });
         let queue: ServerActionQueue = Arc::new(Mutex::new(VecDeque::new()));
         (
-            ServerHost {
-                states,
-                queue: queue.clone(),
-            },
+            ServerHost::new(states, queue.clone(), StatusCell::default()),
             queue,
         )
     }
@@ -432,6 +444,7 @@ mod tests {
             // script eligible to run on the very first cycle, deterministically.
             Duration::ZERO,
             log(),
+            StatusCell::default(),
         )
         .expect("a non-empty script set spawns a sim thread");
 
