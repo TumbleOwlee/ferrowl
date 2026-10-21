@@ -2,9 +2,33 @@ pub mod traits;
 
 use crate::module::StatusSource;
 use crate::module::ValueType;
+use crate::module::docs::{CONNECTION_STATUS, MethodDoc, arg, method};
 use ferrowl_lua_derive::Module;
 use mlua::{Result, UserData};
 use traits::{Has, Read, Write};
+
+/// Help entries for the registered methods.
+pub(crate) const DOCS: &[MethodDoc] = &[
+    method(
+        "Get",
+        &[arg("name", "string")],
+        "number|string|boolean",
+        "read a register's value",
+    ),
+    method(
+        "Set",
+        &[arg("name", "string"), arg("value", "number|string|boolean")],
+        "nil",
+        "write a register's value",
+    ),
+    method(
+        "Has",
+        &[arg("name", "string")],
+        "boolean",
+        "whether a register of that name is defined",
+    ),
+    CONNECTION_STATUS,
+];
 
 /// Lua module `C_Register`: gives scripts read/write access to named registers
 /// through a host-provided [`Read`]/[`Write`] handle.
@@ -98,5 +122,16 @@ mod tests {
                 "want {want}"
             );
         }
+    }
+
+    #[test]
+    fn ut_register_docs_match_registered_methods() {
+        use crate::module::test_support::{documented, registered_methods};
+
+        let lua = mlua::Lua::new();
+        let ud = lua
+            .create_userdata(Register::init(MockHost::default()))
+            .unwrap();
+        assert_eq!(registered_methods(&ud), documented(&[DOCS], &[]));
     }
 }

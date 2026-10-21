@@ -15,11 +15,84 @@
 
 pub mod traits;
 
+use crate::module::docs::{ArgDoc, CONNECTION_STATUS, MethodDoc, arg, method};
 use crate::module::{StatusSource, ValueType};
 use ferrowl_lua_derive::Module;
 use mlua::{Result, Table, UserData, UserDataMethods};
 use std::sync::Arc;
 use traits::{OcppClientHost, OcppHandle, OcppServerHost};
+
+/// Help entries for the shared `Get`/`Set` surface, on every shape and every [`Accessor`].
+pub(crate) const STATE_DOCS: &[MethodDoc] = &[
+    method(
+        "Get",
+        &[arg("name", "string")],
+        "number|string|boolean|nil",
+        "read a state field of this scope",
+    ),
+    method(
+        "Set",
+        &[arg("name", "string"), arg("value", "number|string|boolean")],
+        "nil",
+        "write a state field of this scope",
+    ),
+];
+
+/// Help entry for the per-action method template.
+pub(crate) const ACTION_DOC: MethodDoc = method(
+    "<Action>",
+    &[ArgDoc {
+        name: "overrides",
+        ty: "table",
+        optional: true,
+    }],
+    "boolean",
+    "send this action; overrides merge over the state-derived payload",
+);
+
+/// Help entries beyond the shared surface for the flat shape.
+pub(crate) const FLAT_DOCS: &[MethodDoc] = &[CONNECTION_STATUS];
+
+/// Help entries beyond the shared surface for the client shape.
+pub(crate) const CLIENT_DOCS: &[MethodDoc] = &[
+    method(
+        "Connector",
+        &[arg("id", "integer")],
+        "Accessor",
+        "accessor scoped to one connector, with its own Get/Set/<Action>",
+    ),
+    method("GetConnectors", &[], "integer[]", "list connector ids"),
+    CONNECTION_STATUS,
+];
+
+/// Help entries for the server shape (it has no bare `Get`/`Set`/`<Action>`).
+pub(crate) const SERVER_DOCS: &[MethodDoc] = &[
+    method(
+        "GetChargingStations",
+        &[],
+        "string[]",
+        "list known charging station ids",
+    ),
+    method(
+        "GetConnectors",
+        &[arg("cs", "string")],
+        "integer[]",
+        "list connector ids for a station",
+    ),
+    method(
+        "ChargingStation",
+        &[arg("cs", "string")],
+        "Accessor|nil",
+        "accessor scoped to one station, with its own Get/Set/<Action>",
+    ),
+    method(
+        "Connector",
+        &[arg("cs", "string"), arg("id", "integer")],
+        "Accessor|nil",
+        "accessor scoped to one connector, with its own Get/Set/<Action>",
+    ),
+    CONNECTION_STATUS,
+];
 
 /// A per-call precondition a host-built accessor runs before every method; the default is none.
 #[derive(Clone, Default)]
@@ -455,10 +528,6 @@ mod tests {
         );
     }
 
-    fn run_status_script(ctx: &mut crate::Context<String>) {
-        ctx.call_all().expect("run");
-    }
-
     #[test]
     /// SC-R-082 — `ConnectionStatus()` on the flat, client and server `C_OCPP` shapes returns the host's status string.
     fn ut_connection_status_on_every_shape() {
@@ -473,7 +542,7 @@ mod tests {
             )
             .build()
             .expect("build context");
-        run_status_script(&mut ctx);
+        ctx.call_all().expect("run");
         assert!(matches!(flat.get("st"), Some(ValueType::String(s)) if s == "CONNECTED"));
 
         let client = MockHost::default();
@@ -487,7 +556,7 @@ mod tests {
             )
             .build()
             .expect("build context");
-        run_status_script(&mut ctx);
+        ctx.call_all().expect("run");
         assert!(matches!(client.get("st"), Some(ValueType::String(s)) if s == "DISCONNECTED"));
 
         let server = ServerHost::fixture();
@@ -500,7 +569,7 @@ mod tests {
             )
             .build()
             .expect("build context");
-        run_status_script(&mut ctx);
+        ctx.call_all().expect("run");
         let stations = server.stations.lock().unwrap();
         assert!(matches!(
             store_get(&stations["cp001"].1[&1], "st"),
@@ -542,6 +611,44 @@ mod tests {
                 .iter()
                 .any(|e| e.to_string().contains("guard says no")),
             "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn ut_ocpp_docs_match_registered_methods() {
+        use crate::module::OcppActions;
+        use crate::module::test_support::{documented, registered_methods};
+
+        let lua = mlua::Lua::new();
+        let actions = MockHost::actions();
+
+        let flat = lua
+            .create_userdata(Ocpp::init(MockHost::default()))
+            .unwrap();
+        assert_eq!(
+            registered_methods(&flat),
+            documented(&[STATE_DOCS, FLAT_DOCS], &actions)
+        );
+
+        let client = lua
+            .create_userdata(OcppClient::init(MockHost::default()))
+            .unwrap();
+        assert_eq!(
+            registered_methods(&client),
+            documented(&[STATE_DOCS, CLIENT_DOCS], &actions)
+        );
+
+        let server = lua
+            .create_userdata(OcppServer::init(ServerHost::fixture()))
+            .unwrap();
+        assert_eq!(registered_methods(&server), documented(&[SERVER_DOCS], &[]));
+
+        let accessor = lua
+            .create_userdata(Accessor::new(MockHost::default()))
+            .unwrap();
+        assert_eq!(
+            registered_methods(&accessor),
+            documented(&[STATE_DOCS], &actions)
         );
     }
 }

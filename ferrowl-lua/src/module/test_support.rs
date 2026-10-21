@@ -1,10 +1,40 @@
 //! Shared in-memory host fixtures for the module unit tests.
 
+use crate::module::MethodDoc;
 use crate::module::{
     ConnectionStatus, Has, OcppActions, OcppClientHost, Read, StatusSource, ValueType, Write,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
+
+/// Names of the methods a userdata registered, read from its metatable's `__index` table.
+pub(crate) fn registered_methods(ud: &mlua::AnyUserData) -> BTreeSet<String> {
+    let meta = ud.metatable().expect("userdata has a metatable");
+    let index = meta
+        .get::<mlua::Value>("__index")
+        .expect("metatable has __index");
+    let mlua::Value::Table(table) = index else {
+        panic!("mlua no longer exposes registered methods as a table under `__index`: {index:?}");
+    };
+    table
+        .pairs::<mlua::Value, mlua::Value>()
+        .filter_map(|p| match p.expect("pair") {
+            (mlua::Value::String(k), _) => Some(k.to_str().expect("utf-8 method name").to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The documented method names of `docs` minus the `<Action>` template, plus the concrete
+/// `actions`.
+pub(crate) fn documented(docs: &[&[MethodDoc]], actions: &[&str]) -> BTreeSet<String> {
+    docs.iter()
+        .flat_map(|t| t.iter())
+        .filter(|m| m.name != "<Action>")
+        .map(|m| m.name.to_string())
+        .chain(actions.iter().map(|a| a.to_string()))
+        .collect()
+}
 
 /// A key/value state store shared between a mock handle and the test asserting on it.
 pub(crate) type Store = Arc<Mutex<HashMap<String, ValueType>>>;

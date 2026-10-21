@@ -7,12 +7,58 @@
 //! runtime — a handle obtained before a removal simply starts erroring afterwards instead of
 //! reading stale state.
 
+use crate::module::docs::{CONNECTION_STATUS, MethodDoc, arg, method};
 use crate::module::{
     ConnectionStatus, Has, OcppGuard, Read, RegisterModule, StatusSource, ValueType, Write,
 };
 use ferrowl_lua_derive::Module;
 use mlua::{AnyUserData, Lua, Result, UserData, UserDataMethods};
 use std::sync::Arc;
+
+/// Help entries for `C_Module`.
+pub(crate) const DIR_DOCS: &[MethodDoc] = &[
+    method(
+        "List",
+        &[],
+        "string[]",
+        "sorted names of every module in the session",
+    ),
+    method(
+        "Get",
+        &[arg("name", "string")],
+        "ModuleHandle",
+        "resolve a module by name to a handle (raises if unknown)",
+    ),
+];
+
+/// Help entries for a [`ModuleHandle`].
+pub(crate) const HANDLE_DOCS: &[MethodDoc] = &[
+    method(
+        "Type",
+        &[],
+        "string",
+        "module kind, e.g. \"modbus\" or \"ocpp\"",
+    ),
+    method(
+        "Role",
+        &[],
+        "string",
+        "module role, e.g. \"client\" or \"server\"",
+    ),
+    method(
+        "Register",
+        &[],
+        "C_Register",
+        "C_Register-shaped accessor (modbus modules only)",
+    ),
+    method(
+        "OCPP",
+        &[],
+        "C_OCPP",
+        "C_OCPP-shaped accessor (ocpp modules only)",
+    ),
+    CONNECTION_STATUS,
+];
 
 /// Register read/write/has access of a modbus module, type-erased.
 pub trait RegisterAccess: Read + Write + Has + Send + Sync {}
@@ -92,12 +138,14 @@ struct LiveRegister {
 }
 
 impl LiveRegister {
-    fn access(&self) -> Result<Arc<dyn RegisterAccess>> {
-        let host = self
-            .directory
+    fn host(&self) -> Result<Arc<dyn ModuleHost>> {
+        self.directory
             .resolve(&self.name)
-            .ok_or_else(|| mlua::Error::RuntimeError(format!("unknown module '{}'", self.name)))?;
-        host.register_access().ok_or_else(|| {
+            .ok_or_else(|| mlua::Error::RuntimeError(format!("unknown module '{}'", self.name)))
+    }
+
+    fn access(&self) -> Result<Arc<dyn RegisterAccess>> {
+        self.host()?.register_access().ok_or_else(|| {
             mlua::Error::RuntimeError(format!("module '{}' is not a modbus module", self.name))
         })
     }
@@ -105,11 +153,7 @@ impl LiveRegister {
 
 impl StatusSource for LiveRegister {
     fn connection_status(&self) -> Result<ConnectionStatus> {
-        let host = self
-            .directory
-            .resolve(&self.name)
-            .ok_or_else(|| mlua::Error::RuntimeError(format!("unknown module '{}'", self.name)))?;
-        Ok(host.connection_status())
+        Ok(self.host()?.connection_status())
     }
 }
 
@@ -715,5 +759,23 @@ mod tests {
         dir.remove("m");
         let err = ctx.call(&"probe".to_string()).unwrap_err();
         assert!(err.to_string().contains("unknown module"), "{err}");
+    }
+
+    #[test]
+    fn ut_module_dir_docs_match_registered_methods() {
+        use crate::module::test_support::{documented, registered_methods};
+
+        let lua = mlua::Lua::new();
+        let dir = Arc::new(MockDirectory::default());
+        let directory = dir as Arc<dyn ModuleDirectory>;
+        let handle = lua
+            .create_userdata(ModuleHandle {
+                directory: directory.clone(),
+                name: "m".into(),
+            })
+            .unwrap();
+        assert_eq!(registered_methods(&handle), documented(&[HANDLE_DOCS], &[]));
+        let module = lua.create_userdata(ModuleDir::init(directory)).unwrap();
+        assert_eq!(registered_methods(&module), documented(&[DIR_DOCS], &[]));
     }
 }

@@ -1,5 +1,6 @@
 //! Host modules exposed to Lua scripts as global userdata objects.
 
+pub mod docs;
 mod log;
 mod module_dir;
 mod ocpp;
@@ -12,6 +13,7 @@ pub(crate) mod test_support;
 mod time;
 mod value_type;
 
+pub use docs::{ArgDoc, MethodDoc};
 pub use log::{Log as LogModule, LogLevel, LogSink};
 pub use module_dir::{
     ModuleDir as ModuleDirModule, ModuleDirectory, ModuleHandle, ModuleHost, RegisterAccess,
