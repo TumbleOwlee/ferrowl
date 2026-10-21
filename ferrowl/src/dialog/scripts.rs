@@ -13,7 +13,7 @@
 //! confirmation popup (Enter/Space confirms, Esc dismisses it).
 //!
 //! `?` opens a help overlay, which page depending on focus: from the script table, the table's own
-//! keybinds (UI-R-056); from the code editor's Normal mode, the Lua bindings for `context`.
+//! keybinds (UI-R-056); from the code editor's Normal mode, the Lua bindings for its `bindings`.
 
 use std::time::Duration;
 
@@ -37,7 +37,7 @@ use ratatui::{
 use crate::config::script::ScriptDef;
 use crate::dialog::close_confirm::{CloseConfirmDialog, CloseConfirmOutcome, route_close_confirm};
 use crate::dialog::help::{HelpOutcome, HelpOverlay, route_help};
-use crate::dialog::lua_help::{ScriptContext, lua_help_overlay};
+use crate::dialog::lua_help::{LuaBindings, ScriptContext, lua_help_overlay};
 use crate::dialog::rename::{RenameOutcome, RenamePrompt, route_rename};
 use crate::dialog::script_keys::script_keys_overlay;
 use crate::dialog::script_manager::{self, ScriptManagerRef, ScriptTable};
@@ -107,14 +107,14 @@ pub struct ScriptDialog {
     /// Compact (no vertical row margin) script table; toggled with `c`. Default off (margin 1).
     compact: bool,
     close_confirm: Option<CloseConfirmDialog>,
-    context: ScriptContext,
+    bindings: LuaBindings,
     /// The open `?` help overlay: the Lua bindings (from the code editor) or the script table's
     /// keybinds (from the table). Which page it shows is decided when it is opened (UI-R-056).
     help: Option<HelpOverlay>,
 }
 
 impl ScriptDialog {
-    pub fn new(scripts: &[ScriptDef], interval: Duration, context: ScriptContext) -> Self {
+    pub fn new(scripts: &[ScriptDef], interval: Duration, bindings: LuaBindings) -> Self {
         let scripts = scripts.to_vec();
         let mut interval_field = interval_input();
         set_input(&mut interval_field, &format_interval(interval));
@@ -134,7 +134,7 @@ impl ScriptDialog {
             pending_run: None,
             compact: false,
             close_confirm: None,
-            context,
+            bindings,
             help: None,
             scripts,
         };
@@ -285,7 +285,7 @@ impl ScriptDialog {
             && let (KeyModifiers::NONE | KeyModifiers::SHIFT, KeyCode::Char('?')) =
                 (modifiers, code)
         {
-            self.help = Some(lua_help_overlay(self.context));
+            self.help = Some(lua_help_overlay(&self.bindings));
             return false;
         }
 
@@ -340,7 +340,7 @@ impl ScriptDialog {
                     if let (KeyModifiers::NONE, KeyCode::Enter | KeyCode::Char(' ')) =
                         (modifiers, code)
                     {
-                        self.template_browser = Some(TemplateBrowser::new(self.context));
+                        self.template_browser = Some(TemplateBrowser::new(self.bindings.context()));
                     }
                 }
                 // Code-focus keys were already offered to the editor above; anything
@@ -377,7 +377,7 @@ impl ScriptDialog {
                     .bg(COLOR_SCHEME.bg),
             )
             .title_alignment(HorizontalAlignment::Center)
-            .title(match self.context {
+            .title(match self.bindings.context() {
                 ScriptContext::Session => "Session",
                 ScriptContext::Modbus => "Modbus Scripts",
                 ScriptContext::OcppClient => "OCPP Client Scripts",
@@ -545,7 +545,7 @@ mod tests {
                 enabled: true,
             }],
             Duration::from_secs_f64(2.5),
-            ScriptContext::Modbus,
+            LuaBindings::Modbus,
         )
     }
 
@@ -656,7 +656,7 @@ mod tests {
     #[test]
     /// UI-R-078 — the focus cycle skips a disabled field (the code editor).
     fn ut_rotation_skips_disabled_code_editor() {
-        let mut d = ScriptDialog::new(&[], Duration::from_secs(1), ScriptContext::Modbus);
+        let mut d = ScriptDialog::new(&[], Duration::from_secs(1), LuaBindings::Modbus);
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> templates button
@@ -687,7 +687,7 @@ mod tests {
     #[test]
     /// UI-R-058 — the script table adds, toggles-enabled, and deletes scripts in its working list.
     fn ut_create_toggle_delete_script() {
-        let mut d = ScriptDialog::new(&[], Duration::from_secs(1), ScriptContext::Modbus);
+        let mut d = ScriptDialog::new(&[], Duration::from_secs(1), LuaBindings::Modbus);
         // Tab to the name input, type a name, Enter creates an enabled script.
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
@@ -711,7 +711,7 @@ mod tests {
                 enabled: false,
             }],
             Duration::from_secs(1),
-            ScriptContext::Modbus,
+            LuaBindings::Modbus,
         );
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
         // Edit in the code editor, then come back to the table without leaving the dialog: the
@@ -743,7 +743,7 @@ mod tests {
     #[test]
     /// UI-R-335 — `e` with no script selected is a no-op.
     fn ut_e_without_selection_is_noop() {
-        let mut d = ScriptDialog::new(&[], Duration::from_secs(1), ScriptContext::Modbus);
+        let mut d = ScriptDialog::new(&[], Duration::from_secs(1), LuaBindings::Modbus);
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table (empty)
         d.handle_events(KeyModifiers::NONE, KeyCode::Char('e'));
         assert!(d.take_run_request().is_none());
@@ -942,6 +942,35 @@ mod tests {
     }
 
     #[test]
+    /// UI-R-382, UI-E-030 — `?` in the code editor's Normal mode opens the bindings of the dialog's
+    /// own context, carrying the action names it was built with.
+    fn ut_question_mark_in_normal_opens_bindings_of_dialog() {
+        let bindings = LuaBindings::OcppClient {
+            cs_actions: vec!["Heartbeat"],
+            conn_actions: vec!["StatusNotification"],
+        };
+        let scripts = [ScriptDef {
+            name: "s".into(),
+            enabled: true,
+            code: String::new(),
+        }];
+        let mut d = ScriptDialog::new(&scripts, Duration::from_secs(1), bindings);
+        for _ in 0..4 {
+            d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
+        }
+        assert_eq!(d.focus, ScriptDialogFocus::Code);
+        d.handle_events(KeyModifiers::NONE, KeyCode::Char('?'));
+        let secs = d.help.as_ref().expect("overlay open").sections();
+        let has = |name: &str| {
+            secs.iter()
+                .flat_map(|s| s.entries.iter())
+                .any(|(sig, _)| sig.contains(&format!(":{name}(")))
+        };
+        assert!(has("Heartbeat"));
+        assert!(has("StatusNotification"));
+    }
+
+    #[test]
     /// UI-R-186 — Esc/q/? close the bindings help overlay.
     fn ut_bindings_close_keys() {
         for close_key in [KeyCode::Esc, KeyCode::Char('q'), KeyCode::Char('?')] {
@@ -1040,7 +1069,7 @@ mod tests {
                 enabled: false,
             }],
             Duration::from_secs(1),
-            ScriptContext::Modbus,
+            LuaBindings::Modbus,
         );
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
         assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Enter));
@@ -1075,7 +1104,7 @@ mod tests {
                 },
             ],
             Duration::from_secs(1),
-            ScriptContext::Modbus,
+            LuaBindings::Modbus,
         );
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table (row 0: boot)
         d.handle_events(KeyModifiers::NONE, KeyCode::Enter); // open the prompt
@@ -1109,7 +1138,7 @@ mod tests {
         assert!(d.close_confirm.is_none(), "Esc belonged to the prompt");
         assert_eq!(d.scripts[0].name, "boot");
 
-        let mut empty = ScriptDialog::new(&[], Duration::from_secs(1), ScriptContext::Modbus);
+        let mut empty = ScriptDialog::new(&[], Duration::from_secs(1), LuaBindings::Modbus);
         empty.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table (empty)
         assert!(!empty.handle_events(KeyModifiers::NONE, KeyCode::Enter));
         assert!(empty.rename.is_none());
@@ -1125,7 +1154,7 @@ mod tests {
         assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Char('?')));
         assert!(d.help.is_some());
 
-        let mut empty = ScriptDialog::new(&[], Duration::from_secs(1), ScriptContext::Modbus);
+        let mut empty = ScriptDialog::new(&[], Duration::from_secs(1), LuaBindings::Modbus);
         empty.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table (empty)
         empty.handle_events(KeyModifiers::NONE, KeyCode::Char('?'));
         assert!(empty.help.is_some());

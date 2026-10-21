@@ -4,7 +4,7 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use ferrowl_ui::{EventResult, traits::HandleEvents, widgets::GetValue};
 
-use crate::dialog::lua_help::ScriptContext;
+use crate::dialog::lua_help::LuaBindings;
 use crate::dialog::scripts::ScriptDialog;
 use crate::module::ocpp::action_dialog::{ActionDialog, ActionResult, gen_tx_id, value_to_string};
 use crate::module::ocpp::client::config::{ConfigEditDialog, ConfigKey};
@@ -258,7 +258,10 @@ impl<V: ClientVersion> ClientView<V> {
         self.overlay = ClientOverlay::Scripts(Box::new(ScriptDialog::new(
             &self.device.scripts,
             self.device.script_interval_duration(),
-            ScriptContext::OcppClient,
+            LuaBindings::OcppClient {
+                cs_actions: <V::Cs as ClientFields>::cs_actions(),
+                conn_actions: <V::Cs as ClientFields>::conn_actions(),
+            },
         )));
     }
 

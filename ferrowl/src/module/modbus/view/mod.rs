@@ -14,7 +14,7 @@ use crate::app::Level;
 use crate::config::script::ScriptDef;
 use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
 use crate::dialog::close_confirm::CloseConfirmEvent;
-use crate::dialog::lua_help::ScriptContext;
+use crate::dialog::lua_help::LuaBindings;
 use crate::dialog::scripts::ScriptDialog;
 use crate::module::modbus::build::Timing;
 use crate::module::modbus::dialog::{EditInputDialog, EditSelectionDialog};
@@ -1016,7 +1016,7 @@ impl ModuleView for ModbusModuleView {
                 self.overlay = ModbusViewOverlay::Scripts(Box::new(ScriptDialog::new(
                     &self.device.scripts,
                     self.device.script_interval_duration(),
-                    ScriptContext::Modbus,
+                    LuaBindings::Modbus,
                 )));
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
             }

@@ -6,10 +6,11 @@ use ferrowl_ui::EventResult;
 use ferrowl_ui::traits::{HandleEvents, OverlayRoute};
 use ferrowl_ui::widgets::GetValue;
 
-use crate::dialog::lua_help::ScriptContext;
+use crate::dialog::lua_help::LuaBindings;
 use crate::dialog::scripts::ScriptDialog;
 use crate::module::modbus::dialog::ConfirmDeleteDialog;
 use crate::module::ocpp::action_dialog::{ActionDialog, ActionResult, gen_tx_id};
+use crate::module::ocpp::client::lua_sim::OcppFields;
 use crate::module::ocpp::server::backend::{Scope, with_rfids_mut};
 use crate::module::ocpp::server::detail::{DetailOverlay, DetailRequest};
 
@@ -267,7 +268,10 @@ where
         self.overlay = ServerOverlay::Scripts(Box::new(ScriptDialog::new(
             &self.device.scripts,
             self.device.script_interval_duration(),
-            ScriptContext::OcppServer,
+            LuaBindings::OcppServer {
+                station_actions: <V::Cs as OcppFields>::actions(),
+                conn_actions: <V::Conn as OcppFields>::actions(),
+            },
         )));
     }
 
