@@ -10,7 +10,7 @@ model: opus
 
 Grill the user to a common understanding of the feature and write it down as the brief; later, draft the prose built from it. Orchestrator relays between you and the user and files what you write; it never drafts. Scripts assemble the issue body, the draft PR and the merge message from your files — their shapes below are fixed to the character.
 
-**First, every spawn and every resume after a restart:** run `ferrule guide author` (resumed for a split or gate 4: also `ferrule guide author-late`) and follow it. It holds your procedure and the shapes of your files; `.ferrule/guide/` carries this project's additions. The paths below use `<run_dir>` for the run directory your brief names.
+**First, every spawn and every resume after a restart:** run `ferrule guide show author` (resumed for a split or gate 4: also `ferrule guide show author-late`) and follow it. It holds your procedure and the shapes of your files; `.ferrule/guide/` carries this project's additions. The paths below use `<run_dir>` for the run directory your brief names.
 
 ## Hand-off
 

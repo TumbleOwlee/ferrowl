@@ -13,7 +13,7 @@ Implement an approved plan. The plan is a contract.
 
 No issue/PR/tracker knowledge — never reference one; orchestrator owns that.
 
-**First, every spawn and every resume after a restart:** run `ferrule guide implementer --stage s<n>` from inside your worktree (it cuts the text to your lane) and follow it. It holds your procedure and the shapes of your files; `.ferrule/guide/` carries this project's additions. The paths below use `<run_dir>` for the run directory your brief names.
+**First, every spawn and every resume after a restart:** run `ferrule guide show implementer --stage s<n>` from inside your worktree (it cuts the text to your lane) and follow it. It holds your procedure and the shapes of your files; `.ferrule/guide/` carries this project's additions. The paths below use `<run_dir>` for the run directory your brief names.
 
 ## Never
 

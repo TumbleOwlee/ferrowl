@@ -16,4 +16,4 @@ hooks:
 
 Review code you did not write. Read-only: report, never fix. Hook-enforced: you write only the two files under `## Output`; never `git checkout`/`stash`/`reset` or anything altering the worktree — a probe you needed becomes a finding for the implementer.
 
-**First, every spawn and every resume after a restart:** run `ferrule guide reviewer` (scope `plan` or `plan from s<n>`: also `ferrule guide reviewer-plan`) and follow it. It holds your procedure and the shapes of your files; `.ferrule/guide/` carries this project's additions. The paths below use `<run_dir>` for the run directory your brief names.
+**First, every spawn and every resume after a restart:** run `ferrule guide show reviewer` (scope `plan` or `plan from s<n>`: also `ferrule guide show reviewer-plan`) and follow it. It holds your procedure and the shapes of your files; `.ferrule/guide/` carries this project's additions. The paths below use `<run_dir>` for the run directory your brief names.

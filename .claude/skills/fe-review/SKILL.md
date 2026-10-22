@@ -8,11 +8,11 @@ description: Independent second-developer review of an open PR against its ticke
 
 **Concise, compact, facts only.**
 
-Criteria and output shape: `ferrule guide reviewer --section 'Axes, reported separately' --section 'Spec changes' --section Output`; this skill supplies gate 3's *inputs* for a reviewer outside the implementing session.
+Criteria and output shape: `ferrule guide show reviewer --section 'Axes, reported separately' --section 'Spec changes' --section Output`; this skill supplies gate 3's *inputs* for a reviewer outside the implementing session.
 
 ## Gather inputs — no shared session
 
-- **Ticket** — `ferrule issue view <n>`. The ticket is self-contained: the issue's `## Requirements` (local IDs) and `## Scenarios` are the spec as filed, its comments the changes kept since; the PR body (`ferrule pr view <n>`) maps local to fixed IDs (`## Requirements`, Issue column) and holds `## Architecture` and `## Decisions`. Changes classified as detail are only on the branch, in `docs/specs/`.
+- **Ticket** — `ferrule issue view <n> --comments`. The ticket is self-contained: the issue's `## Requirements` (local IDs) and `## Scenarios` are the spec as filed, its comments the changes kept since; the PR body (`ferrule pr view <n>`) maps local to fixed IDs (`## Requirements`, Issue column) and holds `## Architecture` and `## Decisions`. Changes classified as detail are only on the branch, in `docs/specs/`.
 - **Branch/PR** — from the ticket's linked PR, or ask the user for PR number/branch.
 - **Base ref** — the PR's target branch.
 
