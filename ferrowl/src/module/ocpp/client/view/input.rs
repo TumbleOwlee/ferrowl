@@ -352,6 +352,7 @@ impl<V: ClientVersion> ClientView<V> {
                     Some(spec) => {
                         let state = self.state.clone();
                         let lookup = move |f: &str| {
+                            let f = client_label(f);
                             with_state(&state, |s| {
                                 // Resolve from the targeted connector first, then CS-level.
                                 V::connector_index(s, scope)
@@ -476,5 +477,49 @@ impl<V: ClientVersion> ClientView<V> {
             self.code.state.set_content(&content);
             self.code_content = content;
         }
+    }
+}
+
+/// The client state's label for an action dialog's prefill key (the server-side field name).
+fn client_label(key: &str) -> &str {
+    match key {
+        "ConnectorId" => "Connector ID",
+        "EvseId" => "EVSE ID",
+        "Rfid" => "RFID",
+        other => other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ut_client_label_maps_prefill_keys() {
+        assert_eq!(client_label("ConnectorId"), "Connector ID");
+        assert_eq!(client_label("EvseId"), "EVSE ID");
+        assert_eq!(client_label("Rfid"), "RFID");
+        assert_eq!(client_label("Status"), "Status");
+        assert_eq!(client_label("TransactionId"), "TransactionId");
+
+        let c16 = crate::module::ocpp::client::v1_6::state::CsState::default();
+        let c201 = crate::module::ocpp::client::v2_0_1::state::CsState::default();
+        for key in ["ConnectorId", "Rfid", "Status"] {
+            let label = client_label(key);
+            assert!(
+                c16.connector(1).unwrap().get_field(label).is_some(),
+                "{label}"
+            );
+            assert!(
+                c201.connector(1).unwrap().get_field(label).is_some(),
+                "{label}"
+            );
+        }
+        assert!(
+            c201.connector(1)
+                .unwrap()
+                .get_field(client_label("EvseId"))
+                .is_some()
+        );
     }
 }

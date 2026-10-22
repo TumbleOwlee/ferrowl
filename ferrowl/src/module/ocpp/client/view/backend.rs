@@ -198,13 +198,13 @@ impl<V: ClientVersion> ClientView<V> {
         // Persist CS boot identity (OC-R-103).
         device.model = self.with_state(|s| cs_string_field(s, "Model"));
         device.vendor = self.with_state(|s| cs_string_field(s, "Vendor"));
-        device.firmware_version = self.with_state(|s| cs_string_field(s, "FirmwareVersion"));
-        device.serial_number = self.with_state(|s| cs_string_field(s, "SerialNumber"));
+        device.firmware_version = self.with_state(|s| cs_string_field(s, "Firmware Version"));
+        device.serial_number = self.with_state(|s| cs_string_field(s, "Serial Number"));
         // Persist the 1.6-only meter/modem identity fields (OC-R-104); a no-op on 2.0.1/2.1.
-        device.iccid = self.with_state(|s| cs_string_field(s, "Iccid"));
-        device.imsi = self.with_state(|s| cs_string_field(s, "Imsi"));
-        device.meter_serial_number = self.with_state(|s| cs_string_field(s, "MeterSerialNumber"));
-        device.meter_type = self.with_state(|s| cs_string_field(s, "MeterType"));
+        device.iccid = self.with_state(|s| cs_string_field(s, "ICCID"));
+        device.imsi = self.with_state(|s| cs_string_field(s, "IMSI"));
+        device.meter_serial_number = self.with_state(|s| cs_string_field(s, "Meter Serial Number"));
+        device.meter_type = self.with_state(|s| cs_string_field(s, "Meter Type"));
         let base = ferrowl_util::path::base_dir_of(path);
         device.security.tls.server.relativize_paths(&base);
         device.security.tls.client.relativize_paths(&base);

@@ -169,39 +169,39 @@ impl ConnectorState {
     pub fn get_field(&self, name: &str) -> Option<ferrowl_lua::module::ValueType> {
         use ferrowl_lua::module::ValueType as Vt;
         Some(match name {
-            "EvseId" => Vt::Int(self.evse_id as i128),
-            "ConnectorId" => Vt::Int(self.connector_id as i128),
-            "Phases" => Vt::String(self.phases.clone()),
+            "EVSE ID" => Vt::Int(self.evse_id as i128),
+            "Connector ID" => Vt::Int(self.connector_id as i128),
+            "Used Phases" => Vt::String(self.phases.clone()),
             "Voltage" => Vt::Float(self.voltage),
-            "Current" | "CurrentL1" => Vt::Float(self.current[0]),
-            "CurrentL2" => Vt::Float(self.current[1]),
-            "CurrentL3" => Vt::Float(self.current[2]),
+            "Current L1" => Vt::Float(self.current[0]),
+            "Current L2" => Vt::Float(self.current[1]),
+            "Current L3" => Vt::Float(self.current[2]),
             "Power" => Vt::Float(self.power),
             "Frequency" => Vt::Float(self.frequency),
-            "TotalEnergy" => Vt::Float(self.total_energy),
-            "SessionEnergy" => Vt::Float(self.session_energy),
-            "Soc" | "StateOfCharge" => Vt::Float(self.soc),
+            "Total Energy" => Vt::Float(self.total_energy),
+            "Session Energy" => Vt::Float(self.session_energy),
+            "State of Charge" => Vt::Float(self.soc),
             "Temperature" => Vt::Float(self.temperature),
             "Status" => Vt::String(self.status.clone()),
-            "Rfid" => Vt::String(self.rfid.clone()),
-            "ReservedRfid" => Vt::String(self.reserved_rfid.clone().unwrap_or_default()),
-            "ReservationId" => match self.reservation_id {
+            "RFID" => Vt::String(self.rfid.clone()),
+            "Reserved RFID" => Vt::String(self.reserved_rfid.clone().unwrap_or_default()),
+            "Reservation ID" => match self.reservation_id {
                 Some(id) => Vt::Int(id as i128),
                 None => Vt::Nil,
             },
-            "ChargeLimit" => match self.limit {
+            "Charge Limit" => match self.limit {
                 Some(l) => Vt::Float(l),
                 None => Vt::Nil,
             },
-            "DefaultChargeLimit" => match self.default_limit {
+            "Default Charge Limit" => match self.default_limit {
                 Some(l) => Vt::Float(l),
                 None => Vt::Nil,
             },
-            "MaxChargeLimit" => match self.max_limit {
+            "Max Charge Limit" => match self.max_limit {
                 Some(l) => Vt::Float(l),
                 None => Vt::Nil,
             },
-            "ExternalChargeLimit" => match self.external_limit {
+            "External Charge Limit" => match self.external_limit {
                 Some(l) => Vt::Float(l),
                 None => Vt::Nil,
             },
@@ -218,11 +218,11 @@ impl ConnectorState {
             _ => None,
         };
         match (name, &value) {
-            ("EvseId", _) => match num(&value) {
+            ("EVSE ID", _) => match num(&value) {
                 Some(n) => self.evse_id = n as i64,
                 None => return false,
             },
-            ("ConnectorId", _) => match num(&value) {
+            ("Connector ID", _) => match num(&value) {
                 Some(n) => self.connector_id = n as i64,
                 None => return false,
             },
@@ -230,15 +230,15 @@ impl ConnectorState {
                 Some(n) => self.voltage = n,
                 None => return false,
             },
-            ("Current" | "CurrentL1", _) => match num(&value) {
+            ("Current L1", _) => match num(&value) {
                 Some(n) => self.current[0] = n,
                 None => return false,
             },
-            ("CurrentL2", _) => match num(&value) {
+            ("Current L2", _) => match num(&value) {
                 Some(n) => self.current[1] = n,
                 None => return false,
             },
-            ("CurrentL3", _) => match num(&value) {
+            ("Current L3", _) => match num(&value) {
                 Some(n) => self.current[2] = n,
                 None => return false,
             },
@@ -250,7 +250,7 @@ impl ConnectorState {
                 Some(n) => self.frequency = n,
                 None => return false,
             },
-            ("Soc" | "StateOfCharge", _) => match num(&value) {
+            ("State of Charge", _) => match num(&value) {
                 Some(n) => self.soc = n,
                 None => return false,
             },
@@ -258,30 +258,30 @@ impl ConnectorState {
                 Some(n) => self.temperature = n,
                 None => return false,
             },
-            ("TotalEnergy", _) => match num(&value) {
+            ("Total Energy", _) => match num(&value) {
                 Some(n) => self.total_energy = n,
                 None => return false,
             },
-            ("SessionEnergy", _) => match num(&value) {
+            ("Session Energy", _) => match num(&value) {
                 Some(n) => self.session_energy = n,
                 None => return false,
             },
-            ("Phases", Vt::String(s)) => self.phases.clone_from(s),
+            ("Used Phases", Vt::String(s)) => self.phases.clone_from(s),
             ("Status", Vt::String(s)) => self.status.clone_from(s),
-            ("Rfid", Vt::String(s)) => self.rfid.clone_from(s),
-            ("ChargeLimit", _) => match num(&value) {
+            ("RFID", Vt::String(s)) => self.rfid.clone_from(s),
+            ("Charge Limit", _) => match num(&value) {
                 Some(n) => self.limit = Some(n),
                 None => return false,
             },
-            ("DefaultChargeLimit", _) => match num(&value) {
+            ("Default Charge Limit", _) => match num(&value) {
                 Some(n) => self.default_limit = Some(n),
                 None => return false,
             },
-            ("MaxChargeLimit", _) => match num(&value) {
+            ("Max Charge Limit", _) => match num(&value) {
                 Some(n) => self.max_limit = Some(n),
                 None => return false,
             },
-            ("ExternalChargeLimit", _) => match num(&value) {
+            ("External Charge Limit", _) => match num(&value) {
                 Some(n) => self.external_limit = Some(n),
                 None => return false,
             },
@@ -470,10 +470,10 @@ impl CsState {
         Some(match name {
             "Model" => Vt::String(self.model.clone()),
             "Vendor" => Vt::String(self.vendor.clone()),
-            "FirmwareVersion" => Vt::String(self.firmware_version.clone()),
-            "SerialNumber" => Vt::String(self.serial_number.clone()),
-            "ReservedRfid" => Vt::String(self.reserved_rfid.clone().unwrap_or_default()),
-            "ReservationId" => match self.reservation_id {
+            "Firmware Version" => Vt::String(self.firmware_version.clone()),
+            "Serial Number" => Vt::String(self.serial_number.clone()),
+            "Reserved RFID" => Vt::String(self.reserved_rfid.clone().unwrap_or_default()),
+            "Reservation ID" => match self.reservation_id {
                 Some(id) => Vt::Int(id as i128),
                 None => Vt::Nil,
             },
@@ -487,8 +487,8 @@ impl CsState {
         match (name, value) {
             ("Model", Vt::String(s)) => self.model = s,
             ("Vendor", Vt::String(s)) => self.vendor = s,
-            ("FirmwareVersion", Vt::String(s)) => self.firmware_version = s,
-            ("SerialNumber", Vt::String(s)) => self.serial_number = s,
+            ("Firmware Version", Vt::String(s)) => self.firmware_version = s,
+            ("Serial Number", Vt::String(s)) => self.serial_number = s,
             _ => return false,
         }
         true
@@ -516,8 +516,8 @@ mod tests {
     /// OC-R-058 — each 2.0.1 connector carries its own EVSE-keyed metering/status/transaction/limit/tag/reservation fields.
     fn ut_connector_get_set_field_evse_id() {
         let mut c = ConnectorState::new(1, 1);
-        assert!(c.set_field("EvseId", Vt::Int(2)));
-        assert!(matches!(c.get_field("EvseId"), Some(Vt::Int(2))));
+        assert!(c.set_field("EVSE ID", Vt::Int(2)));
+        assert!(matches!(c.get_field("EVSE ID"), Some(Vt::Int(2))));
         assert!(c.set_field("Voltage", Vt::Float(400.0)));
         assert!(matches!(c.get_field("Voltage"), Some(Vt::Float(v)) if v == 400.0));
         assert!(!c.set_field("Unknown", Vt::Bool(true)));
@@ -533,5 +533,59 @@ mod tests {
         assert!(s.add_connector(1, 2));
         assert!(!s.add_connector(1, 2));
         assert!(s.connector(2).is_some());
+    }
+
+    #[test]
+    /// SC-R-085 — every label the CS and connector state tables show resolves through get.
+    fn ut_every_view_label_resolves_through_get() {
+        let mut s = CsState::default();
+        for row in s.cs_rows() {
+            assert!(s.cs_get_field(&row.name).is_some(), "CS label {}", row.name);
+        }
+        let c = s.connector_mut(1).unwrap();
+        c.limit = Some(1.0);
+        for row in c.rows() {
+            assert!(
+                c.get_field(&row.name).is_some(),
+                "connector label {}",
+                row.name
+            );
+        }
+    }
+
+    #[test]
+    /// SC-E-046 — the former compact field names are unknown: get is `None`, set is `false`.
+    fn ut_former_field_names_are_unknown() {
+        let mut s = CsState::default();
+        for name in [
+            "FirmwareVersion",
+            "SessionEnergy",
+            "Current",
+            "Soc",
+            "ConnectorId",
+            "EvseId",
+        ] {
+            assert!(s.cs_get_field(name).is_none(), "cs get {name}");
+            assert!(!s.cs_set_field(name, Vt::Int(1)), "cs set {name}");
+            let c = s.connector_mut(1).unwrap();
+            assert!(c.get_field(name).is_none(), "conn get {name}");
+            assert!(!c.set_field(name, Vt::Int(1)), "conn set {name}");
+        }
+    }
+
+    #[test]
+    /// SC-E-047 — label matching is exact: case and surrounding whitespace matter.
+    fn ut_view_label_match_is_case_sensitive() {
+        let s = CsState::default();
+        let c = s.connector(1).unwrap();
+        assert!(c.get_field("Session Energy").is_some());
+        for name in [
+            "session energy",
+            "Session energy",
+            "SessionEnergy ",
+            "Session Energy ",
+        ] {
+            assert!(c.get_field(name).is_none(), "{name}");
+        }
     }
 }

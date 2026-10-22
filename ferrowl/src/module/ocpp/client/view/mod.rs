@@ -560,12 +560,12 @@ impl<V: ClientVersion> ClientView<V> {
             for (name, value) in [
                 ("Model", &device.model),
                 ("Vendor", &device.vendor),
-                ("FirmwareVersion", &device.firmware_version),
-                ("SerialNumber", &device.serial_number),
-                ("Iccid", &device.iccid),
-                ("Imsi", &device.imsi),
-                ("MeterSerialNumber", &device.meter_serial_number),
-                ("MeterType", &device.meter_type),
+                ("Firmware Version", &device.firmware_version),
+                ("Serial Number", &device.serial_number),
+                ("ICCID", &device.iccid),
+                ("IMSI", &device.imsi),
+                ("Meter Serial Number", &device.meter_serial_number),
+                ("Meter Type", &device.meter_type),
             ] {
                 if let Some(value) = value {
                     s.cs_set(name, ferrowl_lua::module::ValueType::String(value.clone()));
@@ -1396,10 +1396,10 @@ mod tests {
 
         let mut v = client_view::<V1_6>(OcppVersion::V1_6);
         with_state_mut(&v.state, |s| {
-            s.cs_set("Iccid", ValueType::String("8912".into()));
-            s.cs_set("Imsi", ValueType::String("2901".into()));
-            s.cs_set("MeterSerialNumber", ValueType::String("MTR-1".into()));
-            s.cs_set("MeterType", ValueType::String("MT-X".into()));
+            s.cs_set("ICCID", ValueType::String("8912".into()));
+            s.cs_set("IMSI", ValueType::String("2901".into()));
+            s.cs_set("Meter Serial Number", ValueType::String("MTR-1".into()));
+            s.cs_set("Meter Type", ValueType::String("MT-X".into()));
         });
 
         let dir = reserve_temp_dir("ferrowl_ocpp_client_view");
@@ -1419,12 +1419,12 @@ mod tests {
 
         let reloaded = ClientView::<V1_6>::new(v.spec.clone(), p.clone(), device);
         with_state(&reloaded.state, |s| {
-            assert!(matches!(s.cs_get("Iccid"), Some(ValueType::String(v)) if v == "8912"));
-            assert!(matches!(s.cs_get("Imsi"), Some(ValueType::String(v)) if v == "2901"));
+            assert!(matches!(s.cs_get("ICCID"), Some(ValueType::String(v)) if v == "8912"));
+            assert!(matches!(s.cs_get("IMSI"), Some(ValueType::String(v)) if v == "2901"));
             assert!(
-                matches!(s.cs_get("MeterSerialNumber"), Some(ValueType::String(v)) if v == "MTR-1")
+                matches!(s.cs_get("Meter Serial Number"), Some(ValueType::String(v)) if v == "MTR-1")
             );
-            assert!(matches!(s.cs_get("MeterType"), Some(ValueType::String(v)) if v == "MT-X"));
+            assert!(matches!(s.cs_get("Meter Type"), Some(ValueType::String(v)) if v == "MT-X"));
         });
     }
 

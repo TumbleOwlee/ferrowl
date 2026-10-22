@@ -20,7 +20,8 @@ pub struct HelpSection {
     pub entries: Vec<(String, String)>,
 }
 
-/// Width of the name column; a wider name takes its own line with the description below it.
+/// Width of the name column. A name of 31 columns or fewer keeps a gap before the description on its
+/// line; a longer one takes its own line with the description below.
 const NAME_COL: usize = 32;
 
 /// Builds the popup's logical lines, word-wrapping each entry's description to `desc_budget`

@@ -91,6 +91,24 @@ pub struct CsHandle<V: ServerVersion> {
     queue: ServerActionQueue,
 }
 
+enum SetOutcome {
+    Done,
+    /// The name does not resolve through the scope's get.
+    Unknown,
+    /// The name resolves but is read-only or got a value of the wrong type.
+    Rejected,
+}
+
+fn set_outcome<F: OcppFields>(state: &mut F, name: &str, value: ValueType) -> SetOutcome {
+    if state.set_field(name, value) {
+        SetOutcome::Done
+    } else if state.get_field(name).is_none() {
+        SetOutcome::Unknown
+    } else {
+        SetOutcome::Rejected
+    }
+}
+
 impl<V: ServerVersion> Read for CsHandle<V> {
     fn read(&self, name: String) -> ferrowl_lua::Result<ValueType> {
         with_state(&self.state, |s| s.get_field(&name))
@@ -99,10 +117,12 @@ impl<V: ServerVersion> Read for CsHandle<V> {
 }
 impl<V: ServerVersion> Write for CsHandle<V> {
     fn write(&self, name: String, value: ValueType) -> ferrowl_lua::Result<()> {
-        if with_state_mut(&self.state, |s| s.set_field(&name, value)) {
-            Ok(())
-        } else {
-            Err(Error::RuntimeError(format!("cannot set CS field '{name}'")))
+        match with_state_mut(&self.state, |s| set_outcome(s, &name, value)) {
+            SetOutcome::Done => Ok(()),
+            SetOutcome::Unknown => Err(Error::RuntimeError(format!("unknown CS field '{name}'"))),
+            SetOutcome::Rejected => {
+                Err(Error::RuntimeError(format!("cannot set CS field '{name}'")))
+            }
         }
     }
 }
@@ -132,12 +152,14 @@ impl<V: ServerVersion> Read for ConnHandle<V> {
 }
 impl<V: ServerVersion> Write for ConnHandle<V> {
     fn write(&self, name: String, value: ValueType) -> ferrowl_lua::Result<()> {
-        if with_state_mut(&self.state, |s| s.set_field(&name, value)) {
-            Ok(())
-        } else {
-            Err(Error::RuntimeError(format!(
+        match with_state_mut(&self.state, |s| set_outcome(s, &name, value)) {
+            SetOutcome::Done => Ok(()),
+            SetOutcome::Unknown => Err(Error::RuntimeError(format!(
+                "unknown connector field '{name}'"
+            ))),
+            SetOutcome::Rejected => Err(Error::RuntimeError(format!(
                 "cannot set connector field '{name}'"
-            )))
+            ))),
         }
     }
 }
@@ -496,5 +518,40 @@ mod tests {
             },
         );
         handle.stop();
+    }
+
+    #[test]
+    /// SC-E-046, SC-E-047 — Set with a name the scope lacks raises the unknown-field error; a known but read-only field keeps the cannot-set error.
+    fn ut_server_set_with_non_label_raises_unknown_field() {
+        let states: SharedServerStates<V1_6> = Arc::new(RwLock::new(ServerStates::default()));
+        with_state_mut(&states, |reg| {
+            let st = reg.stations.entry("CP1".to_string()).or_default();
+            st.cs = Some(Arc::new(RwLock::new(Cs::default())));
+            st.conns
+                .push((Scope::connector(1), Arc::new(RwLock::new(Conn::default()))));
+        });
+        let queue: ServerActionQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let host = ServerHost::new(states, queue, StatusCell::default());
+        let err = |r: ferrowl_lua::Result<()>| r.expect_err("expected an error").to_string();
+
+        let conn = host.connector("CP1", 1).unwrap();
+        for name in ["Session Energy", "sessionenergy"] {
+            assert!(
+                err(conn.write(name.to_string(), ValueType::Float(1.0)))
+                    .contains("unknown connector field")
+            );
+        }
+        let cs = host.station("CP1").unwrap();
+        assert!(
+            err(cs.write(
+                "Firmware Version".to_string(),
+                ValueType::String("x".into())
+            ))
+            .contains("unknown CS field")
+        );
+        assert!(
+            err(cs.write("Iccid".to_string(), ValueType::String("x".into())))
+                .contains("cannot set CS field")
+        );
     }
 }

@@ -99,10 +99,16 @@ impl<S: ClientFields + 'static> Read for ClientCsHandle<S> {
 }
 impl<S: ClientFields + 'static> Write for ClientCsHandle<S> {
     fn write(&self, name: String, value: ValueType) -> ferrowl_lua::Result<()> {
-        if with_state_mut(&self.state, |s| s.cs_set(&name, value)) {
+        let (done, known) = with_state_mut(&self.state, |s| {
+            let done = s.cs_set(&name, value);
+            (done, done || s.cs_get(&name).is_some())
+        });
+        if done {
             Ok(())
-        } else {
+        } else if known {
             Err(Error::RuntimeError(format!("cannot set CS field '{name}'")))
+        } else {
+            Err(Error::RuntimeError(format!("unknown CS field '{name}'")))
         }
     }
 }
@@ -146,11 +152,19 @@ impl<S: ClientFields + 'static> Read for ClientConnHandle<S> {
 }
 impl<S: ClientFields + 'static> Write for ClientConnHandle<S> {
     fn write(&self, name: String, value: ValueType) -> ferrowl_lua::Result<()> {
-        if with_state_mut(&self.state, |s| s.conn_set(self.id, &name, value)) {
+        let (done, known) = with_state_mut(&self.state, |s| {
+            let done = s.conn_set(self.id, &name, value);
+            (done, done || s.conn_get(self.id, &name).is_some())
+        });
+        if done {
             Ok(())
-        } else {
+        } else if known {
             Err(Error::RuntimeError(format!(
                 "cannot set connector field '{name}'"
+            )))
+        } else {
+            Err(Error::RuntimeError(format!(
+                "unknown connector field '{name}'"
             )))
         }
     }
@@ -612,5 +626,59 @@ mod tests {
         assert!(conn.dispatch("MeterValues", vec![]));
         // 2.0.1 connector scope carries the EVSE.
         assert_eq!(q.lock().front().unwrap().0, Scope::evse(1, Some(1)));
+    }
+
+    fn client_handle() -> ClientCsHandle<Cs16> {
+        let state = Arc::new(RwLock::new(Cs16::default()));
+        let queue: ScopedActionQueue = Arc::new(Mutex::new(VecDeque::new()));
+        ClientCsHandle::new(state, queue, StatusCell::default())
+    }
+
+    fn err_text<T: std::fmt::Debug>(r: ferrowl_lua::Result<T>) -> String {
+        r.expect_err("expected an error").to_string()
+    }
+
+    #[test]
+    /// SC-R-085 — a connector field is read by the label its state table shows.
+    fn ut_connector_get_by_view_label() {
+        let cs = client_handle();
+        with_state_mut(&cs.state, |s| {
+            s.connector_mut(1).unwrap().session_energy = 4.5;
+        });
+        let conn = cs.connector(1);
+        assert!(matches!(
+            conn.read("Session Energy".to_string()),
+            Ok(ValueType::Float(v)) if v == 4.5
+        ));
+        conn.write("Current L2".to_string(), ValueType::Float(7.0))
+            .unwrap();
+        assert!(matches!(
+            conn.read("Current L2".to_string()),
+            Ok(ValueType::Float(v)) if v == 7.0
+        ));
+    }
+
+    #[test]
+    /// SC-E-046, SC-E-047 — a name that is not a label raises the unknown-field error on get and set.
+    fn ut_get_with_non_label_raises_unknown_field() {
+        let cs = client_handle();
+        let conn = cs.connector(1);
+        for name in ["SessionEnergy", "session energy"] {
+            assert!(err_text(conn.read(name.to_string())).contains("unknown connector field"));
+        }
+        assert!(
+            err_text(conn.write("SessionEnergy".to_string(), ValueType::Int(1)))
+                .contains("unknown connector field")
+        );
+        assert!(err_text(cs.read("FirmwareVersion".to_string())).contains("unknown CS field"));
+        assert!(
+            err_text(cs.write("FirmwareVersion".to_string(), ValueType::String("x".into())))
+                .contains("unknown CS field")
+        );
+        // A label that resolves but is not settable keeps the cannot-set error.
+        assert!(
+            err_text(conn.write("Reserved RFID".to_string(), ValueType::String("x".into())))
+                .contains("cannot set connector field")
+        );
     }
 }
