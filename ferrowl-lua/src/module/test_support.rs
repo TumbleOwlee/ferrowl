@@ -1,8 +1,40 @@
 //! Shared in-memory host fixtures for the module unit tests.
 
-use crate::module::{Has, OcppActions, OcppClientHost, Read, ValueType, Write};
-use std::collections::HashMap;
+use crate::module::MethodDoc;
+use crate::module::{
+    ConnectionStatus, Has, OcppActions, OcppClientHost, Read, StatusSource, ValueType, Write,
+};
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
+
+/// Names of the methods a userdata registered, read from its metatable's `__index` table.
+pub(crate) fn registered_methods(ud: &mlua::AnyUserData) -> BTreeSet<String> {
+    let meta = ud.metatable().expect("userdata has a metatable");
+    let index = meta
+        .get::<mlua::Value>("__index")
+        .expect("metatable has __index");
+    let mlua::Value::Table(table) = index else {
+        panic!("mlua no longer exposes registered methods as a table under `__index`: {index:?}");
+    };
+    table
+        .pairs::<mlua::Value, mlua::Value>()
+        .filter_map(|p| match p.expect("pair") {
+            (mlua::Value::String(k), _) => Some(k.to_str().expect("utf-8 method name").to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The documented method names of `docs` minus the `<Action>` template, plus the concrete
+/// `actions`.
+pub(crate) fn documented(docs: &[&[MethodDoc]], actions: &[&str]) -> BTreeSet<String> {
+    docs.iter()
+        .flat_map(|t| t.iter())
+        .filter(|m| m.name != "<Action>")
+        .map(|m| m.name.to_string())
+        .chain(actions.iter().map(|a| a.to_string()))
+        .collect()
+}
 
 /// A key/value state store shared between a mock handle and the test asserting on it.
 pub(crate) type Store = Arc<Mutex<HashMap<String, ValueType>>>;
@@ -31,12 +63,25 @@ pub(crate) fn pairs(log: &DispatchLog) -> Vec<(String, String)> {
 /// Shared `Send + Sync` in-memory host, implementing every trait the module unit tests mock:
 /// `Read + Write + Has` for a modbus-shaped host, `Read + Write + OcppActions + OcppClientHost`
 /// for an ocpp-shaped one.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct MockHost {
     pub(crate) scope: String,
     pub(crate) store: Store,
     pub(crate) conns: Arc<Mutex<HashMap<i64, Store>>>,
     pub(crate) dispatched: DispatchLog,
+    pub(crate) status: Arc<Mutex<ConnectionStatus>>,
+}
+
+impl Default for MockHost {
+    fn default() -> Self {
+        Self {
+            scope: String::new(),
+            store: Store::default(),
+            conns: Arc::default(),
+            dispatched: DispatchLog::default(),
+            status: Arc::new(Mutex::new(ConnectionStatus::Disconnected)),
+        }
+    }
 }
 
 impl MockHost {
@@ -48,7 +93,13 @@ impl MockHost {
             store,
             conns: Arc::new(Mutex::new(HashMap::new())),
             dispatched,
+            status: Arc::new(Mutex::new(ConnectionStatus::Disconnected)),
         }
+    }
+
+    /// Sets the status every clone of this host reports.
+    pub(crate) fn set_status(&self, status: ConnectionStatus) {
+        *self.status.lock().unwrap() = status;
     }
 
     /// Snapshot of a stored value by name.
@@ -96,6 +147,12 @@ impl Has for MockHost {
     }
 }
 
+impl StatusSource for MockHost {
+    fn connection_status(&self) -> mlua::Result<ConnectionStatus> {
+        Ok(*self.status.lock().unwrap())
+    }
+}
+
 impl OcppActions for MockHost {
     fn actions() -> Vec<&'static str> {
         vec!["BootNotification", "StartTransaction"]
@@ -119,6 +176,7 @@ impl OcppClientHost for MockHost {
             store,
             conns: self.conns.clone(),
             dispatched: self.dispatched.clone(),
+            status: self.status.clone(),
         }
     }
     fn connectors(&self) -> Vec<i64> {

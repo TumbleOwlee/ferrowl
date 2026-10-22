@@ -278,6 +278,22 @@ This area owns the *mechanism*: how `:` commands parse and dispatch, generic (ap
 
 **UI-R-344** — While the script table is focused, its title advertises the keybind-help overlay (UI-R-056) and no other binding.
 
+### Lua-bindings help overlay
+
+**UI-R-378** — The Lua-bindings help overlay (UI-E-030, UI-E-037) lists every method callable in the edited script's context: each module registered there (SC-R-018) with every one of its methods.
+
+**UI-R-379** — In an OCPP module's script, the Lua-bindings help overlay lists the scoping methods of the module's own role shape and none of the other role shape's.
+
+**UI-R-380** — In the session-level script, the Lua-bindings help overlay lists `C_Module`, the `ModuleHandle` methods and the `C_Register`- and `C_OCPP`-shaped accessor surfaces.
+
+**UI-R-381** — Every method entry in the Lua-bindings help overlay shows the type of each argument and the return type.
+
+**UI-R-382** — In an OCPP module's script, the Lua-bindings help overlay lists one entry per action the module's OCPP version exposes.
+
+**UI-R-383** — In the session-level script, the Lua-bindings help overlay lists OCPP actions as one generic `<Action>(overrides?)` entry stating that the action set depends on the target module's version.
+
+**UI-R-384** — A Lua-bindings help entry whose signature is wider than the overlay's name column shows its description starting on the line below the signature.
+
 ### Table edits
 
 **UI-R-058** — In the script-manager dialog, while the script table is focused, the table supports editing its working list: a non-empty name in the new-script input plus confirm adds a new enabled, empty script (empty or already-used name refused, per UI-R-089).

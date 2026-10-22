@@ -168,9 +168,9 @@ impl OcppFields for ConnectorState {
     }
     fn get_field(&self, name: &str) -> Option<ValueType> {
         Some(match name {
-            "EvseId" | "ConnectorId" => ValueType::Int(self.evse_id as i128),
+            "EvseId" => ValueType::Int(self.evse_id as i128),
             "Voltage" => ValueType::Float(self.voltage),
-            "Current" | "CurrentL1" => ValueType::Float(self.current[0]),
+            "CurrentL1" => ValueType::Float(self.current[0]),
             "CurrentL2" => ValueType::Float(self.current[1]),
             "CurrentL3" => ValueType::Float(self.current[2]),
             "Power" => ValueType::Float(self.power),
@@ -754,5 +754,44 @@ mod tests {
             s.derive_payload("ClearCache", Scope::CS).unwrap(),
             serde_json::json!({})
         );
+    }
+
+    #[test]
+    /// SC-R-085 — every label the detail overlay shows resolves through get.
+    fn ut_every_view_label_resolves_through_get() {
+        let cs = CsLevelState::default();
+        for (name, _, _) in cs.fields() {
+            assert!(cs.get_field(&name).is_some(), "CS label {name}");
+        }
+        let c = ConnectorState {
+            limit: Some(1.0),
+            default_limit: Some(1.0),
+            max_limit: Some(1.0),
+            external_limit: Some(1.0),
+            ..Default::default()
+        };
+        for (name, _, _) in c.fields().into_iter().chain(c.metering()) {
+            assert!(c.get_field(&name).is_some(), "connector label {name}");
+        }
+    }
+
+    #[test]
+    /// SC-E-046 — the removed alias names are unknown: get is `None`, set is `false`.
+    fn ut_former_field_names_are_unknown() {
+        let mut c = ConnectorState::default();
+        for name in ["Current", "ConnectorId"] {
+            assert!(c.get_field(name).is_none(), "get {name}");
+            assert!(!c.set_field(name, ValueType::Int(1)), "set {name}");
+        }
+    }
+
+    #[test]
+    /// SC-E-047 — label matching is exact and case-sensitive.
+    fn ut_view_label_match_is_case_sensitive() {
+        let c = ConnectorState::default();
+        assert!(c.get_field("SessionEnergy").is_some());
+        for name in ["sessionenergy", "Sessionenergy", "SessionEnergy "] {
+            assert!(c.get_field(name).is_none(), "{name}");
+        }
     }
 }

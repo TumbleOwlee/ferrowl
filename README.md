@@ -690,6 +690,9 @@ Return:   `C_Register`-shaped accessor for modbus modules; raises for others.
 
 Method:   ModuleHandle:OCPP()
 Return:   Role-specific `C_OCPP`-shaped accessor for ocpp modules; raises for others. A held accessor raises `module '<name>' was replaced; call OCPP() again` once the module instance behind the name changed (role or version change, or the module closed); call `OCPP()` again for the current one.
+
+Method:   ModuleHandle:ConnectionStatus()
+Return:   The module's displayed connection status at the moment of the call: "CONNECTED", "RECONNECTING" or "DISCONNECTED". Raises `unknown module '<name>'` if the module was removed.
 ```
 
 #### Example: mirror a register between two modbus modules
@@ -794,6 +797,12 @@ Arguments:
 
 Return: nil
 ```
+```
+Method:   C_Register:ConnectionStatus()
+
+Return: The module's displayed connection status at the moment of the call:
+        "CONNECTED", "RECONNECTING" or "DISCONNECTED".
+```
 
 ### Module C_OCPP
 
@@ -809,15 +818,7 @@ The module has a flat surface plus role-specific scope accessors:
   stations and their connectors; `ChargingStation(cs)` and `Connector(cs, id)` return accessors
   scoped to one station or one of its connectors.
 
-`Get`/`Set` read and write the addressed scope's state by name. Supported names (compact forms of
-the state-table labels):
-
-```
-ConnectorId, Phases, Voltage, Current (= CurrentL1), CurrentL1, CurrentL2, CurrentL3,
-Power, TotalEnergy, SessionEnergy, Status, Rfid, Model, Vendor
-```
-
-OCPP 2.0.1 additionally exposes `EvseId`.
+`Get`/`Set` read and write the addressed scope's state by name. `name` is the label the view's state table shows, verbatim and case-sensitive (e.g. `"Session Energy"` on a client connector, `"SessionEnergy"` in the CSMS view). A name the scope does not show raises an unknown-field error.
 
 ```
 Method:   C_OCPP:Get(name)
@@ -825,7 +826,7 @@ Method:   C_OCPP:Get(name)
 Arguments:
                Name: name
                Type: String
-        Description: State field name (see the list above).
+        Description: State field label, as shown in the view's state table.
 
 Return: Value of the field — a number for numeric fields, a string for textual ones — or an
         error for an unknown name.
@@ -864,6 +865,13 @@ Arguments:
 
 Return: true when the action was queued, false on an argument error.
 ```
+```
+Method:   C_OCPP:ConnectionStatus()
+
+Return: The module's displayed connection status at the moment of the call:
+        "CONNECTED", "RECONNECTING" or "DISCONNECTED". On the server role this is
+        the listener status, never one station's. Not available on scope accessors.
+```
 
 #### Scope accessors
 
@@ -874,6 +882,9 @@ connectors are enumerated and then addressed by id.
 ```
 Method:   C_OCPP:Connector(id)                 -- client role
 Return:   accessor scoped to connector `id`, exposing Get/Set/<Action>.
+
+Method:   C_OCPP:GetConnectors()               -- client role
+Return:   list of connector ids (numbers).
 
 Method:   C_OCPP:GetChargingStations()         -- server role
 Return:   list of connected charging-station ids.
@@ -894,11 +905,12 @@ Return:   accessor scoped to connector `id` of station `cs` (or nil if unknown),
 ```lua
 -- Ramp the charging current while a transaction is running, then report it.
 local target = 16.0
-local current = C_OCPP:Get("CurrentL1")
+local con = C_OCPP:Connector(1)
+local current = con:Get("Current L1")
 if current < target then
-    C_OCPP:Set("CurrentL1", current + 0.5)
-    C_OCPP:Set("CurrentL2", current + 0.5)
-    C_OCPP:Set("CurrentL3", current + 0.5)
-    C_OCPP:MeterValues()
+    con:Set("Current L1", current + 0.5)
+    con:Set("Current L2", current + 0.5)
+    con:Set("Current L3", current + 0.5)
+    con:MeterValues()
 end
 ```

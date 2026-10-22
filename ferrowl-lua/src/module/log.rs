@@ -4,8 +4,31 @@
 //! lives (e.g. the on-screen ring log + the optional file sink). Keeping the sink behind a trait
 //! lets this crate stay agnostic of the host's logging types.
 
+use crate::module::docs::{MethodDoc, arg, method};
 use ferrowl_lua_derive::Module;
 use mlua::UserData;
+
+/// Help entries for the registered methods.
+pub(crate) const DOCS: &[MethodDoc] = &[
+    method(
+        "Info",
+        &[arg("message", "string")],
+        "nil",
+        "append an info line to the module log",
+    ),
+    method(
+        "Warn",
+        &[arg("message", "string")],
+        "nil",
+        "append a warning line to the module log",
+    ),
+    method(
+        "Error",
+        &[arg("message", "string")],
+        "nil",
+        "append an error line to the module log",
+    ),
+];
 
 /// Severity of a line logged from Lua. Mirrors the host's own level type; kept local to this
 /// crate since `ferrowl-lua` cannot depend on `ferrowl` (the dependency runs the other way) —
@@ -79,5 +102,18 @@ mod tests {
             vec![(LogLevel::Info, "hello".to_string())]
         );
         assert_eq!(<Log<VecSink> as Module>::module(), "C_Log");
+    }
+
+    #[test]
+    fn ut_log_docs_match_registered_methods() {
+        use crate::module::test_support::{documented, registered_methods};
+
+        struct Null;
+        impl LogSink for Null {
+            fn log(&self, _: LogLevel, _: &str) {}
+        }
+        let lua = mlua::Lua::new();
+        let ud = lua.create_userdata(Log::init(Null)).unwrap();
+        assert_eq!(registered_methods(&ud), documented(&[DOCS], &[]));
     }
 }

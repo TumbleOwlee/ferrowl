@@ -118,6 +118,8 @@ Lua API surface and semantics owned here. The in-TUI code editor (vim-modal edit
 
 **SC-R-021** — An OCPP **server** module runs its scripts as a client module does; scripting is not limited to the client role.
 
+**SC-R-084** — A `ModuleHandle` exposes `ConnectionStatus()`, returning the named module's displayed status as one of the strings `CONNECTED`, `RECONNECTING`, `DISCONNECTED` (SC-R-082), resolved at the moment of the call (SC-R-078).
+
 ---
 
 ## Script lifecycle
@@ -185,6 +187,12 @@ Lua API surface and semantics owned here. The in-TUI code editor (vim-modal edit
 **SC-R-073** — After an in-place OCPP module reconfiguration (OC-R-085), every field name a running sim's `C_OCPP` `Get`/`Set` accepted before the edit is accepted again on its next call at any scope still present after the edit (SC-R-072).
 
 **SC-R-074** — A connector added to an OCPP client module at runtime through the client view's connector add is listed by a running sim's next `GetConnectors` call and reachable through `Connector` (SC-R-072).
+
+**SC-R-082** — `C_Register` and the bare `C_OCPP` module of every shape expose `ConnectionStatus()`, returning the host module's displayed status (MB-R-137, MB-R-152, MB-R-153, OC-R-123, OC-R-124) as one of the strings `CONNECTED`, `RECONNECTING`, `DISCONNECTED`.
+
+**SC-R-083** — `ConnectionStatus()` (SC-R-082) returns the module's status as it stands at the moment of the call, never a value captured when the sim's Lua context was built (SC-R-072).
+
+**SC-R-085** — `C_OCPP` `Get` and `Set` accept as field name exactly the label the OCPP module's view shows for that state field at that scope, compared verbatim, case and spaces included.
 
 ---
 

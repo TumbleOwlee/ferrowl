@@ -13,8 +13,8 @@ use std::time::Duration;
 use parking_lot::{Mutex, RwLock};
 
 use ferrowl_lua::module::{
-    LogModule, OcppActions, OcppServer, OcppServerHost, Read, TestModule, TimeModule, ValueType,
-    Write,
+    ConnectionStatus, LogModule, OcppActions, OcppServer, OcppServerHost, Read, StatusSource,
+    TestModule, TimeModule, ValueType, Write,
 };
 use ferrowl_lua::{ContextBuilder, Error};
 
@@ -26,6 +26,7 @@ use crate::module::ocpp::lock::{with_state, with_state_mut};
 use crate::module::ocpp::scope::Scope;
 use crate::module::ocpp::server::view::ServerVersion;
 use crate::module::view::SharedLog;
+use crate::view::status_bar::StatusCell;
 
 /// Actions enqueued by the server Lua sim: `(identity, scope, action, overrides-json)`, drained by
 /// the view each refresh and routed to the matching connection/entry.
@@ -90,6 +91,24 @@ pub struct CsHandle<V: ServerVersion> {
     queue: ServerActionQueue,
 }
 
+enum SetOutcome {
+    Done,
+    /// The name does not resolve through the scope's get.
+    Unknown,
+    /// The name resolves but is read-only or got a value of the wrong type.
+    Rejected,
+}
+
+fn set_outcome<F: OcppFields>(state: &mut F, name: &str, value: ValueType) -> SetOutcome {
+    if state.set_field(name, value) {
+        SetOutcome::Done
+    } else if state.get_field(name).is_none() {
+        SetOutcome::Unknown
+    } else {
+        SetOutcome::Rejected
+    }
+}
+
 impl<V: ServerVersion> Read for CsHandle<V> {
     fn read(&self, name: String) -> ferrowl_lua::Result<ValueType> {
         with_state(&self.state, |s| s.get_field(&name))
@@ -98,10 +117,12 @@ impl<V: ServerVersion> Read for CsHandle<V> {
 }
 impl<V: ServerVersion> Write for CsHandle<V> {
     fn write(&self, name: String, value: ValueType) -> ferrowl_lua::Result<()> {
-        if with_state_mut(&self.state, |s| s.set_field(&name, value)) {
-            Ok(())
-        } else {
-            Err(Error::RuntimeError(format!("cannot set CS field '{name}'")))
+        match with_state_mut(&self.state, |s| set_outcome(s, &name, value)) {
+            SetOutcome::Done => Ok(()),
+            SetOutcome::Unknown => Err(Error::RuntimeError(format!("unknown CS field '{name}'"))),
+            SetOutcome::Rejected => {
+                Err(Error::RuntimeError(format!("cannot set CS field '{name}'")))
+            }
         }
     }
 }
@@ -131,12 +152,14 @@ impl<V: ServerVersion> Read for ConnHandle<V> {
 }
 impl<V: ServerVersion> Write for ConnHandle<V> {
     fn write(&self, name: String, value: ValueType) -> ferrowl_lua::Result<()> {
-        if with_state_mut(&self.state, |s| s.set_field(&name, value)) {
-            Ok(())
-        } else {
-            Err(Error::RuntimeError(format!(
+        match with_state_mut(&self.state, |s| set_outcome(s, &name, value)) {
+            SetOutcome::Done => Ok(()),
+            SetOutcome::Unknown => Err(Error::RuntimeError(format!(
+                "unknown connector field '{name}'"
+            ))),
+            SetOutcome::Rejected => Err(Error::RuntimeError(format!(
                 "cannot set connector field '{name}'"
-            )))
+            ))),
         }
     }
 }
@@ -154,14 +177,29 @@ impl<V: ServerVersion> OcppActions for ConnHandle<V> {
 pub struct ServerHost<V: ServerVersion> {
     states: SharedServerStates<V>,
     queue: ServerActionQueue,
+    status: StatusCell,
 }
 
 impl<V: ServerVersion> ServerHost<V> {
     /// Builds a host over the shared state registry and its action queue (used by both the
     /// running sim thread and the session-level [`crate::registry::OcppServerEntry`] `C_Module`
     /// bridge).
-    pub(crate) fn new(states: SharedServerStates<V>, queue: ServerActionQueue) -> Self {
-        Self { states, queue }
+    pub(crate) fn new(
+        states: SharedServerStates<V>,
+        queue: ServerActionQueue,
+        status: StatusCell,
+    ) -> Self {
+        Self {
+            states,
+            queue,
+            status,
+        }
+    }
+}
+
+impl<V: ServerVersion> StatusSource for ServerHost<V> {
+    fn connection_status(&self) -> ferrowl_lua::Result<ConnectionStatus> {
+        self.status.connection_status()
     }
 }
 
@@ -230,9 +268,10 @@ pub fn run_server_script_once<V: ServerVersion>(
     name: String,
     code: String,
     log: SharedLog,
+    status: StatusCell,
 ) {
     std::thread::spawn(move || {
-        let host = ServerHost { states, queue };
+        let host = ServerHost::new(states, queue, status);
         let context = ContextBuilder::<String>::default()
             .with_stdlib()
             .with_module(OcppServer::init(host))
@@ -263,6 +302,7 @@ pub fn run_server_sim<V: ServerVersion>(
     scripts: Vec<(String, String)>,
     interval: Duration,
     log: SharedLog,
+    status: StatusCell,
 ) -> Option<OcppSimHandle> {
     if scripts.is_empty() {
         return None;
@@ -270,7 +310,7 @@ pub fn run_server_sim<V: ServerVersion>(
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = stop.clone();
     let handle = std::thread::spawn(move || {
-        let host = ServerHost { states, queue };
+        let host = ServerHost::new(states, queue, status);
         let mut builder = ContextBuilder::<String>::default()
             .with_stdlib()
             .with_module(OcppServer::init(host))
@@ -324,10 +364,7 @@ mod tests {
                 .push((Scope::connector(1), Arc::new(RwLock::new(Conn::default()))));
         });
         let queue: ServerActionQueue = Arc::new(Mutex::new(VecDeque::new()));
-        let host = ServerHost {
-            states,
-            queue: queue.clone(),
-        };
+        let host = ServerHost::new(states, queue.clone(), StatusCell::default());
 
         // Enumeration + resolution.
         assert_eq!(host.stations(), vec!["CP1".to_string()]);
@@ -361,10 +398,7 @@ mod tests {
         });
         let queue: ServerActionQueue = Arc::new(Mutex::new(VecDeque::new()));
         (
-            ServerHost {
-                states,
-                queue: queue.clone(),
-            },
+            ServerHost::new(states, queue.clone(), StatusCell::default()),
             queue,
         )
     }
@@ -432,6 +466,7 @@ mod tests {
             // script eligible to run on the very first cycle, deterministically.
             Duration::ZERO,
             log(),
+            StatusCell::default(),
         )
         .expect("a non-empty script set spawns a sim thread");
 
@@ -444,6 +479,79 @@ mod tests {
         assert!(
             start.elapsed() < Duration::from_millis(500),
             "stop() blocked instead of the hook interrupting the runaway script"
+        );
+    }
+
+    #[test]
+    /// SC-R-082 — the server sim's bare `C_OCPP:ConnectionStatus()` reports the published listener status.
+    fn ut_server_sim_connection_status() {
+        use crate::view::status_bar::ConnStatus;
+
+        let states: SharedServerStates<V1_6> = Arc::new(RwLock::new(ServerStates::default()));
+        let queue: ServerActionQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let log = log();
+        let status = StatusCell::default();
+        status.publish(ConnStatus::Connected);
+        let mut handle = run_server_sim(
+            states,
+            queue,
+            vec![(
+                "status".to_string(),
+                r#"C_Log:Info("status=" .. C_OCPP:ConnectionStatus())"#.to_string(),
+            )],
+            Duration::ZERO,
+            log.clone(),
+            status,
+        )
+        .expect("a non-empty script set spawns a sim thread");
+
+        ferrowl_test_support::wait_until_blocking(
+            "sim logs the published status",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || {
+                log.blocking_read()
+                    .peek_n(crate::app::LOG_SIZE)
+                    .into_iter()
+                    .any(|(_, _, line)| line.ends_with("status=CONNECTED"))
+                    .then_some(())
+            },
+        );
+        handle.stop();
+    }
+
+    #[test]
+    /// SC-E-046, SC-E-047 — Set with a name the scope lacks raises the unknown-field error; a known but read-only field keeps the cannot-set error.
+    fn ut_server_set_with_non_label_raises_unknown_field() {
+        let states: SharedServerStates<V1_6> = Arc::new(RwLock::new(ServerStates::default()));
+        with_state_mut(&states, |reg| {
+            let st = reg.stations.entry("CP1".to_string()).or_default();
+            st.cs = Some(Arc::new(RwLock::new(Cs::default())));
+            st.conns
+                .push((Scope::connector(1), Arc::new(RwLock::new(Conn::default()))));
+        });
+        let queue: ServerActionQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let host = ServerHost::new(states, queue, StatusCell::default());
+        let err = |r: ferrowl_lua::Result<()>| r.expect_err("expected an error").to_string();
+
+        let conn = host.connector("CP1", 1).unwrap();
+        for name in ["Session Energy", "sessionenergy"] {
+            assert!(
+                err(conn.write(name.to_string(), ValueType::Float(1.0)))
+                    .contains("unknown connector field")
+            );
+        }
+        let cs = host.station("CP1").unwrap();
+        assert!(
+            err(cs.write(
+                "Firmware Version".to_string(),
+                ValueType::String("x".into())
+            ))
+            .contains("unknown CS field")
+        );
+        assert!(
+            err(cs.write("Iccid".to_string(), ValueType::String("x".into())))
+                .contains("cannot set CS field")
         );
     }
 }

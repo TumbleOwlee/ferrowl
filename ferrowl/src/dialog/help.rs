@@ -15,31 +15,36 @@ use ratatui::{
 
 /// One titled group shown in the overlay: a heading plus its `(name, description)` entries. `name`
 /// is a Lua signature on the bindings page and a key on the keybind page.
-pub struct BindingSection {
-    pub title: &'static str,
-    pub entries: &'static [(&'static str, &'static str)],
+pub struct HelpSection {
+    pub title: String,
+    pub entries: Vec<(String, String)>,
 }
 
+/// Width of the name column. A name of 31 columns or fewer keeps a gap before the description on its
+/// line; a longer one takes its own line with the description below.
+const NAME_COL: usize = 32;
+
 /// Builds the popup's logical lines, word-wrapping each entry's description to `desc_budget`
-/// columns with a 34-col indent (2-space indent + `{name:<32}`) on continuation lines.
-fn build_lines(
-    sections: &'static [&'static BindingSection],
-    desc_budget: usize,
-) -> Vec<Line<'static>> {
+/// columns with a 34-col indent (2-space indent + `{name:<32}`) on continuation lines. A name wider
+/// than the name column renders alone, its description wrapped below at the same indent.
+fn build_lines(sections: &[HelpSection], desc_budget: usize) -> Vec<Line<'static>> {
     let desc_style = Style::default().fg(COLOR_SCHEME.text).bg(COLOR_SCHEME.bg);
-    let make_lines = |(name, desc): &(&str, &str)| -> Vec<Line<'static>> {
+    let name_style = Style::default()
+        .fg(COLOR_SCHEME.hi)
+        .bg(COLOR_SCHEME.bg)
+        .bold();
+    let make_lines = |(name, desc): &(String, String)| -> Vec<Line<'static>> {
         let mut segments = crate::view::text::wrap(desc, desc_budget).into_iter();
-        let first = segments.next().unwrap_or_default();
-        let mut out = vec![Line::from(vec![
-            Span::styled(
-                format!("  {name:<32}"),
-                Style::default()
-                    .fg(COLOR_SCHEME.hi)
-                    .bg(COLOR_SCHEME.bg)
-                    .bold(),
-            ),
-            Span::styled(first, desc_style),
-        ])];
+        let mut out = Vec::new();
+        if name.chars().count() >= NAME_COL {
+            out.push(Line::from(Span::styled(format!("  {name}"), name_style)));
+        } else {
+            let first = segments.next().unwrap_or_default();
+            out.push(Line::from(vec![
+                Span::styled(format!("  {name:<NAME_COL$}"), name_style),
+                Span::styled(first, desc_style),
+            ]));
+        }
         out.extend(
             segments.map(|seg| Line::from(Span::styled(format!("{:34}{seg}", ""), desc_style))),
         );
@@ -60,16 +65,16 @@ fn build_lines(
         if !lines.is_empty() {
             lines.push(Line::default());
         }
-        lines.push(section_title(section.title));
+        lines.push(section_title(&section.title));
         lines.extend(section.entries.iter().flat_map(make_lines));
     }
     lines
 }
 
-/// A scrollable `?` overlay over one set of [`BindingSection`]s.
+/// A scrollable `?` overlay over one set of [`HelpSection`]s.
 pub struct HelpOverlay {
     title: &'static str,
-    sections: &'static [&'static BindingSection],
+    sections: Vec<HelpSection>,
     scroll: u16,
     /// Highest valid `scroll` value, refreshed on every `render` call from the content length and
     /// viewport height. Used to clamp `handle_key`'s `j`/`G` so `scroll` never runs past the last
@@ -80,13 +85,18 @@ pub struct HelpOverlay {
 impl HelpOverlay {
     /// Open the overlay on `sections`. `title` names the page (it is shown in the popup's border,
     /// with the close keys appended).
-    pub fn new(title: &'static str, sections: &'static [&'static BindingSection]) -> Self {
+    pub fn new(title: &'static str, sections: Vec<HelpSection>) -> Self {
         Self {
             title,
             sections,
             scroll: 0,
             max_scroll: 0,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn sections(&self) -> &[HelpSection] {
+        &self.sections
     }
 
     /// Handles one key while the overlay is open. Returns `true` if the overlay should close.
@@ -120,7 +130,7 @@ impl HelpOverlay {
         let inner_width = popup_w.saturating_sub(4) as usize;
         let desc_budget = inner_width.saturating_sub(36);
 
-        let lines = build_lines(self.sections, desc_budget);
+        let lines = build_lines(&self.sections, desc_budget);
 
         let popup_h = (lines.len() as u16 + 4).min(area.height.saturating_sub(4));
         let [_, mid, _] = Layout::horizontal([
@@ -185,10 +195,10 @@ pub fn route_help(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dialog::lua_help::{self, ScriptContext};
+    use crate::dialog::lua_help::{self, LuaBindings};
 
     fn overlay() -> HelpOverlay {
-        HelpOverlay::new("Lua Bindings", lua_help::sections(ScriptContext::Session))
+        HelpOverlay::new("Lua Bindings", lua_help::sections(&LuaBindings::Session))
     }
 
     #[test]
@@ -260,40 +270,95 @@ mod tests {
         assert_eq!(o.scroll, max);
     }
 
+    fn real_bindings() -> Vec<LuaBindings> {
+        use crate::module::ocpp::client::lua_sim::ClientFields;
+        use crate::module::ocpp::client::lua_sim::OcppFields;
+        use crate::module::ocpp::client::v1_6::state::CsState as Cs16;
+        use crate::module::ocpp::client::v2_0_1::state::CsState as Cs201;
+        use crate::module::ocpp::server::view::ServerVersion;
+        use ferrowl_ocpp::{V1_6, V2_0_1};
+        vec![
+            LuaBindings::Modbus,
+            LuaBindings::Session,
+            LuaBindings::OcppClient {
+                cs_actions: Cs16::cs_actions(),
+                conn_actions: Cs16::conn_actions(),
+            },
+            LuaBindings::OcppClient {
+                cs_actions: Cs201::cs_actions(),
+                conn_actions: Cs201::conn_actions(),
+            },
+            LuaBindings::OcppServer {
+                station_actions: <<V1_6 as ServerVersion>::Cs as OcppFields>::actions(),
+                conn_actions: <<V1_6 as ServerVersion>::Conn as OcppFields>::actions(),
+            },
+            LuaBindings::OcppServer {
+                station_actions: <<V2_0_1 as ServerVersion>::Cs as OcppFields>::actions(),
+                conn_actions: <<V2_0_1 as ServerVersion>::Conn as OcppFields>::actions(),
+            },
+        ]
+    }
+
+    fn line_text(line: &Line) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
     #[test]
     /// Help overlay lines fit the popup width.
     fn ut_build_lines_fit_popup_width() {
-        // popup_w = 75, inner_width = 73, desc_budget = 73 - 34 = 39.
-        let lines = build_lines(lua_help::sections(ScriptContext::OcppClient), 39);
-        for line in &lines {
-            let total: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
-            assert!(total <= 73, "line too wide ({total} chars): {line:?}");
+        // popup_w = 75, inner_width = 73, desc_budget = 73 - 34 = 39. A wide name sits alone on its
+        // line, so only names up to the inner width are guaranteed to fit.
+        for b in real_bindings() {
+            let lines = build_lines(&lua_help::sections(&b), 39);
+            for line in &lines {
+                let total = line_text(line).chars().count();
+                assert!(total <= 73, "line too wide ({total} chars): {line:?}");
+            }
         }
     }
 
     #[test]
     /// A long help entry description wraps within the overlay.
     fn ut_build_lines_wraps_long_action_desc() {
-        let secs = lua_help::sections(ScriptContext::OcppClient);
-        let ocpp = secs.iter().find(|s| s.title == "C_OCPP").unwrap();
-        let (_, action_desc) = ocpp
-            .entries
-            .iter()
-            .find(|(sig, _)| sig.contains("<Action>"))
-            .unwrap();
-        assert!(action_desc.chars().count() > 39);
-        let wrapped_segments = crate::view::text::wrap(action_desc, 39).len();
-        assert!(
-            wrapped_segments >= 2,
-            "expected the long <Action> description to wrap into >= 2 segments, got {wrapped_segments}"
-        );
+        let long = "word ".repeat(30);
+        let secs = vec![HelpSection {
+            title: "T".into(),
+            entries: vec![("name".into(), long.trim().into())],
+        }];
+        let wrapped_segments = crate::view::text::wrap(long.trim(), 39).len();
+        assert!(wrapped_segments >= 2);
+        let lines = build_lines(&secs, 39);
+        assert_eq!(lines.len(), 1 + wrapped_segments);
+    }
 
-        // build_lines must emit exactly that many physical lines for this entry: one entry-count
-        // increase per section beyond the un-wrapped baseline.
-        let lines = build_lines(secs, 39);
-        let baseline: usize = 1 // section title
-            + ocpp.entries.len();
-        assert!(lines.len() >= baseline + (wrapped_segments - 1));
+    #[test]
+    /// UI-R-384 — a name wider than the name column takes its own line, the description below at
+    /// the 34-column indent; a narrower name keeps the one-line layout.
+    fn ut_build_lines_wide_name_puts_description_below() {
+        let wide = "n".repeat(40);
+        let narrow = "m".repeat(20);
+        let secs = vec![HelpSection {
+            title: "T".into(),
+            entries: vec![
+                (wide.clone(), "the description".into()),
+                (narrow.clone(), "short".into()),
+            ],
+        }];
+        let lines: Vec<String> = build_lines(&secs, 39).iter().map(line_text).collect();
+        assert_eq!(lines[0], "T");
+        assert_eq!(lines[1], format!("  {wide}"));
+        assert_eq!(lines[2], format!("{:34}the description", ""));
+        assert_eq!(lines[3], format!("  {narrow:<32}short"));
+        assert_eq!(lines.len(), 4);
+
+        let exact = "e".repeat(32);
+        let secs = vec![HelpSection {
+            title: "T".into(),
+            entries: vec![(exact.clone(), "desc".into())],
+        }];
+        let lines: Vec<String> = build_lines(&secs, 39).iter().map(line_text).collect();
+        assert_eq!(lines[1], format!("  {exact}"));
+        assert_eq!(lines[2], format!("{:34}desc", ""));
     }
 
     #[test]

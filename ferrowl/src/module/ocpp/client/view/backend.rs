@@ -46,6 +46,7 @@ impl<V: ClientVersion> ClientView<V> {
             self.enabled_scripts(),
             self.device.script_interval_duration(),
             self.script_log.clone(),
+            self.runtime.status.clone(),
         );
     }
 
@@ -64,6 +65,7 @@ impl<V: ClientVersion> ClientView<V> {
             name,
             code,
             self.script_log.clone(),
+            self.runtime.status.clone(),
         );
     }
 
@@ -196,13 +198,13 @@ impl<V: ClientVersion> ClientView<V> {
         // Persist CS boot identity (OC-R-103).
         device.model = self.with_state(|s| cs_string_field(s, "Model"));
         device.vendor = self.with_state(|s| cs_string_field(s, "Vendor"));
-        device.firmware_version = self.with_state(|s| cs_string_field(s, "FirmwareVersion"));
-        device.serial_number = self.with_state(|s| cs_string_field(s, "SerialNumber"));
+        device.firmware_version = self.with_state(|s| cs_string_field(s, "Firmware Version"));
+        device.serial_number = self.with_state(|s| cs_string_field(s, "Serial Number"));
         // Persist the 1.6-only meter/modem identity fields (OC-R-104); a no-op on 2.0.1/2.1.
-        device.iccid = self.with_state(|s| cs_string_field(s, "Iccid"));
-        device.imsi = self.with_state(|s| cs_string_field(s, "Imsi"));
-        device.meter_serial_number = self.with_state(|s| cs_string_field(s, "MeterSerialNumber"));
-        device.meter_type = self.with_state(|s| cs_string_field(s, "MeterType"));
+        device.iccid = self.with_state(|s| cs_string_field(s, "ICCID"));
+        device.imsi = self.with_state(|s| cs_string_field(s, "IMSI"));
+        device.meter_serial_number = self.with_state(|s| cs_string_field(s, "Meter Serial Number"));
+        device.meter_type = self.with_state(|s| cs_string_field(s, "Meter Type"));
         let base = ferrowl_util::path::base_dir_of(path);
         device.security.tls.server.relativize_paths(&base);
         device.security.tls.client.relativize_paths(&base);
@@ -435,6 +437,10 @@ impl<V: ClientVersion> ClientView<V> {
                     None => unreachable!("outer condition checked pending_lifecycle.is_some()"),
                 }
             }
+
+            self.runtime
+                .status
+                .publish(self.backend.connection_status());
 
             if let Some((spec, path, extra_headers)) = self.deferred.setup.take() {
                 let mut device = OcppDeviceConfig::from_spec(&spec, self.device.scripts.clone());
@@ -926,6 +932,41 @@ mod tests {
             terminal.backend().buffer()[(0, last_row)].bg,
             COLOR_SCHEME.warning,
             "RECONNECTING row must use the warning background"
+        );
+
+        v.backend.stop().await.expect("cleanup stop");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn it_client_refresh_publishes_reconnecting() {
+        use crate::view::status_bar::ConnStatus;
+        use ferrowl_lua::module::{ConnectionStatus, StatusSource};
+
+        let port = reserve_tcp_port().release();
+        let mut v = client_view::<ferrowl_ocpp::V1_6>(OcppVersion::V1_6, port);
+        v.spec.timeout_ms = Some(200);
+        v.spec.reconnect = Some(true);
+        let handler = v.make_handler();
+        v.backend
+            .start(&v.spec, &v.device, &v.log, handler)
+            .await
+            .expect("start must not fail synchronously against an unreachable CSMS");
+        assert_eq!(
+            v.runtime.status.connection_status().unwrap(),
+            ConnectionStatus::Disconnected
+        );
+
+        wait_until(
+            "task backs off in Reconnecting",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || (v.backend.connection_status() == ConnStatus::Reconnecting).then_some(()),
+        )
+        .await;
+        v.refresh().await;
+        assert_eq!(
+            v.runtime.status.connection_status().unwrap(),
+            ConnectionStatus::Reconnecting
         );
 
         v.backend.stop().await.expect("cleanup stop");
@@ -1777,6 +1818,107 @@ mod tests {
                 "StatusNotification".to_string()
             ],
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    /// SC-R-082, SC-R-083 — a running client sim reads the status as it stands at each call through connect, CSMS loss and `:stop`, on one sim that is never restarted.
+    async fn it_client_sim_reads_connection_status() {
+        let server = csms::ServerBuilder::<ferrowl_ocpp::V1_6>::new(
+            csms::Config {
+                host: "127.0.0.1".to_owned(),
+                port: 0,
+                timeout_ms: 2000,
+                reconnect: true,
+                basic_auth: None,
+                tls: Default::default(),
+            },
+            ferrowl_ocpp::new_self_signed_cache(),
+        )
+        .spawn(
+            RecordingCsms16 {
+                calls: Arc::new(Mutex::new(Vec::new())),
+                notify: Arc::new(Notify::new()),
+            },
+            sink(),
+        )
+        .await
+        .expect("server failed to bind");
+        let addr = wait_until(
+            "CSMS listener bind",
+            std::time::Duration::from_millis(20),
+            std::time::Duration::from_secs(10),
+            || server.local_addr(),
+        )
+        .await;
+
+        let mut v = client_view::<ferrowl_ocpp::V1_6>(OcppVersion::V1_6, addr.port());
+        v.spec.timeout_ms = Some(200);
+        v.spec.reconnect = Some(true);
+        v.device.script_interval = 0.02;
+        v.device.scripts = vec![crate::config::script::ScriptDef {
+            name: "status".into(),
+            code: r#"C_Log:Info("status=" .. C_OCPP:ConnectionStatus())"#.into(),
+            enabled: true,
+        }];
+        v.start_sim();
+        let handler = v.make_handler();
+        v.backend
+            .start(&v.spec, &v.device, &v.log, handler)
+            .await
+            .expect("start");
+
+        async fn saw(v: &mut ClientView<ferrowl_ocpp::V1_6>, want: &str) -> Option<()> {
+            v.refresh().await;
+            v.script_log
+                .read()
+                .await
+                .peek_n(crate::app::LOG_SIZE)
+                .into_iter()
+                .any(|(_, _, line)| line.contains(want))
+                .then_some(())
+        }
+        async fn wait_for(v: &mut ClientView<ferrowl_ocpp::V1_6>, want: &'static str) {
+            wait_until_async(
+                want,
+                std::time::Duration::from_millis(20),
+                std::time::Duration::from_secs(15),
+                async || saw(v, want).await,
+            )
+            .await;
+        }
+
+        wait_for(&mut v, "status=CONNECTED").await;
+        server.terminate().await.expect("terminate CSMS");
+        wait_for(&mut v, "status=RECONNECTING").await;
+
+        v.handle_command("stop").await;
+        wait_until_async(
+            "lifecycle settles",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            async || {
+                if !v.lifecycle_pending() {
+                    return Some(());
+                }
+                v.refresh().await;
+                None
+            },
+        )
+        .await;
+        wait_for(&mut v, "status=DISCONNECTED").await;
+
+        let stopped = v
+            .script_log
+            .read()
+            .await
+            .peek_n(crate::app::LOG_SIZE)
+            .into_iter()
+            .any(|(_, _, line)| line.contains("stopped"));
+        assert!(
+            !stopped,
+            "the sim must keep running across the status changes"
+        );
+        v.stop_sim();
     }
 
     /// CSMS handler answering every 2.0.1 action used by these tests and recording the ordered

@@ -14,7 +14,7 @@ use crate::app::Level;
 use crate::config::script::ScriptDef;
 use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
 use crate::dialog::close_confirm::CloseConfirmEvent;
-use crate::dialog::lua_help::ScriptContext;
+use crate::dialog::lua_help::LuaBindings;
 use crate::dialog::scripts::ScriptDialog;
 use crate::module::modbus::build::Timing;
 use crate::module::modbus::dialog::{EditInputDialog, EditSelectionDialog};
@@ -771,6 +771,8 @@ impl ModuleView for ModbusModuleView {
                 }
             }
 
+            self.module.publish_status();
+
             if let Some(pending) = self.pending.take() {
                 match pending {
                     PendingAction::Add(edited) => self.apply_add(edited).await,
@@ -1014,7 +1016,7 @@ impl ModuleView for ModbusModuleView {
                 self.overlay = ModbusViewOverlay::Scripts(Box::new(ScriptDialog::new(
                     &self.device.scripts,
                     self.device.script_interval_duration(),
-                    ScriptContext::Modbus,
+                    LuaBindings::Modbus,
                 )));
                 Box::pin(std::future::ready(CommandResult::Handled(None)))
             }
@@ -1169,6 +1171,7 @@ impl ModuleView for ModbusModuleView {
             registers: self.module.lua_registers(),
             instance_id: self.instance_id,
             role,
+            status: self.module.status_cell(),
         }))
     }
 }
@@ -3371,6 +3374,48 @@ mod tests {
 
         view.module.stop().await.expect("cleanup stop");
         server_view.module.stop().await.expect("cleanup stop");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn it_modbus_refresh_publishes_connected() {
+        use ferrowl_lua::module::StatusSource;
+
+        let device = empty_device();
+        let spec = ModuleSpec {
+            name: "status module".into(),
+            device: "status.toml".into(),
+            role: Role::Server,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: ferrowl_test_support::reserve_tcp_port().release(),
+            },
+        };
+        let module = super::super::ModbusModule::new(&spec, &device);
+        let mut view = ModbusModuleView::new(module, spec, device);
+        let cell = view.module.status_cell();
+        assert_eq!(
+            cell.connection_status().unwrap(),
+            ferrowl_lua::module::ConnectionStatus::Disconnected
+        );
+        view.module.start().await.expect("start server");
+
+        wait_until(
+            "server binds and shows Connected",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            || {
+                (view.module.connection_status() == crate::view::status_bar::ConnStatus::Connected)
+                    .then_some(())
+            },
+        )
+        .await;
+        view.refresh().await;
+        assert_eq!(
+            cell.connection_status().unwrap(),
+            ferrowl_lua::module::ConnectionStatus::Connected
+        );
+
+        view.module.stop().await.expect("cleanup stop");
     }
 
     #[tokio::test]

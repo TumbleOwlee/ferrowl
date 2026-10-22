@@ -10,8 +10,8 @@ use std::time::Duration;
 use std::sync::{Arc, Mutex};
 
 use ferrowl_lua::module::{
-    Has, LogLevel, LogModule, LogSink, Read, RegisterModule, StaticsModule, TimeModule, ValueType,
-    Write,
+    ConnectionStatus, Has, LogLevel, LogModule, LogSink, Read, RegisterModule, StaticsModule,
+    StatusSource, TimeModule, ValueType, Write,
 };
 use ferrowl_lua::{Context, ContextBuilder, Error, Result};
 
@@ -32,6 +32,12 @@ impl Read for Handle {
             // float/string/bool getters -> exercises the type-mismatch arm.
             _ => Ok(ValueType::Int(0)),
         }
+    }
+}
+
+impl StatusSource for Handle {
+    fn connection_status(&self) -> Result<ConnectionStatus> {
+        Ok(ConnectionStatus::Disconnected)
     }
 }
 

@@ -4,8 +4,20 @@
 //! `false` are falsy). `Fail(msg)` always raises. Both surface as `"assertion failed: {msg}"` so
 //! a headless runner watching the module log can key off that text.
 
+use crate::module::docs::{MethodDoc, arg, method};
 use ferrowl_lua_derive::Module;
 use mlua::{Error, Result, UserData, Value};
+
+/// Help entries for the registered methods.
+pub(crate) const DOCS: &[MethodDoc] = &[
+    method(
+        "Assert",
+        &[arg("cond", "any"), arg("msg", "string")],
+        "nil",
+        "raise if cond is falsy (nil/false)",
+    ),
+    method("Fail", &[arg("msg", "string")], "nil", "always raise"),
+];
 
 /// Lua module `C_Test`: exposes `Assert(cond, msg)` and `Fail(msg)`.
 #[derive(Module, Default)]
@@ -103,5 +115,14 @@ mod tests {
         let lua = lua_with_test();
         let err = lua.load(r#"C_Test:Fail("nope")"#).exec().unwrap_err();
         assert!(err.to_string().contains("assertion failed: nope"));
+    }
+
+    #[test]
+    fn ut_test_docs_match_registered_methods() {
+        use crate::module::test_support::{documented, registered_methods};
+
+        let lua = mlua::Lua::new();
+        let ud = lua.create_userdata(Test).unwrap();
+        assert_eq!(registered_methods(&ud), documented(&[DOCS], &[]));
     }
 }

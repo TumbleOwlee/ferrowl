@@ -1,5 +1,17 @@
+use crate::module::docs::{MethodDoc, method};
 use ferrowl_lua_derive::Module;
 use mlua::{Result, UserData};
+
+/// Help entries for the registered methods.
+pub(crate) const DOCS: &[MethodDoc] = &[
+    method("Get", &[], "integer", "seconds elapsed since module start"),
+    method(
+        "GetMs",
+        &[],
+        "integer",
+        "milliseconds elapsed since module start",
+    ),
+];
 
 /// Lua module `C_Time`: elapsed time since module creation.
 ///
@@ -41,7 +53,7 @@ impl Time {
 
 #[cfg(test)]
 mod tests {
-    use super::Time;
+    use super::{DOCS, Time};
 
     #[test]
     /// SC-R-017 — C_Time is measured from the moment its context is built, and building a fresh
@@ -65,5 +77,14 @@ mod tests {
             Time::get_ms(&lua, &t2, ()).unwrap() < elapsed,
             "a rebuilt clock must start from zero, not inherit the old origin"
         );
+    }
+
+    #[test]
+    fn ut_time_docs_match_registered_methods() {
+        use crate::module::test_support::{documented, registered_methods};
+
+        let lua = mlua::Lua::new();
+        let ud = lua.create_userdata(Time::default()).unwrap();
+        assert_eq!(registered_methods(&ud), documented(&[DOCS], &[]));
     }
 }

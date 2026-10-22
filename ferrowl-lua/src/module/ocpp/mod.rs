@@ -15,11 +15,84 @@
 
 pub mod traits;
 
-use crate::module::ValueType;
+use crate::module::docs::{ArgDoc, CONNECTION_STATUS, MethodDoc, arg, method};
+use crate::module::{StatusSource, ValueType};
 use ferrowl_lua_derive::Module;
 use mlua::{Result, Table, UserData, UserDataMethods};
 use std::sync::Arc;
 use traits::{OcppClientHost, OcppHandle, OcppServerHost};
+
+/// Help entries for the shared `Get`/`Set` surface, on every shape and every [`Accessor`].
+pub(crate) const STATE_DOCS: &[MethodDoc] = &[
+    method(
+        "Get",
+        &[arg("name", "string")],
+        "number|string|boolean|nil",
+        "read a state field of this scope",
+    ),
+    method(
+        "Set",
+        &[arg("name", "string"), arg("value", "number|string|boolean")],
+        "nil",
+        "write a state field of this scope",
+    ),
+];
+
+/// Help entry for the per-action method template.
+pub(crate) const ACTION_DOC: MethodDoc = method(
+    "<Action>",
+    &[ArgDoc {
+        name: "overrides",
+        ty: "table",
+        optional: true,
+    }],
+    "boolean",
+    "send this action; overrides merge over the state-derived payload",
+);
+
+/// Help entries beyond the shared surface for the flat shape.
+pub(crate) const FLAT_DOCS: &[MethodDoc] = &[CONNECTION_STATUS];
+
+/// Help entries beyond the shared surface for the client shape.
+pub(crate) const CLIENT_DOCS: &[MethodDoc] = &[
+    method(
+        "Connector",
+        &[arg("id", "integer")],
+        "Accessor",
+        "accessor scoped to one connector, with its own Get/Set/<Action>",
+    ),
+    method("GetConnectors", &[], "integer[]", "list connector ids"),
+    CONNECTION_STATUS,
+];
+
+/// Help entries for the server shape (it has no bare `Get`/`Set`/`<Action>`).
+pub(crate) const SERVER_DOCS: &[MethodDoc] = &[
+    method(
+        "GetChargingStations",
+        &[],
+        "string[]",
+        "list known charging station ids",
+    ),
+    method(
+        "GetConnectors",
+        &[arg("cs", "string")],
+        "integer[]",
+        "list connector ids for a station",
+    ),
+    method(
+        "ChargingStation",
+        &[arg("cs", "string")],
+        "Accessor|nil",
+        "accessor scoped to one station, with its own Get/Set/<Action>",
+    ),
+    method(
+        "Connector",
+        &[arg("cs", "string"), arg("id", "integer")],
+        "Accessor|nil",
+        "accessor scoped to one connector, with its own Get/Set/<Action>",
+    ),
+    CONNECTION_STATUS,
+];
 
 /// A per-call precondition a host-built accessor runs before every method; the default is none.
 #[derive(Clone, Default)]
@@ -99,12 +172,12 @@ impl<H: OcppHandle> UserData for Accessor<H> {
 /// dispatch. Flat single-scope shape.
 #[derive(Module)]
 #[module = "C_OCPP"]
-pub struct Ocpp<H: OcppHandle> {
+pub struct Ocpp<H: OcppHandle + StatusSource> {
     handle: H,
     guard: OcppGuard,
 }
 
-impl<H: OcppHandle> Ocpp<H> {
+impl<H: OcppHandle + StatusSource> Ocpp<H> {
     /// Creates the module around the host handle.
     pub fn init(handle: H) -> Self {
         Self {
@@ -114,21 +187,25 @@ impl<H: OcppHandle> Ocpp<H> {
     }
 }
 
-impl<H: OcppHandle> UserData for Ocpp<H> {
+impl<H: OcppHandle + StatusSource> UserData for Ocpp<H> {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         register_state_actions(methods, |o: &Ocpp<H>| &o.handle, |o| &o.guard);
+        methods.add_method("ConnectionStatus", |_, this, ()| {
+            this.guard.check()?;
+            this.handle.connection_status()
+        });
     }
 }
 
 /// Lua module `C_OCPP` for the **client**: CS-level `Get`/`Set`/`<Action>` plus `Connector(id)`.
 #[derive(Module)]
 #[module = "C_OCPP"]
-pub struct OcppClient<H: OcppHandle + OcppClientHost> {
+pub struct OcppClient<H: OcppHandle + OcppClientHost + StatusSource> {
     handle: H,
     guard: OcppGuard,
 }
 
-impl<H: OcppHandle + OcppClientHost> OcppClient<H> {
+impl<H: OcppHandle + OcppClientHost + StatusSource> OcppClient<H> {
     /// Creates the module around the client host handle.
     pub fn init(handle: H) -> Self {
         Self::init_guarded(handle, OcppGuard::default())
@@ -140,9 +217,13 @@ impl<H: OcppHandle + OcppClientHost> OcppClient<H> {
     }
 }
 
-impl<H: OcppHandle + OcppClientHost> UserData for OcppClient<H> {
+impl<H: OcppHandle + OcppClientHost + StatusSource> UserData for OcppClient<H> {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         register_state_actions(methods, |o: &OcppClient<H>| &o.handle, |o| &o.guard);
+        methods.add_method("ConnectionStatus", |_, this, ()| {
+            this.guard.check()?;
+            this.handle.connection_status()
+        });
         methods.add_method("Connector", |_, this, id: i64| {
             this.guard.check()?;
             Ok(Accessor::guarded(
@@ -160,12 +241,12 @@ impl<H: OcppHandle + OcppClientHost> UserData for OcppClient<H> {
 /// Lua module `C_OCPP` for the **server**: enumeration plus per-station / per-connector accessors.
 #[derive(Module)]
 #[module = "C_OCPP"]
-pub struct OcppServer<H: OcppServerHost + 'static> {
+pub struct OcppServer<H: OcppServerHost + StatusSource + 'static> {
     handle: H,
     guard: OcppGuard,
 }
 
-impl<H: OcppServerHost + 'static> OcppServer<H> {
+impl<H: OcppServerHost + StatusSource + 'static> OcppServer<H> {
     /// Creates the module around the server host handle.
     pub fn init(handle: H) -> Self {
         Self::init_guarded(handle, OcppGuard::default())
@@ -177,8 +258,12 @@ impl<H: OcppServerHost + 'static> OcppServer<H> {
     }
 }
 
-impl<H: OcppServerHost + 'static> UserData for OcppServer<H> {
+impl<H: OcppServerHost + StatusSource + 'static> UserData for OcppServer<H> {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method("ConnectionStatus", |_, this, ()| {
+            this.guard.check()?;
+            this.handle.connection_status()
+        });
         methods.add_method("GetChargingStations", |_, this, ()| {
             this.guard.check()?;
             Ok(this.handle.stations())
@@ -220,6 +305,7 @@ fn table_to_overrides(table: Option<Table>) -> Result<Vec<(String, ValueType)>> 
 mod tests {
     use super::*;
     use crate::ContextBuilder;
+    use crate::module::ConnectionStatus;
     use crate::module::test_support::{DispatchLog, MockHost, Store, pairs};
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
@@ -319,6 +405,11 @@ mod tests {
                 stations: Arc::new(Mutex::new(stations)),
                 dispatched: Arc::new(Mutex::new(Vec::new())),
             }
+        }
+    }
+    impl StatusSource for ServerHost {
+        fn connection_status(&self) -> Result<ConnectionStatus> {
+            Ok(ConnectionStatus::Reconnecting)
         }
     }
     impl OcppServerHost for ServerHost {
@@ -434,6 +525,130 @@ mod tests {
         assert!(
             !errors.is_empty(),
             "expected at least one error from malformed override table"
+        );
+    }
+
+    #[test]
+    /// SC-R-082 — `ConnectionStatus()` on the flat, client and server `C_OCPP` shapes returns the host's status string.
+    fn ut_connection_status_on_every_shape() {
+        let flat = MockHost::default();
+        flat.set_status(ConnectionStatus::Connected);
+        let mut ctx = ContextBuilder::<String>::default()
+            .with_stdlib()
+            .with_module(Ocpp::init(flat.clone()))
+            .with_script(
+                "s".to_string(),
+                r#"C_OCPP:Set("st", C_OCPP:ConnectionStatus())"#,
+            )
+            .build()
+            .expect("build context");
+        ctx.call_all().expect("run");
+        assert!(matches!(flat.get("st"), Some(ValueType::String(s)) if s == "CONNECTED"));
+
+        let client = MockHost::default();
+        client.set_status(ConnectionStatus::Disconnected);
+        let mut ctx = ContextBuilder::<String>::default()
+            .with_stdlib()
+            .with_module(OcppClient::init(client.clone()))
+            .with_script(
+                "s".to_string(),
+                r#"C_OCPP:Set("st", C_OCPP:ConnectionStatus())"#,
+            )
+            .build()
+            .expect("build context");
+        ctx.call_all().expect("run");
+        assert!(matches!(client.get("st"), Some(ValueType::String(s)) if s == "DISCONNECTED"));
+
+        let server = ServerHost::fixture();
+        let mut ctx = ContextBuilder::<String>::default()
+            .with_stdlib()
+            .with_module(OcppServer::init(server.clone()))
+            .with_script(
+                "s".to_string(),
+                r#"C_OCPP:Connector("cp001", 1):Set("st", C_OCPP:ConnectionStatus())"#,
+            )
+            .build()
+            .expect("build context");
+        ctx.call_all().expect("run");
+        let stations = server.stations.lock().unwrap();
+        assert!(matches!(
+            store_get(&stations["cp001"].1[&1], "st"),
+            Some(ValueType::String(s)) if s == "RECONNECTING"
+        ));
+    }
+
+    #[test]
+    /// SC-R-082 — an `Accessor` has no `ConnectionStatus()`.
+    fn ut_accessor_has_no_connection_status() {
+        let mut ctx = ContextBuilder::<String>::default()
+            .with_stdlib()
+            .with_module(OcppClient::init(MockHost::default()))
+            .with_script("s".to_string(), "C_OCPP:Connector(1):ConnectionStatus()")
+            .build()
+            .expect("build context");
+        let errors = ctx.call_all().expect_err("accessor has no such method");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.to_string().contains("ConnectionStatus")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    /// SC-R-080 — `ConnectionStatus()` runs the accessor guard first and raises its error.
+    fn ut_connection_status_runs_guard() {
+        let guard = OcppGuard::new(|| Err(mlua::Error::RuntimeError("guard says no".into())));
+        let mut ctx = ContextBuilder::<String>::default()
+            .with_stdlib()
+            .with_module(OcppClient::init_guarded(MockHost::default(), guard))
+            .with_script("s".to_string(), "C_OCPP:ConnectionStatus()")
+            .build()
+            .expect("build context");
+        let errors = ctx.call_all().expect_err("guard error propagates");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.to_string().contains("guard says no")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn ut_ocpp_docs_match_registered_methods() {
+        use crate::module::OcppActions;
+        use crate::module::test_support::{documented, registered_methods};
+
+        let lua = mlua::Lua::new();
+        let actions = MockHost::actions();
+
+        let flat = lua
+            .create_userdata(Ocpp::init(MockHost::default()))
+            .unwrap();
+        assert_eq!(
+            registered_methods(&flat),
+            documented(&[STATE_DOCS, FLAT_DOCS], &actions)
+        );
+
+        let client = lua
+            .create_userdata(OcppClient::init(MockHost::default()))
+            .unwrap();
+        assert_eq!(
+            registered_methods(&client),
+            documented(&[STATE_DOCS, CLIENT_DOCS], &actions)
+        );
+
+        let server = lua
+            .create_userdata(OcppServer::init(ServerHost::fixture()))
+            .unwrap();
+        assert_eq!(registered_methods(&server), documented(&[SERVER_DOCS], &[]));
+
+        let accessor = lua
+            .create_userdata(Accessor::new(MockHost::default()))
+            .unwrap();
+        assert_eq!(
+            registered_methods(&accessor),
+            documented(&[STATE_DOCS], &actions)
         );
     }
 }

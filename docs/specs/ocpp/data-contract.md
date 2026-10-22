@@ -118,27 +118,27 @@ State split by level, shared between the view, the inbound handler, and the Lua 
 
 ### Charge-point level
 
-| Field | Notes | Req |
-|---|---|---|
-| model, vendor, firmware version, serial number | boot identity, sent in `BootNotification` | OC-R-057, OC-R-103 |
-| ICCID, IMSI, meter serial number, meter type (1.6 only) | optional identity, sent in `BootNotification` only when non-empty; no 2.x equivalent | OC-R-104, OC-R-142 |
-| configuration / variable store | list of `(key, value, readonly)`; answers `GetConfiguration` (1.6) / `GetVariables` (2.x), mutated by `ChangeConfiguration` / `SetVariables`. Seeded from the device config, or the version's built-in defaults when empty | OC-R-057, OC-R-066 |
-| heartbeat interval | seconds, from the CSMS's `BootNotification` response. Unset until a boot round-trips | OC-R-057 |
-| reservation | id tag + reservation id of a charge-point-wide reservation | OC-R-057 |
-| connectors | one or more connector states | OC-R-057 |
+| Field | View label | Notes | Req |
+|---|---|---|---|
+| model, vendor, firmware version, serial number | `Model`, `Vendor`, `Firmware Version`, `Serial Number` | boot identity, sent in `BootNotification` | OC-R-057, OC-R-103, SC-R-085 |
+| ICCID, IMSI, meter serial number, meter type (1.6 only) | `ICCID`, `IMSI`, `Meter Serial Number`, `Meter Type` | optional identity, sent in `BootNotification` only when non-empty; no 2.x equivalent | OC-R-104, OC-R-142, SC-R-085 |
+| configuration / variable store | — | list of `(key, value, readonly)`; answers `GetConfiguration` (1.6) / `GetVariables` (2.x), mutated by `ChangeConfiguration` / `SetVariables`. Seeded from the device config, or the version's built-in defaults when empty | OC-R-057, OC-R-066 |
+| heartbeat interval | — | seconds, from the CSMS's `BootNotification` response. Unset until a boot round-trips | OC-R-057 |
+| reservation | `Reserved RFID`, `Reservation ID` | id tag + reservation id of a charge-point-wide reservation | OC-R-057, SC-R-085 |
+| connectors | — | one or more connector states | OC-R-057 |
 
 ### Connector level
 
-| Field | Notes | Req |
-|---|---|---|
-| connector id (1.6) / EVSE id + connector id (2.x) | addressing | OC-R-058 |
-| phases, voltage, 3× current, power, frequency | metering, fed into `MeterValues` | OC-R-058 |
-| total energy, session energy, state of charge, temperature | metering | OC-R-058 |
-| status | the version's connector/EVSE status enum | OC-R-058, OC-R-122 |
-| RFID tag | id tag this connector presents | OC-R-058 |
-| transaction | 1.6: integer id assigned by the CSMS. 2.x: locally minted string id plus sequence counter and *confirmed* flag | OC-R-058, OC-R-070 |
-| charging limits | one per charging-profile purpose (transaction, default, maximum, and — 2.x only — external constraints), each with its own rate unit | OC-R-058 |
-| reservation | id tag + reservation id of a connector-level reservation | OC-R-058 |
+| Field | View label | Notes | Req |
+|---|---|---|---|
+| connector id (1.6) / EVSE id + connector id (2.x) | `Connector ID`; 2.x also `EVSE ID` | addressing | OC-R-058, SC-R-085 |
+| phases, voltage, 3× current, power, frequency | `Used Phases`, `Voltage`, `Current L1`, `Current L2`, `Current L3`, `Power`, `Frequency` | metering, fed into `MeterValues` | OC-R-058, SC-R-085 |
+| total energy, session energy, state of charge, temperature | `Total Energy`, `Session Energy`, `State of Charge`, `Temperature` | metering | OC-R-058, SC-R-085 |
+| status | `Status` | the version's connector/EVSE status enum | OC-R-058, OC-R-122, SC-R-085 |
+| RFID tag | `RFID` | id tag this connector presents | OC-R-058, SC-R-085 |
+| transaction | — | 1.6: integer id assigned by the CSMS. 2.x: locally minted string id plus sequence counter and *confirmed* flag | OC-R-058, OC-R-070 |
+| charging limits | `Charge Limit`, `Default Charge Limit`, `Max Charge Limit`; 2.x also `External Charge Limit` | one per charging-profile purpose (transaction, default, maximum, and — 2.x only — external constraints), each with its own rate unit | OC-R-058, SC-R-085 |
+| reservation | `Reserved RFID`, `Reservation ID` | id tag + reservation id of a connector-level reservation | OC-R-058, SC-R-085 |
 
 ### Level semantics
 
@@ -163,6 +163,17 @@ The CSMS is not configured with a station topology; it **observes** one.
 | transaction ids | minted by the CSMS, unique per server instance, monotonic from 1 | OC-R-070 |
 
 Observed state is transient: discarded on `:stop` and `:restart`, never persisted to the device config (only RFID accept-lists are) (OC-R-084).
+
+Observed state fields, by the label the CSMS view's state and metering tables show — the `C_OCPP` field names on the server shape (SC-R-085):
+
+| Level | View label | Versions | Req |
+|---|---|---|---|
+| station | `Model`, `Vendor`, `FirmwareVersion`, `SerialNumber`, `LastHeartbeat` | all | SC-R-085 |
+| station | `Iccid` | 1.6 | SC-R-085 |
+| connector | `ConnectorId`, `Phases` | 1.6 | SC-R-085 |
+| connector | `EvseId` | 2.x | SC-R-085 |
+| connector | `Status`, `Rfid`, `TransactionId`, `ChargeLimit`, `DefaultChargeLimit`, `MaxChargeLimit`, `Voltage`, `CurrentL1`, `CurrentL2`, `CurrentL3`, `Power`, `Frequency`, `TotalEnergy`, `SessionEnergy`, `Soc`, `Temperature` | all | SC-R-085 |
+| connector | `ExternalChargeLimit` | 2.x | SC-R-085 |
 
 ### RFID accept-list semantics
 

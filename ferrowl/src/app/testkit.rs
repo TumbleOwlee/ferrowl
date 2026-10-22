@@ -97,6 +97,9 @@ impl ModuleHost for MockHost {
     fn register_access(&self) -> Option<Arc<dyn RegisterAccess>> {
         None
     }
+    fn connection_status(&self) -> ferrowl_lua::module::ConnectionStatus {
+        ferrowl_lua::module::ConnectionStatus::Disconnected
+    }
     fn ocpp_accessor(&self, _lua: &Lua, _guard: OcppGuard) -> LuaResult<Option<AnyUserData>> {
         Ok(None)
     }

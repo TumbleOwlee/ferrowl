@@ -143,6 +143,8 @@ or rendering. Modbus and OCPP are architecturally separate: there is no shared
 `Instance<T>`-style lifecycle abstraction spanning both, and a pattern in one does
 not necessarily transfer to the other.
 
+Each module's view publishes its displayed connection status into a shared atomic cell on every refresh tick, and that module's sim threads and session accessors read it from there.
+
 The precise concurrency guarantees per module type are specified in
 [`docs/specs/modbus/`](./docs/specs/modbus/) and
 [`docs/specs/scripting/`](./docs/specs/scripting/).

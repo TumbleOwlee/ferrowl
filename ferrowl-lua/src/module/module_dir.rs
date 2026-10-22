@@ -7,10 +7,58 @@
 //! runtime — a handle obtained before a removal simply starts erroring afterwards instead of
 //! reading stale state.
 
-use crate::module::{Has, OcppGuard, Read, RegisterModule, ValueType, Write};
+use crate::module::docs::{CONNECTION_STATUS, MethodDoc, arg, method};
+use crate::module::{
+    ConnectionStatus, Has, OcppGuard, Read, RegisterModule, StatusSource, ValueType, Write,
+};
 use ferrowl_lua_derive::Module;
 use mlua::{AnyUserData, Lua, Result, UserData, UserDataMethods};
 use std::sync::Arc;
+
+/// Help entries for `C_Module`.
+pub(crate) const DIR_DOCS: &[MethodDoc] = &[
+    method(
+        "List",
+        &[],
+        "string[]",
+        "sorted names of every module in the session",
+    ),
+    method(
+        "Get",
+        &[arg("name", "string")],
+        "ModuleHandle",
+        "resolve a module by name to a handle (raises if unknown)",
+    ),
+];
+
+/// Help entries for a [`ModuleHandle`].
+pub(crate) const HANDLE_DOCS: &[MethodDoc] = &[
+    method(
+        "Type",
+        &[],
+        "string",
+        "module kind, e.g. \"modbus\" or \"ocpp\"",
+    ),
+    method(
+        "Role",
+        &[],
+        "string",
+        "module role, e.g. \"client\" or \"server\"",
+    ),
+    method(
+        "Register",
+        &[],
+        "C_Register",
+        "C_Register-shaped accessor (modbus modules only)",
+    ),
+    method(
+        "OCPP",
+        &[],
+        "C_OCPP",
+        "C_OCPP-shaped accessor (ocpp modules only)",
+    ),
+    CONNECTION_STATUS,
+];
 
 /// Register read/write/has access of a modbus module, type-erased.
 pub trait RegisterAccess: Read + Write + Has + Send + Sync {}
@@ -29,6 +77,8 @@ pub trait ModuleHost: Send + Sync {
     fn instance_id(&self) -> u64;
     /// Register access for a modbus module, `None` for any other kind.
     fn register_access(&self) -> Option<Arc<dyn RegisterAccess>>;
+    /// The module's displayed connection status at this moment.
+    fn connection_status(&self) -> ConnectionStatus;
     /// Builds the role-shaped `C_OCPP` accessor userdata for an ocpp module, running `guard`
     /// before every method; `Ok(None)` for any other kind.
     fn ocpp_accessor(&self, lua: &Lua, guard: OcppGuard) -> Result<Option<AnyUserData>>;
@@ -88,14 +138,22 @@ struct LiveRegister {
 }
 
 impl LiveRegister {
-    fn access(&self) -> Result<Arc<dyn RegisterAccess>> {
-        let host = self
-            .directory
+    fn host(&self) -> Result<Arc<dyn ModuleHost>> {
+        self.directory
             .resolve(&self.name)
-            .ok_or_else(|| mlua::Error::RuntimeError(format!("unknown module '{}'", self.name)))?;
-        host.register_access().ok_or_else(|| {
+            .ok_or_else(|| mlua::Error::RuntimeError(format!("unknown module '{}'", self.name)))
+    }
+
+    fn access(&self) -> Result<Arc<dyn RegisterAccess>> {
+        self.host()?.register_access().ok_or_else(|| {
             mlua::Error::RuntimeError(format!("module '{}' is not a modbus module", self.name))
         })
+    }
+}
+
+impl StatusSource for LiveRegister {
+    fn connection_status(&self) -> Result<ConnectionStatus> {
+        Ok(self.host()?.connection_status())
     }
 }
 
@@ -140,6 +198,9 @@ impl UserData for ModuleHandle {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("Type", |_, this, ()| Ok(this.resolve()?.kind()));
         methods.add_method("Role", |_, this, ()| Ok(this.resolve()?.role()));
+        methods.add_method("ConnectionStatus", |_, this, ()| {
+            Ok(this.resolve()?.connection_status())
+        });
         methods.add_method("Register", |lua, this, ()| {
             let host = this.resolve()?;
             if host.register_access().is_none() {
@@ -225,6 +286,9 @@ mod tests {
         fn register_access(&self) -> Option<Arc<dyn RegisterAccess>> {
             Some(Arc::new(self.rw.clone()))
         }
+        fn connection_status(&self) -> ConnectionStatus {
+            self.rw.connection_status().unwrap()
+        }
         fn ocpp_accessor(&self, _lua: &Lua, _guard: OcppGuard) -> Result<Option<AnyUserData>> {
             Ok(None)
         }
@@ -248,6 +312,9 @@ mod tests {
         }
         fn register_access(&self) -> Option<Arc<dyn RegisterAccess>> {
             None
+        }
+        fn connection_status(&self) -> ConnectionStatus {
+            self.handle.connection_status().unwrap()
         }
         fn ocpp_accessor(&self, lua: &Lua, guard: OcppGuard) -> Result<Option<AnyUserData>> {
             Ok(Some(lua.create_userdata(OcppClient::init_guarded(
@@ -624,5 +691,91 @@ mod tests {
         dir.insert("cs", ocpp(&handle, 7));
         ctx.call(&"set".to_string()).expect("held accessor follows");
         assert!(matches!(handle.get("Model"), Some(ValueType::String(s)) if s == "M"));
+    }
+
+    #[test]
+    /// SC-R-084 — a handle's `ConnectionStatus()` is resolved at call time, following the host now behind the name.
+    fn ut_module_handle_connection_status() {
+        let dir = Arc::new(MockDirectory::default());
+        let old = MockHost::default();
+        old.set_status(ConnectionStatus::Connected);
+        dir.insert("m", modbus(&old, 1));
+        let mut ctx = ctx_with(
+            &dir,
+            &[
+                ("hold", r#"h = C_Module:Get("m")"#),
+                ("use", r#"h:Register():Set("out", h:ConnectionStatus())"#),
+            ],
+        );
+        ctx.call(&"hold".to_string()).expect("hold");
+        ctx.call(&"use".to_string()).expect("use");
+        assert!(matches!(old.get("out"), Some(ValueType::String(s)) if s == "CONNECTED"));
+
+        let new = MockHost::default();
+        new.set_status(ConnectionStatus::Reconnecting);
+        dir.insert("m", modbus(&new, 2));
+        ctx.call(&"use".to_string()).expect("use again");
+        assert!(matches!(new.get("out"), Some(ValueType::String(s)) if s == "RECONNECTING"));
+    }
+
+    #[test]
+    /// SC-E-045 — `ConnectionStatus()` on a module removed after `Get` raises `unknown module`.
+    fn ut_module_handle_connection_status_after_removal() {
+        let dir = Arc::new(MockDirectory::default());
+        dir.insert("m", modbus(&MockHost::default(), 1));
+        let mut ctx = ctx_with(
+            &dir,
+            &[
+                ("hold", r#"h = C_Module:Get("m")"#),
+                ("use", r#"h:ConnectionStatus()"#),
+            ],
+        );
+        ctx.call(&"hold".to_string()).expect("hold");
+        dir.remove("m");
+        let err = ctx.call(&"use".to_string()).unwrap_err();
+        assert!(err.to_string().contains("unknown module 'm'"), "{err}");
+    }
+
+    #[test]
+    /// SC-R-082, SC-R-083 — a held `Register()` accessor's `ConnectionStatus()` resolves live: it follows a replaced host and raises once the module is removed.
+    fn ut_register_accessor_connection_status_resolves_live() {
+        let dir = Arc::new(MockDirectory::default());
+        let old = MockHost::default();
+        dir.insert("m", modbus(&old, 1));
+        let mut ctx = ctx_with(
+            &dir,
+            &[
+                ("hold", r#"r = C_Module:Get("m"):Register()"#),
+                ("use", r#"r:Set("out", r:ConnectionStatus())"#),
+                ("probe", r#"r:ConnectionStatus()"#),
+            ],
+        );
+        ctx.call(&"hold".to_string()).expect("hold");
+        let new = MockHost::default();
+        new.set_status(ConnectionStatus::Connected);
+        dir.insert("m", modbus(&new, 2));
+        ctx.call(&"use".to_string()).expect("use");
+        assert!(matches!(new.get("out"), Some(ValueType::String(s)) if s == "CONNECTED"));
+        dir.remove("m");
+        let err = ctx.call(&"probe".to_string()).unwrap_err();
+        assert!(err.to_string().contains("unknown module"), "{err}");
+    }
+
+    #[test]
+    fn ut_module_dir_docs_match_registered_methods() {
+        use crate::module::test_support::{documented, registered_methods};
+
+        let lua = mlua::Lua::new();
+        let dir = Arc::new(MockDirectory::default());
+        let directory = dir as Arc<dyn ModuleDirectory>;
+        let handle = lua
+            .create_userdata(ModuleHandle {
+                directory: directory.clone(),
+                name: "m".into(),
+            })
+            .unwrap();
+        assert_eq!(registered_methods(&handle), documented(&[HANDLE_DOCS], &[]));
+        let module = lua.create_userdata(ModuleDir::init(directory)).unwrap();
+        assert_eq!(registered_methods(&module), documented(&[DIR_DOCS], &[]));
     }
 }

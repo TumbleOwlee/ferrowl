@@ -34,6 +34,9 @@
 | **SC-E-019** | `C_OCPP` server `ChargingStation`/`Connector` for an unknown station/connector | returns `nil`; indexing that `nil` is the script's own error |
 | **SC-E-020** | `C_Module:Get` for an unknown/removed module | raises `unknown module '<name>'` |
 | **SC-E-021** | `ModuleHandle:Register()` on a non-modbus module / `:OCPP()` on a non-ocpp module | raises `is not a modbus module` / `is not an ocpp module` |
+| **SC-E-045** | `ModuleHandle:ConnectionStatus()` (SC-R-084) on a module removed after `C_Module:Get` | raises `unknown module '<name>'`, as every other `ModuleHandle` method (SC-E-020) |
+| **SC-E-046** | `C_OCPP` `Get`/`Set` with a name the view shows no label for at that scope, a former field name included | raises the unknown-field error; no alias is kept (SC-R-085) |
+| **SC-E-047** | `C_OCPP` `Get`/`Set` with a view label in different case or spacing (`"session energy"` for "Session Energy") | raises the unknown-field error (SC-R-085) |
 
 ---
 

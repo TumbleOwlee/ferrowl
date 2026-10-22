@@ -10,7 +10,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use ferrowl_lua::ContextBuilder;
-use ferrowl_lua::module::{Has, Read, RegisterModule, ValueType, Write};
+use ferrowl_lua::module::{
+    ConnectionStatus, Has, Read, RegisterModule, StatusSource, ValueType, Write,
+};
 
 const INFINITE_LOOP: &str = "while true do end";
 
@@ -22,6 +24,11 @@ struct RecordingHandle(Arc<Mutex<bool>>);
 impl Read for RecordingHandle {
     fn read(&self, _name: String) -> ferrowl_lua::Result<ValueType> {
         Ok(ValueType::Int(0))
+    }
+}
+impl StatusSource for RecordingHandle {
+    fn connection_status(&self) -> ferrowl_lua::Result<ConnectionStatus> {
+        Ok(ConnectionStatus::Disconnected)
     }
 }
 impl Has for RecordingHandle {

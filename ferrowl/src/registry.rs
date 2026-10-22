@@ -11,7 +11,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use parking_lot::RwLock;
 
 use ferrowl_lua::module::{
-    ModuleDirectory, ModuleHost, OcppClient, OcppGuard, OcppServer, RegisterAccess,
+    ConnectionStatus, ModuleDirectory, ModuleHost, OcppClient, OcppGuard, OcppServer,
+    RegisterAccess, StatusSource,
 };
 use mlua::{AnyUserData, Lua, Result as LuaResult};
 
@@ -20,6 +21,7 @@ use crate::module::modbus::{ModuleMemory, VirtualStore};
 use crate::module::ocpp::client::lua_sim::{ClientCsHandle, ClientFields, ScopedActionQueue};
 use crate::module::ocpp::server::lua::{ServerActionQueue, ServerHost, SharedServerStates};
 use crate::module::ocpp::server::view::ServerVersion;
+use crate::view::status_bar::StatusCell;
 
 /// Mints the identity of one module instance in the registry (SC-R-080).
 pub fn next_instance_id() -> u64 {
@@ -65,6 +67,7 @@ pub struct ModbusHost {
     pub registers: SharedRegisters,
     pub role: &'static str,
     pub instance_id: u64,
+    pub status: StatusCell,
 }
 
 impl ModuleHost for ModbusHost {
@@ -85,7 +88,14 @@ impl ModuleHost for ModbusHost {
             self.memory.clone(),
             self.virtual_store.clone(),
             self.registers.clone(),
+            self.status.clone(),
         )))
+    }
+
+    fn connection_status(&self) -> ConnectionStatus {
+        self.status
+            .connection_status()
+            .unwrap_or(ConnectionStatus::Disconnected)
     }
 
     fn ocpp_accessor(&self, _lua: &Lua, _guard: OcppGuard) -> LuaResult<Option<AnyUserData>> {
@@ -102,6 +112,7 @@ pub struct OcppClientEntry<S: ClientFields + Send + Sync + 'static> {
     pub state: Arc<parking_lot::RwLock<S>>,
     pub queue: ScopedActionQueue,
     pub instance_id: u64,
+    pub status: StatusCell,
 }
 
 impl<S: ClientFields + Send + Sync + 'static> ModuleHost for OcppClientEntry<S> {
@@ -121,8 +132,15 @@ impl<S: ClientFields + Send + Sync + 'static> ModuleHost for OcppClientEntry<S> 
         None
     }
 
+    fn connection_status(&self) -> ConnectionStatus {
+        self.status
+            .connection_status()
+            .unwrap_or(ConnectionStatus::Disconnected)
+    }
+
     fn ocpp_accessor(&self, lua: &Lua, guard: OcppGuard) -> LuaResult<Option<AnyUserData>> {
-        let handle = ClientCsHandle::new(self.state.clone(), self.queue.clone());
+        let handle =
+            ClientCsHandle::new(self.state.clone(), self.queue.clone(), self.status.clone());
         Ok(Some(lua.create_userdata(OcppClient::init_guarded(
             handle, guard,
         ))?))
@@ -138,6 +156,7 @@ pub struct OcppServerEntry<V: ServerVersion + Send + Sync + 'static> {
     pub states: SharedServerStates<V>,
     pub queue: ServerActionQueue,
     pub instance_id: u64,
+    pub status: StatusCell,
 }
 
 impl<V: ServerVersion + Send + Sync + 'static> ModuleHost for OcppServerEntry<V> {
@@ -157,8 +176,14 @@ impl<V: ServerVersion + Send + Sync + 'static> ModuleHost for OcppServerEntry<V>
         None
     }
 
+    fn connection_status(&self) -> ConnectionStatus {
+        self.status
+            .connection_status()
+            .unwrap_or(ConnectionStatus::Disconnected)
+    }
+
     fn ocpp_accessor(&self, lua: &Lua, guard: OcppGuard) -> LuaResult<Option<AnyUserData>> {
-        let host = ServerHost::new(self.states.clone(), self.queue.clone());
+        let host = ServerHost::new(self.states.clone(), self.queue.clone(), self.status.clone());
         Ok(Some(
             lua.create_userdata(OcppServer::init_guarded(host, guard))?,
         ))
@@ -221,6 +246,9 @@ mod tests {
         }
         fn register_access(&self) -> Option<Arc<dyn RegisterAccess>> {
             None
+        }
+        fn connection_status(&self) -> ConnectionStatus {
+            ConnectionStatus::Disconnected
         }
         fn ocpp_accessor(&self, _lua: &Lua, _guard: OcppGuard) -> LuaResult<Option<AnyUserData>> {
             Ok(None)
@@ -382,6 +410,7 @@ mod tests {
             registers: Arc::new(parking_lot::RwLock::new(registers)),
             role: "client",
             instance_id: next_instance_id(),
+            status: StatusCell::default(),
         };
 
         let registry = ModuleRegistry::new();
@@ -433,6 +462,7 @@ mod tests {
             state: state.clone(),
             queue: queue.clone(),
             instance_id: next_instance_id(),
+            status: StatusCell::default(),
         };
 
         let registry = ModuleRegistry::new();
@@ -496,6 +526,7 @@ mod tests {
             states: states.clone(),
             queue: queue.clone(),
             instance_id: next_instance_id(),
+            status: StatusCell::default(),
         };
 
         let registry = ModuleRegistry::new();
@@ -566,5 +597,45 @@ mod tests {
         registry.replace_all(HashMap::new());
         let err = ctx.call(&"probe".to_string()).unwrap_err();
         assert!(err.to_string().contains("unknown module"));
+    }
+
+    #[test]
+    /// SC-R-084 — each module host reports the status its view last published to its cell.
+    fn ut_entries_connection_status_reads_cell() {
+        use crate::module::ocpp::client::v1_6::state::CsState as Cs16;
+        use crate::view::status_bar::ConnStatus;
+        use ferrowl_ocpp::V1_6;
+
+        let modbus_cell = StatusCell::default();
+        let modbus = ModbusHost {
+            memory: evse_memory(),
+            virtual_store: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            registers: Arc::new(parking_lot::RwLock::new(HashMap::new())),
+            role: "client",
+            instance_id: next_instance_id(),
+            status: modbus_cell.clone(),
+        };
+        let client_cell = StatusCell::default();
+        let client = OcppClientEntry {
+            state: Arc::new(RwLock::new(Cs16::default())),
+            queue: Arc::new(parking_lot::Mutex::new(Default::default())),
+            instance_id: next_instance_id(),
+            status: client_cell.clone(),
+        };
+        let server_cell = StatusCell::default();
+        let server = OcppServerEntry::<V1_6> {
+            states: Arc::new(RwLock::new(Default::default())),
+            queue: Arc::new(parking_lot::Mutex::new(Default::default())),
+            instance_id: next_instance_id(),
+            status: server_cell.clone(),
+        };
+
+        assert_eq!(modbus.connection_status(), ConnectionStatus::Disconnected);
+        modbus_cell.publish(ConnStatus::Connected);
+        client_cell.publish(ConnStatus::Reconnecting);
+        server_cell.publish(ConnStatus::Connected);
+        assert_eq!(modbus.connection_status(), ConnectionStatus::Connected);
+        assert_eq!(client.connection_status(), ConnectionStatus::Reconnecting);
+        assert_eq!(server.connection_status(), ConnectionStatus::Connected);
     }
 }

@@ -191,6 +191,8 @@ Selection clamps at the ends (no wrap).
 
 Same navigation as ``### Keybind-help dialog (`?`)``. Reachable only from the code editor in Normal mode; in Insert/Visual `?` is literal text.
 
+Lists every method of the script's context with argument and return types, written `Name(arg: type, opt?: type) -> type` with Lua type names and `|` for unions; an entry wider than the name column has its description on the next line (UI-R-378, UI-R-379, UI-R-380, UI-R-381, UI-R-382, UI-R-383, UI-R-384).
+
 ### Script-manager dialog
 
 | Key | Context | Action | Req |
@@ -205,7 +207,7 @@ Same navigation as ``### Keybind-help dialog (`?`)``. Reachable only from the co
 | `Enter` | name input focused | Create a new script with the typed name | UI-R-058 |
 | `Enter` / `Space` | Templates button focused | Open the template-browser overlay | UI-R-052 |
 | `?` | script table focused | Open the script-table keybind-help overlay (`Esc`/`q`/`?` closes) | UI-R-056 |
-| `?` | code editor, Normal mode | Open the Lua-bindings help overlay | UI-R-056 |
+| `?` | code editor, Normal mode | Open the Lua-bindings help overlay | UI-R-378 |
 
 ### Template-browser overlay (Templates button in the script-manager dialog)
 

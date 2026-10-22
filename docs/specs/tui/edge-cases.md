@@ -333,3 +333,7 @@
 **UI-E-096** — The diff widget, the markdown measurement, the command-line widget and the editor dialog are library surface in the TUI crate with no use in any application view; each is exercised only by runnable examples and automated tests. Absence of a consumer is deliberate, not an oversight, as for the markdown input field (UI-E-077).
 
 **UI-E-109** — The file tree widget in the application: library surface with no consumer in any application view, exercised by the example and automated tests only, as UI-E-096 records for the diff widget, the markdown measurement, the command-line widget and the editor dialog.
+
+### Lua-bindings help omits field names
+
+**UI-E-173** — The Lua-bindings help overlay does not list the field names `C_OCPP` `Get`/`Set` accept; the names are the view's labels (SC-R-085), and listing every scope's fields would make the help very long.
