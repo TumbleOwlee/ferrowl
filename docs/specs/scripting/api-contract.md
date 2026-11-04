@@ -38,7 +38,7 @@ A script sees only the modules registered for its sim owner (`requirements.md` S
 
 ## Script triggers
 
-A script's `trigger` (`requirements.md` SC-R-086). Absent: the script runs every cycle (SC-R-014).
+A script's `trigger` (`requirements.md` SC-R-086). Absent: the script runs per its owner's cadence (SC-R-014, SC-R-044).
 
 | Field | Type | Default | Notes | Req |
 |---|---|---|---|---|
@@ -57,9 +57,9 @@ A script reads its trigger's arguments as the chunk's `...` (SC-R-003, SC-R-090)
 | none | — | — | SC-R-003 |
 | `register` | `local event = ...` | `name`, `old`, `new`, `source`, `seq`, `timestamp` | SC-R-090, MB-R-303 |
 
-- `old` and `new` are shaped as `C_Register:Get` returns them.
-- `source` is one of `remote`, `poll`, `set`, `lua`.
-- `timestamp` is milliseconds since the Unix epoch.
+- `old` and `new` are shaped as `C_Register:Get` returns them (MB-R-303).
+- `source` is one of `remote`, `poll`, `set`, `lua` (MB-R-303).
+- `timestamp` is milliseconds since the Unix epoch (MB-R-303).
 - An on-demand run passes no argument (SC-E-054).
 
 ---

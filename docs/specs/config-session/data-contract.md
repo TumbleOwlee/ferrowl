@@ -57,7 +57,7 @@ Session scripts and device-config scripts share this shape.
 | `name` | string | — (required) | script name | — |
 | `code` | string | empty | Lua source | — |
 | `enabled` | bool | `true` | runs in the sim loop. A flag-less entry is active | — |
-| `trigger` | optional table | unset | what runs the script besides the cycle; `kind` selects its shape: `register` with `registers` (name list or `all`) and `every_write`. Omitted when unset | SC-R-086, SC-R-097, CS-R-077, CS-R-080 |
+| `trigger` | optional table | unset | what runs the script instead of the cycle; `kind` selects its shape: `register` with `registers` (name list or `all`) and `every_write`. Omitted when unset | SC-R-086, SC-R-097, CS-R-077, CS-R-080 |
 
 ---
 

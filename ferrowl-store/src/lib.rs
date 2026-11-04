@@ -14,5 +14,5 @@ mod range;
 pub mod slice;
 
 pub use cell::{Access, Cell, CellKind, CellType, ValueRange};
-pub use memory::{Memory, MemoryError};
+pub use memory::{Memory, MemoryError, StoreWrite, WriteSource, WriteTap};
 pub use range::Range;

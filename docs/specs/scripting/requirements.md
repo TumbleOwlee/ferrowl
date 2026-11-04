@@ -170,7 +170,9 @@ Lua API surface and semantics owned here. The in-TUI code editor (vim-modal edit
 
 **SC-R-093** — A register write made by a script does not trigger that script, while every other script selecting that register fires.
 
-**SC-R-094** — The exclusion of SC-R-093 identifies a script by its owner (module or session) and name, and an on-demand run of a script counts as that script.
+**SC-R-094** — The exclusion of SC-R-093 identifies a script by its owner (module or session) and name.
+
+**SC-R-099** — An on-demand run of a script counts as that script under the exclusion of SC-R-093.
 
 **SC-R-095** — Each event script has a bounded event queue of a fixed 4096 events.
 
