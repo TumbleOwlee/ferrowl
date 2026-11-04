@@ -1,4 +1,4 @@
-version = "0.1.1"
+version = "0.1.2"
 hosts = ["claude"]
 stack = "rust"
 main_branch = "main"
