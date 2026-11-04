@@ -1856,6 +1856,7 @@ mod tests {
         v.spec.reconnect = Some(true);
         v.device.script_interval = 0.02;
         v.device.scripts = vec![crate::config::script::ScriptDef {
+            trigger: None,
             name: "status".into(),
             code: r#"C_Log:Info("status=" .. C_OCPP:ConnectionStatus())"#.into(),
             enabled: true,
@@ -2031,6 +2032,7 @@ mod tests {
     ) -> ClientView<V> {
         let mut v = client_view::<V>(version, port);
         v.device.scripts = vec![crate::config::script::ScriptDef {
+            trigger: None,
             name: "count".into(),
             code: code.into(),
             enabled: true,

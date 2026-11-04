@@ -19,7 +19,7 @@ use ferrowl_lua::module::{ModuleDirectory, ModuleHost};
 use crate::app::{Level, LogRing};
 use crate::cli::RunArgs;
 use crate::config::ocpp::OcppRole;
-use crate::config::script::ScriptDef;
+use crate::config::script::{ScriptDef, SessionTrigger};
 use crate::config::{self, OcppModuleSpec, OcppSpec, Role};
 use crate::module::modbus::ModbusModule as Module;
 use crate::module::modbus::view::ModbusModuleView;
@@ -213,12 +213,14 @@ fn build_registry(modules: &[RunModule]) -> ModuleRegistry {
     registry
 }
 
+type SessionScripts = (Vec<ScriptDef<SessionTrigger>>, Duration);
+
 /// Aggregate every `--session` file's session-level Lua scripts and cycle interval into one
 /// config, or `None` when no session file carries any script (including the single-module
 /// `--module`/`--ocpp` path, which has no session file at all). Scripts from multiple session
 /// files are concatenated in file order; the interval is the last session file's, matching the
 /// TUI's `session_sim_config` rule so both entry points resolve multi-file sessions identically.
-fn load_session_scripts(args: &RunArgs) -> Result<Option<(Vec<ScriptDef>, Duration)>, String> {
+fn load_session_scripts(args: &RunArgs) -> Result<Option<SessionScripts>, String> {
     let mut scripts = Vec::new();
     let mut interval = None;
     for path in &args.sessions {
@@ -564,6 +566,7 @@ mod tests {
             version: None,
             modules: vec![],
             scripts: vec![ScriptDef {
+                trigger: None,
                 name: "a".into(),
                 code: String::new(),
                 enabled: true,
@@ -574,6 +577,7 @@ mod tests {
             version: None,
             modules: vec![],
             scripts: vec![ScriptDef {
+                trigger: None,
                 name: "b".into(),
                 code: String::new(),
                 enabled: false,
@@ -670,6 +674,7 @@ mod tests {
             version: None,
             modules: vec![module_value],
             scripts: vec![ScriptDef {
+                trigger: None,
                 name: "s".to_string(),
                 code: r#"C_Module:Get("m"):Register():Set("value", 42); C_Log:Info("session-script-ran")"#
                     .to_string(),
@@ -1253,6 +1258,7 @@ mod tests {
             version: None,
             modules: vec![],
             scripts: vec![ScriptDef {
+                trigger: None,
                 name: "boom".into(),
                 code: "error(\"boom\")".into(),
                 enabled: true,

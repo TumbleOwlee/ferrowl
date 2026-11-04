@@ -11,7 +11,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use crate::app::Level;
-use crate::config::script::ScriptDef;
+use crate::config::script::{ModbusTrigger, ScriptList};
 use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
 use crate::dialog::close_confirm::CloseConfirmEvent;
 use crate::dialog::lua_help::LuaBindings;
@@ -25,7 +25,7 @@ use crate::module::modbus::table::{Definition, TableView, cmp_definitions};
 use crate::module::type_descriptor::SetupView;
 use crate::module::view::{
     CommandDescriptor, CommandFuture, CommandResult, CommandSpec, ModuleView, RefreshFuture,
-    SharedLog, StopOutcome, parse_command,
+    SetScriptsError, SharedLog, StopOutcome, parse_command,
 };
 
 use super::ModbusModule;
@@ -54,7 +54,7 @@ enum ModbusViewOverlay {
     #[overlay(focus_cycle)]
     Settings(Box<ModuleSettingsDialog>),
     /// Lua scripts editor (routes every key through its own `handle_events`).
-    Scripts(Box<ScriptDialog>),
+    Scripts(Box<ScriptDialog<ModbusTrigger>>),
 }
 
 ferrowl_ui::impl_overlay_keys!(SetupDialog, ModuleSettingsDialog);
@@ -1140,15 +1140,15 @@ impl ModuleView for ModbusModuleView {
         Some(v)
     }
 
-    fn scripts(&self) -> Option<&[ScriptDef]> {
-        Some(&self.device.scripts)
+    fn script_list(&self) -> Option<ScriptList> {
+        Some(ScriptList::Modbus(self.device.scripts.clone()))
     }
 
-    fn set_scripts(&mut self, scripts: Vec<ScriptDef>) -> bool {
-        self.device.scripts = scripts;
+    fn set_script_list(&mut self, scripts: ScriptList) -> Result<(), SetScriptsError> {
+        self.device.scripts = scripts.into_modbus().map_err(SetScriptsError::Mismatch)?;
         self.module
             .reload_scripts(super::registers::collect_scripts(&self.device));
-        true
+        Ok(())
     }
 
     fn set_serial_paths(&mut self, registry: super::SerialPathRegistry) {
@@ -1681,6 +1681,7 @@ mod tests {
         // (which shows executed output) and never from the code editor pane (which shows the
         // source verbatim).
         device.scripts = vec![ScriptDef {
+            trigger: None,
             name: "s1".into(),
             code: r#"print("ui" .. "-r-088-out") C_Log:Info("ui" .. "-r-088-log") error("ui" .. "-r-088-boom")"#
                 .into(),
@@ -3959,6 +3960,7 @@ mod tests {
             },
         );
         device.scripts = vec![ScriptDef {
+            trigger: None,
             name: "count".into(),
             code: r#"n = (n or 0) + 1; C_Register:Set("marker", n)"#.into(),
             enabled: true,
@@ -4063,11 +4065,13 @@ mod tests {
     #[tokio::test]
     async fn ut_clone_setup_matches_edit_prefill_and_round_trips() {
         let mut view = new_view();
-        view.set_scripts(vec![ScriptDef {
+        view.set_script_list(crate::config::script::ScriptList::Modbus(vec![ScriptDef {
+            trigger: None,
             name: "s".into(),
             code: "-- x".into(),
             enabled: true,
-        }]);
+        }]))
+        .unwrap();
         let base = std::path::Path::new(".");
         let before = view.session_spec(base);
 
@@ -4098,8 +4102,11 @@ mod tests {
 
         assert_clone_round_trips(&view);
         let (_, factory) = view.clone_setup("x-2").confirm().unwrap();
-        assert_eq!(factory().scripts(), Some(&[][..]));
-        assert_eq!(view.scripts().map(<[_]>::len), Some(1));
+        assert_eq!(
+            factory().script_list(),
+            Some(crate::config::script::ScriptList::Modbus(Vec::new()))
+        );
+        assert_eq!(view.script_list().map(|l| l.len()), Some(1));
 
         assert_eq!(view.session_spec(base), before);
         assert!(!view.overlay.is_active());

@@ -1093,7 +1093,7 @@ mod tests {
     /// One fixed U16 "marker" register (address 0) plus `scripts` (global Lua scripts, as loaded
     /// from a device config's `scripts` list).
     fn device_with_script(
-        scripts: Vec<crate::config::script::ScriptDef>,
+        scripts: Vec<crate::config::script::ScriptDef<crate::config::script::ModbusTrigger>>,
     ) -> crate::config::DeviceConfig {
         use crate::config::DeviceConfig;
         use crate::config::device::{
@@ -1147,8 +1147,12 @@ mod tests {
         }
     }
 
-    fn script(code: &str, enabled: bool) -> crate::config::script::ScriptDef {
+    fn script(
+        code: &str,
+        enabled: bool,
+    ) -> crate::config::script::ScriptDef<crate::config::script::ModbusTrigger> {
         crate::config::script::ScriptDef {
+            trigger: None,
             name: "sim".to_string(),
             code: code.to_string(),
             enabled,
@@ -1520,6 +1524,7 @@ if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
     fn ut_sim_keeps_running_after_register_delete() {
         use super::ModbusModule;
         let def = |name: &str, code: &str| crate::config::script::ScriptDef {
+            trigger: None,
             name: name.to_string(),
             code: code.to_string(),
             enabled: true,

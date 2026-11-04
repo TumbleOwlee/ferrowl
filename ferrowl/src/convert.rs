@@ -409,6 +409,13 @@ mod tests {
         );
         assert!(nested.contains("line 2"), "{nested}");
         assert!(!nested.contains("key path"), "{nested}");
+        let truncated = load_text(
+            "truncated.json",
+            "{\"items\": [\n{\"count\": 1},\n{\"count\":",
+            FileType::Json,
+        );
+        assert!(truncated.contains("line 3"), "{truncated}");
+        assert!(!truncated.contains("key path"), "{truncated}");
     }
 
     /// A unique `~/<name>` string plus the real, joined `PathBuf` it should expand to, for

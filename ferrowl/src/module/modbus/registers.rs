@@ -247,16 +247,19 @@ mod tests {
         let device = crate::config::DeviceConfig {
             scripts: vec![
                 ScriptDef {
+                    trigger: None,
                     name: "a".into(),
                     code: "x=1".into(),
                     enabled: true,
                 },
                 ScriptDef {
+                    trigger: None,
                     name: "disabled".into(),
                     code: "y=2".into(),
                     enabled: false,
                 },
                 ScriptDef {
+                    trigger: None,
                     name: "blank".into(),
                     code: "   ".into(),
                     enabled: true,

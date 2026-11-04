@@ -5,7 +5,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use crate::app::{Level, LogRing};
-use crate::config::script::ScriptDef;
+use crate::config::script::{ScriptList, TriggerMismatch};
 use crate::module::type_descriptor::SetupView;
 
 /// Generic log channel shared between a [`ModuleView`] and the owning [`Tab`].
@@ -19,6 +19,13 @@ pub enum CommandResult {
     Handled(Option<(Level, String)>),
     /// Command is not known to this module.
     Unhandled,
+}
+
+/// Why a module refused a script list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SetScriptsError {
+    Unsupported,
+    Mismatch(TriggerMismatch),
 }
 
 /// One entry in a module's command help list.
@@ -166,14 +173,15 @@ pub trait ModuleView: SetFocus + IsFocus {
     }
 
     /// The module's Lua script list, or `None` when the module has no script support.
-    fn scripts(&self) -> Option<&[ScriptDef]> {
+    fn script_list(&self) -> Option<ScriptList> {
         None
     }
 
     /// Replace the module's script list and apply it to any running sim the same way
-    /// the script dialog does. Returns `false` when unsupported.
-    fn set_scripts(&mut self, _scripts: Vec<ScriptDef>) -> bool {
-        false
+    /// the script dialog does. A list holding a trigger the module cannot take changes
+    /// nothing.
+    fn set_script_list(&mut self, _scripts: ScriptList) -> Result<(), SetScriptsError> {
+        Err(SetScriptsError::Unsupported)
     }
 
     /// MB-R-150 — attach this session's live Rtu/Ascii path-conflict registry. Default: no-op —

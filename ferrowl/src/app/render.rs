@@ -12,6 +12,7 @@ use ratatui::{
 
 use ferrowl_ui::state::TabBarState;
 
+use crate::config::script::SessionTrigger;
 use crate::dialog::scripts::ScriptDialog;
 use crate::module::view::CommandDescriptor;
 use crate::view::command::CommandLine;
@@ -47,7 +48,7 @@ pub(super) fn render(
     focus: Focus,
     command: &mut CommandLine,
     overlay: Option<&mut Overlay>,
-    session_dialog: Option<&mut ScriptDialog>,
+    session_dialog: Option<&mut ScriptDialog<SessionTrigger>>,
     help_open: bool,
     help_scroll: &mut u16,
 ) {

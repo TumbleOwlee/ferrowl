@@ -30,7 +30,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
 use super::{App, Level, LogRing};
-use crate::config::script::ScriptDef;
+use crate::config::script::ScriptList;
 use crate::module::modbus::SerialPathRegistry;
 use crate::module::type_descriptor::{ModuleViewFactory, SetupView};
 use crate::module::view::{
@@ -190,6 +190,8 @@ pub(crate) struct MockView {
     session_spec: Option<serde_json::Value>,
     device_for_spec: Option<String>,
     replacement: Option<Box<dyn ModuleView>>,
+    /// The list `script_list()` reports, as a copy source in tests.
+    script_list: Option<ScriptList>,
     host_kind: Option<&'static str>,
     host_changed: bool,
     refreshes: Arc<AtomicUsize>,
@@ -248,6 +250,7 @@ impl MockView {
             session_spec: None,
             device_for_spec: None,
             replacement: None,
+            script_list: None,
             host_kind: None,
             host_changed: false,
             refreshes,
@@ -354,6 +357,11 @@ impl MockView {
     /// `:write` target directory, mirroring a real view's `device` field.
     pub(super) fn with_device(mut self, device: &str) -> Self {
         self.device_for_spec = Some(device.to_string());
+        self
+    }
+
+    pub(super) fn with_script_list(mut self, scripts: ScriptList) -> Self {
+        self.script_list = Some(scripts);
         self
     }
 
@@ -501,8 +509,8 @@ impl ModuleView for MockView {
         self.replacement.take()
     }
 
-    fn scripts(&self) -> Option<&[ScriptDef]> {
-        None
+    fn script_list(&self) -> Option<ScriptList> {
+        self.script_list.clone()
     }
 
     fn module_host(&self) -> Option<Arc<dyn ModuleHost>> {

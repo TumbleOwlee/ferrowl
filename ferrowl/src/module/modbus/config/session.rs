@@ -2,7 +2,7 @@
 //! endpoint/role/name). Used by `--session <file>`; a single instance is also built from
 //! `--module key=val` on the CLI.
 
-use crate::config::script::ScriptDef;
+use crate::config::script::{ScriptDef, SessionTrigger};
 use serde::{Deserialize, Serialize};
 
 /// A pre-configured set of module instances.
@@ -20,7 +20,7 @@ pub struct Session {
     /// Session-level Lua scripts, run in their own Lua state with `C_Module` access to every
     /// module in the session. Older session files without this field load as empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub scripts: Vec<ScriptDef>,
+    pub scripts: Vec<ScriptDef<SessionTrigger>>,
     /// Session sim cycle interval in seconds. Older session files without this field load as
     /// the default (1.0s).
     #[serde(default = "default_interval")]
@@ -321,6 +321,7 @@ mod tests {
                 },
             ],
             scripts: vec![ScriptDef {
+                trigger: None,
                 name: "s1".into(),
                 code: "C_Time:Sleep(1)".into(),
                 enabled: true,

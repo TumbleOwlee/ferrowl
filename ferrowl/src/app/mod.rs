@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 
 use ferrowl_ui::state::TabBarState;
 
-use crate::config::script::ScriptDef;
+use crate::config::script::{ScriptDef, SessionTrigger};
 use crate::dialog::scripts::ScriptDialog;
 use crate::module::type_descriptor::SetupView;
 use crate::module::type_select::TypeSelectDialog;
@@ -319,11 +319,11 @@ pub struct App<S: DrawSurface = AlternateScreen<Stdout>> {
     /// runs.
     serial_paths: crate::module::modbus::SerialPathRegistry,
     /// The `:session` dialog, if open.
-    session_dialog: Option<Box<ScriptDialog>>,
+    session_dialog: Option<Box<ScriptDialog<SessionTrigger>>>,
     /// Current session-level Lua scripts and sim-cycle interval, applied to `session_sim` and
     /// written by `:session` (edited) and `save_session` (persisted). Loaded at startup from the
     /// session file(s) passed on the command line, if any.
-    session_scripts: Vec<ScriptDef>,
+    session_scripts: Vec<ScriptDef<SessionTrigger>>,
     session_interval: Duration,
     /// Log the session sim writes to, shown at the bottom of the `:session` dialog.
     session_log: SharedLog,
@@ -347,7 +347,7 @@ impl App<AlternateScreen<Stdout>> {
     /// Builds the app on the real terminal (raw mode, alternate screen).
     pub fn new(
         tabs: Vec<Tab>,
-        session_scripts: Vec<ScriptDef>,
+        session_scripts: Vec<ScriptDef<SessionTrigger>>,
         session_interval: Duration,
     ) -> std::io::Result<Self> {
         Self::with_screen(
@@ -365,7 +365,7 @@ impl<S: DrawSurface> App<S> {
     pub(crate) fn with_screen(
         screen: S,
         tabs: Vec<Tab>,
-        session_scripts: Vec<ScriptDef>,
+        session_scripts: Vec<ScriptDef<SessionTrigger>>,
         session_interval: Duration,
     ) -> std::io::Result<Self> {
         let (overlay, focus) = if tabs.is_empty() {

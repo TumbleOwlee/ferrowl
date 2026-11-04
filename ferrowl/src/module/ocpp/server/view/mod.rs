@@ -34,7 +34,7 @@ use ferrowl_ocpp::Version;
 use ferrowl_ocpp::csms::{ConnectionId, CsmsActionHandler};
 
 use crate::app::LogRing;
-use crate::config::script::ScriptDef;
+use crate::config::script::{OcppTrigger, ScriptList};
 use crate::dialog::scripts::ScriptDialog;
 use crate::module::modbus::dialog::ConfirmDeleteDialog;
 use crate::module::ocpp::action_dialog::ActionDialog;
@@ -52,7 +52,7 @@ use crate::module::ocpp::server::lua::{ServerActionQueue, ServerStates, SharedSe
 use crate::module::ocpp::setup::OcppSetupView;
 use crate::module::ocpp::setup_dialog::OcppSetupDialog;
 use crate::module::type_descriptor::SetupView;
-use crate::module::view::{CommandDescriptor, CommandSpec, ModuleView, SharedLog};
+use crate::module::view::{CommandDescriptor, CommandSpec, ModuleView, SetScriptsError, SharedLog};
 use crate::view::status_bar::StatusCell;
 
 /// Build the runtime RFID store from a persisted device config (CS list + per-connector lists).
@@ -326,7 +326,7 @@ enum ServerOverlay {
     #[overlay(focus_cycle)]
     Setup(Box<OcppSetupDialog>),
     /// Lua scripts editor (routes every key through its own `handle_events()`).
-    Scripts(Box<ScriptDialog>),
+    Scripts(Box<ScriptDialog<OcppTrigger>>),
     /// Action send dialog: target connection/scope + the dialog (routes every key via `input()`).
     Action(Box<(ConnectionId, Scope, ActionDialog)>),
 }
@@ -561,14 +561,14 @@ where
         self.deferred.replacement.take()
     }
 
-    fn scripts(&self) -> Option<&[ScriptDef]> {
-        Some(&self.device.scripts)
+    fn script_list(&self) -> Option<ScriptList> {
+        Some(ScriptList::Ocpp(self.device.scripts.clone()))
     }
 
-    fn set_scripts(&mut self, scripts: Vec<ScriptDef>) -> bool {
-        self.device.scripts = scripts;
+    fn set_script_list(&mut self, scripts: ScriptList) -> Result<(), SetScriptsError> {
+        self.device.scripts = scripts.into_ocpp().map_err(SetScriptsError::Mismatch)?;
         self.start_sim();
-        true
+        Ok(())
     }
 
     fn module_host(&self) -> Option<std::sync::Arc<dyn ferrowl_lua::module::ModuleHost>> {

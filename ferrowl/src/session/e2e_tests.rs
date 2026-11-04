@@ -20,7 +20,7 @@ use ferrowl_store::{CellKind, Memory, Range};
 use ferrowl_test_support::wait_until_blocking;
 
 use crate::app::LOG_SIZE;
-use crate::config::script::ScriptDef;
+use crate::config::script::{ScriptDef, SessionTrigger};
 use crate::lua::SharedRegisters;
 use crate::module::modbus::VirtualStore;
 use crate::module::ocpp::client::lua_sim::OcppFields;
@@ -48,8 +48,9 @@ fn log_lines(log: &SharedLog) -> Vec<String> {
         .collect()
 }
 
-fn script(name: &str, code: &str) -> ScriptDef {
+fn script(name: &str, code: &str) -> ScriptDef<SessionTrigger> {
     ScriptDef {
+        trigger: None,
         name: name.to_string(),
         code: code.to_string(),
         enabled: true,

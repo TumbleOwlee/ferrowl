@@ -12,7 +12,7 @@ use ferrowl_lua::ContextBuilder;
 use ferrowl_lua::module::{LogModule, ModuleDirModule, ModuleDirectory, TestModule, TimeModule};
 
 use crate::app::Level;
-use crate::config::script::ScriptDef;
+use crate::config::script::{ScriptDef, SessionTrigger};
 use crate::lua::SimHandle;
 use crate::module::ocpp::client::lua_sim::{LuaLogSink, emit, sleep_responsive};
 use crate::module::view::SharedLog;
@@ -20,7 +20,7 @@ use crate::module::view::SharedLog;
 /// Owns the session-level Lua sim thread, restarting it whenever the script list or interval
 /// changes (globals reset on restart — intended). Stopped whenever no script is enabled.
 pub struct SessionSim {
-    scripts: Vec<ScriptDef>,
+    scripts: Vec<ScriptDef<SessionTrigger>>,
     interval: Duration,
     log: SharedLog,
     directory: Arc<dyn ModuleDirectory>,
@@ -41,7 +41,7 @@ impl SessionSim {
     }
 
     /// Replaces the script list and restarts the sim thread (stopped if none are enabled).
-    pub fn set_scripts(&mut self, scripts: Vec<ScriptDef>) {
+    pub fn set_scripts(&mut self, scripts: Vec<ScriptDef<SessionTrigger>>) {
         self.scripts = scripts;
         self.ensure();
     }
@@ -244,8 +244,9 @@ mod tests {
         dir as Arc<dyn ModuleDirectory>
     }
 
-    fn script(name: &str, code: &str) -> ScriptDef {
+    fn script(name: &str, code: &str) -> ScriptDef<SessionTrigger> {
         ScriptDef {
+            trigger: None,
             name: name.to_string(),
             code: code.to_string(),
             enabled: true,
@@ -281,6 +282,7 @@ mod tests {
         let log = log();
         let mut sim = SessionSim::new(directory, log);
         sim.set_scripts(vec![ScriptDef {
+            trigger: None,
             name: "s".into(),
             code: r#"C_Module:Get("m"):Register():Set("x", 1)"#.into(),
             enabled: false,
@@ -322,6 +324,7 @@ mod tests {
         );
 
         sim.set_scripts(vec![ScriptDef {
+            trigger: None,
             name: "s".into(),
             code: r#"C_Module:Get("m"):Register():Set("x", 1)"#.into(),
             enabled: false,
@@ -445,6 +448,7 @@ mod tests {
         let directory = directory_with_mock(rw.clone());
         let mut sim = SessionSim::new(directory, log());
         sim.set_scripts(vec![ScriptDef {
+            trigger: None,
             name: "s".into(),
             code: r#"C_Module:Get("m"):Register():Set("x", 5)"#.into(),
             enabled: false,
@@ -477,6 +481,7 @@ mod tests {
         // cannot race the assertion below.
         sim.set_interval(Duration::from_secs(60));
         sim.set_scripts(vec![ScriptDef {
+            trigger: None,
             name: "s".into(),
             code: r#"C_Module:Get("m"):Register():Set("x", 99)"#.into(),
             enabled: true,

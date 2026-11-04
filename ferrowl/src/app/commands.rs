@@ -4,7 +4,7 @@
 use crate::convert::{Converter, FileType};
 
 use crate::config::Session;
-use crate::module::view::CommandResult;
+use crate::module::view::{CommandResult, SetScriptsError};
 
 use super::{App, DrawSurface, Level};
 
@@ -159,7 +159,7 @@ impl<S: DrawSurface> App<S> {
             Err(e) => return (Level::Warning, e),
         };
         // Clone source list first; avoids a split borrow across tabs.
-        let Some(scripts) = self.tabs.titles[src].view.scripts().map(<[_]>::to_vec) else {
+        let Some(scripts) = self.tabs.titles[src].view.script_list() else {
             return (Level::Warning, format!("tab [{src}] has no script support"));
         };
         let n = scripts.len();
@@ -169,16 +169,16 @@ impl<S: DrawSurface> App<S> {
                 "active module has no script support".to_string(),
             );
         };
-        if tab.view.set_scripts(scripts) {
-            (
+        match tab.view.set_script_list(scripts) {
+            Ok(()) => (
                 Level::Info,
                 format!("Replaced scripts with {n} script(s) from tab [{src}]"),
-            )
-        } else {
-            (
+            ),
+            Err(SetScriptsError::Mismatch(e)) => (Level::Error, e.to_string()),
+            Err(SetScriptsError::Unsupported) => (
                 Level::Warning,
                 "active module has no script support".to_string(),
-            )
+            ),
         }
     }
 }
@@ -705,5 +705,107 @@ mod tests {
         assert!(active_log_lines(&app).await.iter().any(|(level, msg)| {
             *level == Level::Warning && msg == "Unknown command ':clone foo'"
         }));
+    }
+
+    fn triggered_modbus_script()
+    -> crate::config::script::ScriptDef<crate::config::script::ModbusTrigger> {
+        use crate::config::script::{AllMarker, ModbusTrigger, ScriptDef, Selection};
+        ScriptDef {
+            name: "on-write".into(),
+            code: "x = 1".into(),
+            enabled: true,
+            trigger: Some(ModbusTrigger::Register {
+                registers: Selection::All(AllMarker::All),
+                every_write: false,
+            }),
+        }
+    }
+
+    fn ocpp_client_tab() -> Box<dyn crate::module::view::ModuleView> {
+        use crate::module::ocpp::config::device::OcppDeviceConfig;
+        use crate::module::ocpp::config::session::{OcppProtocol, OcppRole, OcppSpec, OcppVersion};
+        let spec = OcppSpec {
+            name: "cs".into(),
+            version: OcppVersion::V1_6,
+            role: OcppRole::Client,
+            protocol: OcppProtocol::Ws,
+            ip: "127.0.0.1".into(),
+            port: 0,
+            path: String::new(),
+            timeout_ms: None,
+            reconnect: None,
+            security: Default::default(),
+        };
+        let mut device = OcppDeviceConfig::default();
+        device.scripts = vec![crate::config::script::ScriptDef {
+            name: "seeded".into(),
+            code: "y = 2".into(),
+            enabled: true,
+            trigger: None,
+        }];
+        Box::new(
+            crate::module::ocpp::client::ClientView::<ferrowl_ocpp::V1_6>::new(
+                spec,
+                String::new(),
+                device,
+            ),
+        )
+    }
+
+    #[tokio::test]
+    /// UI-E-174 — `:script copy` holding a script whose trigger does not fit the active tab logs
+    /// an error naming the script and leaves the tab's list unchanged.
+    async fn ut_script_copy_refuses_unfitting_trigger() {
+        use crate::config::script::ScriptList;
+        let (source, _h) = MockView::pair("source");
+        let source = source
+            .with_script_list(ScriptList::Modbus(vec![triggered_modbus_script()]))
+            .boxed();
+        let mut app = build_app(vec![source, ocpp_client_tab()]);
+        app.tabs.select_index(1);
+        let before = app.tabs.titles[1].view.script_list();
+        assert_eq!(before.as_ref().map(|l| l.len()), Some(1));
+        app.run_command("script copy 0").await;
+        let lines = active_log_lines(&app).await;
+        assert!(
+            lines
+                .iter()
+                .any(|(level, msg)| *level == Level::Error && msg.contains("on-write")),
+            "{lines:?}"
+        );
+        assert_eq!(app.tabs.titles[1].view.script_list(), before);
+    }
+
+    #[tokio::test]
+    /// UI-R-385 — `:script copy` carries each script's trigger when it fits the target tab.
+    async fn ut_script_copy_carries_fitting_trigger() {
+        use crate::config::script::ScriptList;
+        use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
+        use crate::module::modbus::ModbusModule;
+        use crate::module::modbus::view::ModbusModuleView;
+        let script = triggered_modbus_script();
+        let (source, _h) = MockView::pair("source");
+        let source = source
+            .with_script_list(ScriptList::Modbus(vec![script.clone()]))
+            .boxed();
+        let spec = ModuleSpec {
+            name: "target".into(),
+            device: String::new(),
+            role: Role::Server,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port: 5020,
+            },
+        };
+        let device = DeviceConfig::default();
+        let module = ModbusModule::new(&spec, &device);
+        let target = Box::new(ModbusModuleView::new(module, spec, device));
+        let mut app = build_app(vec![source, target]);
+        app.tabs.select_index(1);
+        app.run_command("script copy 0").await;
+        assert_eq!(
+            app.tabs.titles[1].view.script_list(),
+            Some(ScriptList::Modbus(vec![script]))
+        );
     }
 }
