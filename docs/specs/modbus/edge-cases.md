@@ -40,6 +40,27 @@
 
 ---
 
+## Register events
+
+| ID | Condition | Behavior |
+|---|---|---|
+| **MB-E-106** | Add/edit register dialog confirmed with an empty Value input re-encodes the register's stored value (MB-R-222) | no event |
+| **MB-E-107** | `:set` on a client's register that is not write-only (MB-R-158) | event produced when the following poll changes the store, with source poll |
+| **MB-E-119** | `:set` on a client's write-only register (MB-R-158) | event produced at once from its store update, with source `:set` |
+| **MB-E-108** | `:set` on a client's `ReadOnly` register (MB-R-159) | no event |
+| **MB-E-117** | Rejected write (MB-R-033) | no event |
+| **MB-E-118** | Seeding of a store at module build (MB-R-079, MB-R-080) | no event |
+| **MB-E-112** | `default` seeding of a register added or edited at runtime (MB-R-079, MB-R-080, MB-R-222) | no event |
+| **MB-E-113** | Modbus `:reload` builds a fresh store | its seeding produces no event, as under MB-E-118, while the sequence number continues (MB-R-304) |
+| **MB-E-114** | Non-empty Value input confirmed in the add/edit register dialog (MB-R-223) | produces its event as a `:set` does, with the same source |
+| **MB-E-109** | Lua write on a client to a polled register (SC-E-033) | one event for the write and another when the next poll restores the device's value |
+| **MB-E-110** | Fixed-address register write (SC-R-092) | its value has changed when the bits it decodes from differ, the words under its width and bit field |
+| **MB-E-115** | Virtual register write (SC-R-092) | its value has changed when its value differs, with NaN equal to itself |
+| **MB-E-111** | Words fail to decode | `nil` old or new value in the event |
+| **MB-E-116** | Virtual register's first write | `nil` old value in the event |
+
+---
+
 ## Client
 
 | ID | Condition | Behavior |

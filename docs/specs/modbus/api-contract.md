@@ -197,7 +197,7 @@ Same fields as `transport = "tcp"` (`## Modbus TCP connection config`).
 | `reconnect` | optional bool | `true` | client: auto-reconnect (MB-R-050–055); server: bind/serial-open/mid-serve retry (MB-R-130–134) | MB-R-050, MB-R-130, MB-R-087 |
 | `read_ranges` | `ReadRanges` | empty | explicit batched read windows (``### `read_ranges` ``) | MB-R-082, MB-R-083, MB-R-288, MB-R-293 |
 | `definitions` | map name → `RegisterDef` | — (required) | register table (``### `RegisterDef` ``) | MB-R-077 |
-| `scripts` | list | empty | Lua sim scripts — `scripting/` | SC-R-022 |
+| `scripts` | list | empty | Lua sim scripts — `scripting/` | SC-R-022, SC-R-086, SC-E-050 |
 | `script_interval` | f64 seconds | `1.0` | Lua sim cycle period; bounds and fallback in `scripting/` (SC-R-016, SC-R-045) | SC-R-016, SC-R-045 |
 
 Device-config timing defaults (`delay_ms` = 1000, `interval_ms` = 1000) are what an application-built module uses; they deliberately differ from the transport-level `0`.

@@ -65,11 +65,27 @@
 
 ---
 
+## Script triggers
+
+**SC-E-048** — Two scripts writing registers the other watches can trigger each other without end; this is not prevented and can end in the overflow outcome (SC-R-096).
+
+**SC-E-049** — A register trigger naming a register not defined at context build logs a Warn line, is not an error, and fires once a register of that name exists (SC-R-067, SC-R-068).
+
+**SC-E-050** — A trigger on a session script or an OCPP module script, or of any kind but register on a Modbus module script, is rejected at config load with a parse error locating the script by line and key path, never ignored silently.
+
+**SC-E-051** — A per-module trigger carrying a `module` key is rejected at config load, as under SC-E-050.
+
+**SC-E-052** — An empty name list in a register trigger (SC-R-091) loads, logs a Warn line at context build and never fires.
+
+**SC-E-054** — An on-demand run (SC-R-035) of a register-triggered script passes no argument, so a script reading its event argument sees `nil`.
+
+---
+
 ## Known limitations
 
 ### Execution ceiling — an infinite loop is interrupted mid-cycle
 
-**SC-E-032** — Every context installs an execution hook (SC-R-034, `every_nth_instruction` every 1,000 instructions) checking the stop flag (SC-R-046) and enforcing a fixed 1,000 ms wall-clock cap (SC-R-047). A script looping forever is interrupted the first time the hook fires after either condition is met: a pending stop-and-join (script edit, tab close, Modbus `:reload`, OCPP role or version change, app shutdown) makes the hook raise to unwind the runaway script, so the cycle ends and the join completes promptly — before this hook the stop flag was observed only *between* cycles, so a runaway script blocked any thread joining it, typically the UI thread; independent of any stop request, the 1,000 ms cap aborts a cycle (or on-demand run, SC-R-035) that runs long, bounding worst-case CPU pinning to just over the cap with no operator action. Both constants fixed (SC-R-034, SC-R-047), not configurable. No memory ceiling (SC-R-048): a script allocating without bound (ever-growing table) is not stopped — the hook checks instruction count and wall-clock only.
+**SC-E-032** — Every context installs an execution hook (SC-R-034, `every_nth_instruction` every 1,000 instructions) checking the stop flag (SC-R-046) and enforcing a fixed 1,000 ms wall-clock cap (SC-R-047). A script looping forever is interrupted the first time the hook fires after either condition is met: a pending stop-and-join (script edit, tab close, Modbus `:reload`, OCPP role or version change, app shutdown) makes the hook raise to unwind the runaway script, so the cycle ends and the join completes promptly — before this hook the stop flag was observed only *between* cycles, so a runaway script blocked any thread joining it, typically the UI thread; independent of any stop request, the 1,000 ms cap aborts a cycle, an event-triggered run (or on-demand run, SC-R-035) that runs long, bounding worst-case CPU pinning to just over the cap with no operator action. Both constants fixed (SC-R-034, SC-R-047), not configurable. No memory ceiling (SC-R-048): a script allocating without bound (ever-growing table) is not stopped — the hook checks instruction count and wall-clock only.
 
 ### Lua register writes are store-only (client)
 
@@ -79,13 +95,15 @@
 
 **SC-E-034** — A context stores scripts in a hash map and runs them in hash-iteration order, not definition order, not stable. Scripts must not depend on running before or after a sibling within a cycle.
 
+**SC-E-053** — One event selected by several scripts is delivered to each, with their relative order unspecified (SC-E-034).
+
 ### A fresh Lua state on every restart
 
 **SC-E-035** — Every script/interval edit rebuilds the context from scratch: no persistent Lua state across restarts or config reload. The only durable state is what a script writes into host register/OCPP state via `C_*`.
 
 ### No script return value, no scheduling primitives
 
-**SC-E-036** — A script is a nullary function whose return is ignored. No per-script scheduling beyond the context's single cycle interval, no timers, no callbacks, no cooperative yield or sleep; a script acting less often than every cycle must gate itself with `C_Time`.
+**SC-E-036** — A script is a function whose return is ignored, receiving the arguments its trigger defines (SC-R-090). Apart from its trigger (SC-R-086), a script has no per-script scheduling, no timers, no callbacks, no cooperative yield or sleep; a script with no trigger acting less often than every cycle must gate itself with `C_Time`.
 
 ### `C_Statics` is unreachable
 

@@ -22,7 +22,7 @@ Dispatch: first token matched against the generic set; not in the set → forwar
 | `:write [path]` | `:w`, `:s`, `:save` | optional output path (default `session.toml`) | Save all module instances plus session scripts/interval as a session file; format from extension (`.toml`/`.json`) | UI-R-017 |
 | `:swap <i> <j>` | — | two tab indices | Swap tabs `i` and `j` (no-op if equal or out of range); non-numeric rejected | UI-R-017 |
 | `:session` | — | — | Open the session-level Lua scripts + sim-interval dialog | UI-R-017 |
-| `:script copy <idx>` | — | source tab index | Replace the active tab's script list with tab `idx`'s; errors if `idx` missing, out of range, equals the active tab, or either tab lacks script support | UI-R-017 |
+| `:script copy <idx>` | — | source tab index | Replace the active tab's script list with tab `idx`'s; carries fitting triggers, refused on an unfitting one; errors if `idx` missing, out of range, equals the active tab, or either tab lacks script support | UI-R-017, UI-R-385, UI-E-174 |
 | `:log clear` | — | the literal `clear` | Clear the active tab's on-screen log ring | UI-R-017, UI-R-045 |
 
 - `:log` with **any argument other than `clear`** (including a path), and **bare `:log`**, are *not* generic — forwarded to the active view (``## Module (protocol-specific) `:` commands``), where `:log <file>` sets/clears the module's file sink.

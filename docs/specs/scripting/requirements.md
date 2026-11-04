@@ -16,7 +16,7 @@ Lua API surface and semantics owned here. The in-TUI code editor (vim-modal edit
 
 **SC-R-002** — The Lua API is synchronous and blocking: a `C_*` call completes before the script continues; no script can `await`, yield to, or interact with the host's async runtime.
 
-**SC-R-003** — A script is compiled into a callable function once, when loaded into a Lua context, and invoked with no arguments and no expected return on each execution.
+**SC-R-003** — A script is compiled into a callable function once, when loaded into a Lua context, and invoked with the arguments its trigger defines (SC-R-090), read in the body as the chunk's `...`, and no expected return on each execution.
 
 **SC-R-004** — A Lua context owns exactly one VM and a set of loaded scripts keyed by name. Every script in one context shares that context's single global environment.
 
@@ -52,11 +52,11 @@ Lua API surface and semantics owned here. The in-TUI code editor (vim-modal edit
 
 **SC-R-043** — SC-R-035's on-demand single-script execution runs on its own short-lived thread, neither gated on the sim-thread condition of SC-R-011 nor counted as a sim thread.
 
-**SC-R-012** — A sim thread is controlled by a stop flag observed between cycles and, during a cycle, at each firing of the execution hook (SC-R-034, SC-R-046). Setting the flag and joining stops the sim; the sim handle's destruction also stops and joins.
+**SC-R-012** — A sim thread is controlled by a stop flag observed between cycles, between event-triggered runs and, during a cycle or run, at each firing of the execution hook (SC-R-034, SC-R-046). Setting the flag and joining stops the sim; the sim handle's destruction also stops and joins.
 
-**SC-R-013** — Within each cycle the thread sleeps up to the cycle interval in small chunks, re-checking the stop flag between chunks.
+**SC-R-013** — Within each cycle the thread sleeps up to the cycle interval in small chunks, re-checking the stop flag between chunks, and ends the sleep early when an event is queued.
 
-**SC-R-014** — A per-module Modbus sim and the session-level sim run **every** enabled script on **every** cycle, so a script's observable cadence is approximately one execution per cycle interval.
+**SC-R-014** — A per-module Modbus sim and the session-level sim run **every** enabled script with no trigger on **every** cycle, so such a script's observable cadence is approximately one execution per cycle interval.
 
 **SC-R-044** — A per-module OCPP sim runs each enabled script at most once per cycle interval, skipping any that ran more recently than the interval, so a script's observable cadence is approximately one execution per cycle interval, as under SC-R-014.
 
@@ -124,7 +124,7 @@ Lua API surface and semantics owned here. The in-TUI code editor (vim-modal edit
 
 ## Script lifecycle
 
-**SC-R-022** — A script is defined by a name, a code body (default empty), and an enabled flag (default enabled).
+**SC-R-022** — A script is defined by a name, a code body (default empty), an enabled flag (default enabled), and a trigger (default none).
 
 **SC-R-061** — Every enabled script (SC-R-022) is handed to a sim thread; the code body is not a selection criterion.
 
@@ -145,6 +145,36 @@ Lua API surface and semantics owned here. The in-TUI code editor (vim-modal edit
 **SC-R-025** — Legacy per-register `update` snippets in an older Modbus device config are migrated on load into named, enabled entries in the module's script list, preserving code.
 
 **SC-R-026** — A Modbus module's sim runs independently of the network instance's connection state.
+
+**SC-R-097** — A script with no trigger field in its config loads with no trigger, including one migrated from a legacy `update` snippet (SC-R-025) or copied from a template (SC-R-064).
+
+**SC-R-098** — Editing a script's name, code or enabled flag in the script-manager dialog (UI-R-051) keeps its trigger.
+
+---
+
+## Script triggers
+
+**SC-R-086** — A script's trigger is one of: none, register event.
+
+**SC-R-087** — An event-triggered script runs as soon as the sim thread is free, without waiting for the cycle interval.
+
+**SC-R-088** — An event-triggered script runs once per delivered event, in the module's event order.
+
+**SC-R-089** — Runs of every trigger kind are sequential on the owner's sim thread (SC-R-015).
+
+**SC-R-090** — A per-module event script receives the event as its only argument.
+
+**SC-R-091** — A register trigger selects either a list of register names or all registers of the module.
+
+**SC-R-092** — A register trigger fires on a value change by default, and on every write when its every-write option is set.
+
+**SC-R-093** — A register write made by a script does not trigger that script, while every other script selecting that register fires.
+
+**SC-R-094** — The exclusion of SC-R-093 identifies a script by its owner (module or session) and name, and an on-demand run of a script counts as that script.
+
+**SC-R-095** — Each event script has a bounded event queue of a fixed 4096 events.
+
+**SC-R-096** — An event arriving at a full queue (SC-R-095) drops that queue's oldest event and never blocks the event's source.
 
 ---
 
@@ -210,7 +240,7 @@ Lua API surface and semantics owned here. The in-TUI code editor (vim-modal edit
 
 **SC-R-046** — On each firing of the execution hook (SC-R-034), a sim-thread context checks the stop flag and, if set, raises a Lua error to unwind the executing script.
 
-**SC-R-047** — On each firing of the execution hook (SC-R-034), every context unconditionally checks elapsed wall-clock since the current cycle (or the on-demand run's single execution) began, raising a Lua error past a fixed 1,000 ms cap. The cap is fixed, not exposed as config key or CLI flag.
+**SC-R-047** — On each firing of the execution hook (SC-R-034), every context unconditionally checks elapsed wall-clock since the current cycle, the current event-triggered run, or the on-demand run's single execution began, raising a Lua error past a fixed 1,000 ms cap. The cap is fixed, not exposed as config key or CLI flag.
 
 **SC-R-048** — The execution hook (SC-R-034) enforces no memory ceiling (SC-E-032).
 

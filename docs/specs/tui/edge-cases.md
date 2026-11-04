@@ -17,6 +17,7 @@
 | **UI-E-007** | `:script copy <idx>` out of range | error logged: `no tab [idx] (0..=max)` |
 | **UI-E-008** | `:script copy <active-index>` | error logged: `cannot copy from the active tab` |
 | **UI-E-009** | `:script copy <idx>` where source or active tab lacks script support | warning logged: `... has no script support` |
+| **UI-E-174** | `:script copy <idx>` holding a script whose trigger does not fit the active tab | error logged naming the script; the active tab's script list stays unchanged |
 | **UI-E-010** | `:quit` on the last tab | quits the application |
 | **UI-E-011** | `:log` bare, or `:log <path>` (path ≠ `clear`) | not app-level; forwarded to the view as a module command |
 | **UI-E-012** | Generic name shadows a module name | generic always wins; module commands reached only for unrecognized tokens |

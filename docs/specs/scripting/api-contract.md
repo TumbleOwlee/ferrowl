@@ -36,6 +36,34 @@ A script sees only the modules registered for its sim owner (`requirements.md` S
 
 ---
 
+## Script triggers
+
+A script's `trigger` (`requirements.md` SC-R-086). Absent: the script runs every cycle (SC-R-014).
+
+| Field | Type | Default | Notes | Req |
+|---|---|---|---|---|
+| `kind` | string | — (required) | `register` | SC-R-086 |
+| `registers` | list of names, or `all` | — (required) | the registers whose events run the script | SC-R-091 |
+| `every_write` | bool | `false` | fire on every write, not only on a value change | SC-R-092 |
+
+---
+
+## Script arguments
+
+A script reads its trigger's arguments as the chunk's `...` (SC-R-003, SC-R-090).
+
+| Trigger | Argument | Fields | Req |
+|---|---|---|---|
+| none | — | — | SC-R-003 |
+| `register` | `local event = ...` | `name`, `old`, `new`, `source`, `seq`, `timestamp` | SC-R-090, MB-R-303 |
+
+- `old` and `new` are shaped as `C_Register:Get` returns them.
+- `source` is one of `remote`, `poll`, `set`, `lua`.
+- `timestamp` is milliseconds since the Unix epoch.
+- An on-demand run passes no argument (SC-E-054).
+
+---
+
 ## `C_Register` — Modbus register access
 
 In a Modbus module's sim, and via `C_Module:Get(name):Register()` from the session-level sim.
