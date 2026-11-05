@@ -611,7 +611,12 @@ impl ModuleView for ModbusModuleView {
                     }
                     Some(PendingLifecycle::Reload { path, device }) => {
                         let stop_err = stop_result.err().filter(|e| !e.is_not_running());
-                        let new_module = ModbusModule::new(&self.spec, &device);
+                        self.module.stop_sim();
+                        let new_module = ModbusModule::new_with_events(
+                            &self.spec,
+                            &device,
+                            self.module.events(),
+                        );
                         self.module = new_module;
                         self.host_changed = true;
                         self.device = *device;
@@ -963,7 +968,12 @@ impl ModuleView for ModbusModuleView {
                     // Nothing was running (Idle): rebuild and start immediately — there is no
                     // in-flight task `poll_stop()` could ever resolve.
                     Err(_) => {
-                        let new_module = ModbusModule::new(&self.spec, &device);
+                        self.module.stop_sim();
+                        let new_module = ModbusModule::new_with_events(
+                            &self.spec,
+                            &device,
+                            self.module.events(),
+                        );
                         self.module = new_module;
                         self.host_changed = true;
                         self.device = device;
@@ -1076,7 +1086,8 @@ impl ModuleView for ModbusModuleView {
                         ":set requires <register> <value>".into(),
                     )));
                 }
-                self.set_register_value(&register, &value).await
+                self.set_register_value(&register, &value, mutate::ValueWrite::Command)
+                    .await
             }),
 
             ModbusCmd::Order(rest) => {
@@ -4124,5 +4135,188 @@ mod tests {
         let module = super::super::ModbusModule::new(&spec, &device);
         let view = ModbusModuleView::new(module, spec, device);
         assert_clone_round_trips(&view);
+    }
+
+    fn event_register_def(
+        is_virtual: bool,
+        default: Option<i64>,
+    ) -> crate::config::device::RegisterDef {
+        use crate::config::device::{
+            AccessCfg, AlignmentCfg, EndianCfg, RegisterDef, Scalar, ValueType, WordOrderCfg,
+        };
+        RegisterDef {
+            slave_id: 1,
+            kind: Kind::HoldingRegister,
+            address: (!is_virtual).then_some(0),
+            is_virtual,
+            access: AccessCfg::ReadWrite,
+            value_type: ValueType::U16,
+            endian: EndianCfg::Big,
+            word_order: WordOrderCfg::default(),
+            resolution: 1.0,
+            bitmask: None,
+            length: 1,
+            alignment: AlignmentCfg::Left,
+            values: vec![],
+            update: None,
+            description: String::new(),
+            default: default.map(Scalar::Int),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// MB-E-113 — a `:reload` seeds defaults without events and the sequence continues: the
+    /// stream outlives the rebuilt module, for the idle arm and the settle arm alike.
+    async fn ut_reload_seeding_produces_no_event_and_seq_continues() {
+        for started in [false, true] {
+            let mut device = empty_device();
+            device
+                .definitions
+                .insert("reg".into(), event_register_def(false, Some(7)));
+            let dir = reserve_temp_dir("ferrowl_view_reload_events");
+            let path = dir.join("dev.toml").to_str().expect("utf-8").to_string();
+            let spec = ModuleSpec {
+                device: path.clone(),
+                endpoint: Endpoint::Tcp {
+                    ip: "127.0.0.1".into(),
+                    port: 0,
+                },
+                ..tcp_server_spec()
+            };
+            let module = super::super::ModbusModule::new(&spec, &device);
+            let mut view = ModbusModuleView::new(module, spec, device);
+            let _ = view.handle_command(&format!("write-device {path}")).await;
+            let queue = crate::module::modbus::events::capture_events(&view.module.events());
+            if started {
+                view.module.start().await.expect("start");
+            }
+
+            let _ = view.handle_command("set reg 1").await;
+            let before = queue.pop().expect("event before the reload").seq;
+            assert!(queue.pop().is_none());
+
+            let _ = view.handle_command("reload").await;
+            settle(&mut view).await;
+            assert!(queue.pop().is_none(), "the reload publishes nothing");
+            assert_eq!(
+                view.module.memory().read().read_unchecked(
+                    Key {
+                        id: SlaveKey {
+                            slave_id: UnitId(1),
+                            kind: Kind::HoldingRegister,
+                        },
+                    },
+                    &Range::new(0, 1),
+                ),
+                Some(vec![7]),
+                "the reload rebuilt the module and seeded the default"
+            );
+
+            let _ = view.handle_command("set reg 2").await;
+            let after = queue.pop().expect("event after the reload").seq;
+            assert_eq!(after, before + 1);
+            let _ = view.module.stop().await;
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// MB-R-302 — each write path publishes exactly one event with its own source: a client
+    /// `:set` gives `Remote` on the server and `Poll` on the client, a server `:set` gives `Set`,
+    /// and a script bridge write gives `Lua`, fixed-address and virtual.
+    async fn ut_every_source_produces_one_event() {
+        use crate::lua::RegisterBridge;
+        use crate::module::modbus::events::capture_events;
+        use crate::module::modbus::{RegisterEvent, RegisterEventSource};
+        use ferrowl_lua::module::{ValueType as LuaValue, Write};
+
+        let port = reserve_tcp_port().release();
+        let spec = |role| ModuleSpec {
+            role,
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port,
+            },
+            ..tcp_server_spec()
+        };
+        let mut server_device = empty_device();
+        server_device
+            .definitions
+            .insert("hold".into(), event_register_def(false, None));
+        server_device
+            .definitions
+            .insert("v".into(), event_register_def(true, None));
+        let mut client_device = empty_device();
+        client_device.interval_ms = Some(300);
+        client_device
+            .definitions
+            .insert("hold".into(), event_register_def(false, None));
+
+        let server_spec = spec(Role::Server);
+        let module = super::super::ModbusModule::new(&server_spec, &server_device);
+        let mut server = ModbusModuleView::new(module, server_spec, server_device);
+        let client_spec = spec(Role::Client);
+        let module = super::super::ModbusModule::new(&client_spec, &client_device);
+        let mut client = ModbusModuleView::new(module, client_spec, client_device);
+        let server_queue = capture_events(&server.module.events());
+        let client_queue = capture_events(&client.module.events());
+
+        server.module.start().await.expect("server start");
+        client.module.start().await.expect("client start");
+        wait_until(
+            "first poll event",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            || client_queue.pop(),
+        )
+        .await;
+        while client_queue.pop().is_some() {}
+        while server_queue.pop().is_some() {}
+
+        let _ = client.handle_command("set hold 5").await;
+        let remote: RegisterEvent = wait_until(
+            "server sees the remote write",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            || server_queue.pop(),
+        )
+        .await;
+        assert!(matches!(remote.source, RegisterEventSource::Remote));
+        assert!(server_queue.pop().is_none());
+        let polled = wait_until(
+            "client polls the new value",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            || client_queue.pop().filter(|e| e.changed),
+        )
+        .await;
+        assert!(matches!(polled.source, RegisterEventSource::Poll));
+
+        let _ = server.handle_command("set hold 6").await;
+        let set = server_queue.pop().expect("server `:set` event");
+        assert!(matches!(set.source, RegisterEventSource::Set));
+        assert!(server_queue.pop().is_none());
+
+        let bridge = RegisterBridge::new(
+            server.module.memory(),
+            server.module.virtual_store(),
+            server.module.lua_registers(),
+            server.module.status_cell(),
+            server.module.events(),
+        );
+        tokio::task::spawn_blocking(move || {
+            bridge.write("hold".into(), LuaValue::Int(7)).unwrap();
+            bridge.write("v".into(), LuaValue::Int(8)).unwrap();
+        })
+        .await
+        .unwrap();
+        for name in ["hold", "v"] {
+            let event = server_queue.pop().expect("bridge event");
+            assert_eq!(&*event.name, name);
+            assert!(matches!(event.source, RegisterEventSource::Lua { .. }));
+        }
+        assert!(server_queue.pop().is_none());
+
+        client.module.stop().await.expect("stop");
+        server.module.stop().await.expect("stop");
     }
 }

@@ -31,7 +31,7 @@ use super::build::{
 };
 use super::log::{FileSink, append, open_sink};
 use super::serial_paths::SerialPathRegistry;
-use super::{RegisterEvent, RegisterTap};
+use super::{RegisterEvent, RegisterEventSource, RegisterTap, publish_virtual};
 
 pub type ModuleMemory = Arc<MemLock<Memory<Key<SlaveKey>>>>;
 pub type ModuleLog = Arc<RwLock<LogRing>>;
@@ -114,6 +114,16 @@ pub struct ModbusModule {
 impl ModbusModule {
     /// Build a module from an instance spec and its device-type config.
     pub fn new(spec: &ModuleSpec, device: &DeviceConfig) -> Self {
+        Self::new_with_events(spec, device, EventStream::new())
+    }
+
+    /// [`new`](Self::new) publishing register events on an existing stream, so sequence numbers
+    /// and attached script queues survive a rebuild.
+    pub fn new_with_events(
+        spec: &ModuleSpec,
+        device: &DeviceConfig,
+        events: EventStream<RegisterEvent>,
+    ) -> Self {
         let mut memory = Memory::<Key<SlaveKey>>::default();
         let mut log = LogRing::init();
         let mut registers: Vec<(String, String, Register, Vec<NamedValue>)> = Vec::new();
@@ -184,7 +194,6 @@ impl ModbusModule {
                 .map(|(name, _, register, _)| (name.clone(), register.clone()))
                 .collect(),
         ));
-        let events = EventStream::new();
         memory.set_write_tap(Arc::new(RegisterTap::new(
             lua_registers.clone(),
             events.clone(),
@@ -307,6 +316,13 @@ impl ModbusModule {
             .write()
             .await
             .insert(name.to_string(), val);
+    }
+
+    /// Store a value for a virtual register as a `:set`-style command, publishing a `Set` event.
+    pub async fn set_virtual_value_from_command(&self, name: &str, val: ferrowl_codec::Value) {
+        let mut guard = self.virtual_values.write().await;
+        let old = guard.insert(name.to_string(), val.clone());
+        publish_virtual(&self.events, name, old, val, RegisterEventSource::Set);
     }
 
     /// Shared handle to the virtual-register store (snapshot it for display, or share with the sim).
@@ -438,7 +454,7 @@ impl ModbusModule {
     }
 
     /// Stop and join the simulation thread if one is running.
-    fn stop_sim(&mut self) {
+    pub(crate) fn stop_sim(&mut self) {
         if let Some(mut sim) = self.sim.take() {
             sim.stop();
         }
