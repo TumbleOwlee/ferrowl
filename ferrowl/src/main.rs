@@ -18,6 +18,9 @@ mod module;
 mod registry;
 mod script_template;
 mod session;
+// Lifted once run_sim plans event scripts.
+#[allow(dead_code)]
+mod sim;
 mod time;
 mod view;
 
