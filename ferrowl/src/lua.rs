@@ -14,13 +14,18 @@ use ferrowl_lua::module::{
 };
 use ferrowl_lua::{ContextBuilder, Error, Result};
 use ferrowl_modbus::{Key, SlaveKey};
-use ferrowl_store::Range;
+use ferrowl_store::{Range, WriteSource};
 
 use crate::app::Level;
-use crate::module::modbus::{FileSink, ModuleLog, ModuleMemory, VirtualStore, append};
+use crate::module::modbus::{
+    FileSink, ModuleLog, ModuleMemory, RegisterEvent, RegisterEventSource, VirtualStore, append,
+    publish_virtual,
+};
+use crate::sim::events::EventStream;
+use crate::sim::script_id::executing_script;
 use crate::view::status_bar::StatusCell;
 
-mod value_conv;
+pub(crate) mod value_conv;
 use value_conv::{typed_value_from_type, value_to_type, virtual_value_from_type};
 
 /// Name to `Register` map shared between a module and its Lua bridges.
@@ -36,6 +41,7 @@ pub struct RegisterBridge {
     virtual_store: VirtualStore,
     registers: SharedRegisters,
     status: StatusCell,
+    events: EventStream<RegisterEvent>,
 }
 
 impl RegisterBridge {
@@ -44,12 +50,14 @@ impl RegisterBridge {
         virtual_store: VirtualStore,
         registers: SharedRegisters,
         status: StatusCell,
+        events: EventStream<RegisterEvent>,
     ) -> Self {
         Self {
             memory,
             virtual_store,
             registers,
             status,
+            events,
         }
     }
 
@@ -110,7 +118,17 @@ impl Write for RegisterBridge {
             Address::Fixed(addr) => *addr,
             Address::Virtual => {
                 let value = virtual_value_from_type(value, &register)?;
-                self.virtual_store.blocking_write().insert(name, value);
+                let mut guard = self.virtual_store.blocking_write();
+                let old = guard.insert(name.clone(), value.clone());
+                publish_virtual(
+                    &self.events,
+                    &name,
+                    old,
+                    value,
+                    RegisterEventSource::Lua {
+                        script: executing_script(),
+                    },
+                );
                 return Ok(());
             }
         };
@@ -133,10 +151,12 @@ impl Write for RegisterBridge {
                 kind: register.kind().clone(),
             },
         };
-        let ok =
-            self.memory
-                .write()
-                .write_unchecked(key, &Range::new(addr as usize, raw.len()), &raw);
+        let ok = self.memory.write().write_unchecked_from(
+            WriteSource::Script,
+            key,
+            &Range::new(addr as usize, raw.len()),
+            &raw,
+        );
         if ok {
             Ok(())
         } else {
@@ -192,6 +212,7 @@ pub fn run_sim(
     memory: ModuleMemory,
     virtual_store: VirtualStore,
     registers: SharedRegisters,
+    events: EventStream<RegisterEvent>,
     scripts: Vec<(String, String)>,
     interval: Duration,
     log: ModuleLog,
@@ -205,7 +226,7 @@ pub fn run_sim(
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = stop.clone();
     let handle = std::thread::spawn(move || {
-        let bridge = RegisterBridge::new(memory, virtual_store, registers, status);
+        let bridge = RegisterBridge::new(memory, virtual_store, registers, status, events);
         let mut builder = ContextBuilder::<String>::default()
             .with_stdlib()
             .with_module(RegisterModule::init(bridge))
@@ -265,6 +286,7 @@ pub fn run_script_once(
     memory: ModuleMemory,
     virtual_store: VirtualStore,
     registers: SharedRegisters,
+    events: EventStream<RegisterEvent>,
     name: String,
     code: String,
     log: ModuleLog,
@@ -272,7 +294,7 @@ pub fn run_script_once(
     status: StatusCell,
 ) {
     std::thread::spawn(move || {
-        let bridge = RegisterBridge::new(memory, virtual_store, registers, status);
+        let bridge = RegisterBridge::new(memory, virtual_store, registers, status, events);
         let context = ContextBuilder::<String>::default()
             .with_stdlib()
             .with_module(RegisterModule::init(bridge))
@@ -416,6 +438,7 @@ mod tests {
             virtual_store.clone(),
             Arc::new(MemLock::new(registers)),
             StatusCell::default(),
+            EventStream::new(),
         );
 
         // Reading before any write errors; after a write the value round-trips via the store.
@@ -444,6 +467,7 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             StatusCell::default(),
+            EventStream::new(),
         );
         bridge
             .write("setpoint".to_string(), ValueType::Int(100))
@@ -463,6 +487,7 @@ mod tests {
             vstore(),
             shared.clone(),
             StatusCell::default(),
+            EventStream::new(),
         );
         shared.write().insert("late".to_string(), holding(1));
         bridge
@@ -483,6 +508,7 @@ mod tests {
             vstore(),
             shared.clone(),
             StatusCell::default(),
+            EventStream::new(),
         );
         {
             let mut map = shared.write();
@@ -507,6 +533,7 @@ mod tests {
             vstore(),
             shared.clone(),
             StatusCell::default(),
+            EventStream::new(),
         );
         shared.write().remove("power");
         for err in [
@@ -530,6 +557,7 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             StatusCell::default(),
+            EventStream::new(),
         );
         assert!(bridge.read("nope".to_string()).is_err());
         assert!(bridge.write("nope".to_string(), ValueType::Int(1)).is_err());
@@ -545,6 +573,7 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             StatusCell::default(),
+            EventStream::new(),
         );
         bridge
             .write("setpoint".to_string(), ValueType::Int(42))
@@ -589,6 +618,7 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             StatusCell::default(),
+            EventStream::new(),
         );
         let mut context = ContextBuilder::<String>::default()
             .with_stdlib()
@@ -637,6 +667,7 @@ mod tests {
             memory.clone(),
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
+            EventStream::new(),
             "once".to_string(),
             "C_Register:Set(\"power\", 7)".to_string(),
             log,
@@ -676,6 +707,7 @@ mod tests {
             evse_memory(),
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
+            EventStream::new(),
             "bad".to_string(),
             "C_Register:Set(\"nope\", 1)".to_string(),
             log.clone(),
@@ -706,6 +738,7 @@ mod tests {
             evse_memory(),
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
+            EventStream::new(),
             "sandbox".to_string(),
             r#"print(os == nil and "os-nil" or "os-present")
                print("time-ok:" .. tostring(C_Time:Get() >= 0))"#
@@ -751,6 +784,7 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             StatusCell::default(),
+            EventStream::new(),
         );
 
         bridge
@@ -778,6 +812,7 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             StatusCell::default(),
+            EventStream::new(),
         );
         bridge
             .write("setpoint".to_string(), ValueType::Float(42.0))
@@ -796,6 +831,7 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             StatusCell::default(),
+            EventStream::new(),
         );
         assert!(
             bridge
@@ -812,6 +848,7 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             StatusCell::default(),
+            EventStream::new(),
         );
         bridge
             .write("setpoint".to_string(), ValueType::String("77".to_string()))
@@ -830,6 +867,7 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             StatusCell::default(),
+            EventStream::new(),
         );
         let err = bridge
             .write("setpoint".to_string(), ValueType::Nil)
@@ -845,6 +883,7 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             StatusCell::default(),
+            EventStream::new(),
         );
         assert!(
             bridge
@@ -880,6 +919,7 @@ mod tests {
             virtual_store,
             Arc::new(MemLock::new(registers)),
             StatusCell::default(),
+            EventStream::new(),
         );
         bridge
             .write("calc".to_string(), ValueType::Int(i128::MAX))
@@ -916,6 +956,7 @@ mod tests {
             virtual_store,
             Arc::new(MemLock::new(registers)),
             StatusCell::default(),
+            EventStream::new(),
         );
         let err = bridge
             .write("calc".to_string(), ValueType::Nil)
@@ -975,6 +1016,7 @@ mod tests {
             evse_memory(),
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
+            EventStream::new(),
             noop(),
             Duration::from_millis(20),
             log.clone(),
@@ -996,6 +1038,7 @@ mod tests {
                 evse_memory(),
                 vstore(),
                 Arc::new(MemLock::new(evse_registers())),
+                EventStream::new(),
                 noop(),
                 Duration::from_millis(20),
                 log2.clone(),
@@ -1021,6 +1064,7 @@ mod tests {
             evse_memory(),
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
+            EventStream::new(),
             vec![("runaway".to_string(), "while true do end".to_string())],
             Duration::from_secs(10), // long interval: a between-cycle-only check would never fire
             log.clone(),
@@ -1074,6 +1118,7 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             StatusCell::default(),
+            EventStream::new(),
         );
         let done = Arc::new(AtomicBool::new(false));
 
@@ -1133,6 +1178,7 @@ mod tests {
             evse_memory(),
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
+            EventStream::new(),
             vec![(
                 "status".to_string(),
                 r#"C_Log:Info("status=" .. C_Register:ConnectionStatus())"#.to_string(),

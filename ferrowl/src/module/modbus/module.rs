@@ -22,6 +22,7 @@ use crate::config::{
 use crate::instance::Instance;
 use crate::instance::error::Error;
 use crate::lua::{SharedRegisters, SimHandle, run_script_once, run_sim};
+use crate::sim::events::EventStream;
 use crate::view::status_bar::StatusCell;
 
 use super::build::{
@@ -30,6 +31,7 @@ use super::build::{
 };
 use super::log::{FileSink, append, open_sink};
 use super::serial_paths::SerialPathRegistry;
+use super::{RegisterEvent, RegisterTap};
 
 pub type ModuleMemory = Arc<MemLock<Memory<Key<SlaveKey>>>>;
 pub type ModuleLog = Arc<RwLock<LogRing>>;
@@ -104,6 +106,9 @@ pub struct ModbusModule {
     /// Re-fetched (and re-attached to `serial_paths`) on every `new()`/`reconfigure()`, since
     /// each rebuilds `self.instance` with a fresh, unattached cell.
     path_conflict_cell: Option<ferrowl_modbus::PathConflictCell>,
+    /// Register events of this module, kept for its whole life so sequence numbers continue
+    /// across a sim restart and a reconfigure.
+    events: EventStream<RegisterEvent>,
 }
 
 impl ModbusModule {
@@ -173,6 +178,17 @@ impl ModbusModule {
         }
         let operations = build_read_operations(&registers, &device.read_ranges);
 
+        let lua_registers: SharedRegisters = Arc::new(MemLock::new(
+            registers
+                .iter()
+                .map(|(name, _, register, _)| (name.clone(), register.clone()))
+                .collect(),
+        ));
+        let events = EventStream::new();
+        memory.set_write_tap(Arc::new(RegisterTap::new(
+            lua_registers.clone(),
+            events.clone(),
+        )));
         let memory: ModuleMemory = Arc::new(MemLock::new(memory));
         let operations = Arc::new(RwLock::new(operations));
         let log: ModuleLog = Arc::new(RwLock::new(log));
@@ -192,12 +208,6 @@ impl ModbusModule {
             self_signed_cache.clone(),
         );
 
-        let lua_registers: SharedRegisters = Arc::new(MemLock::new(
-            registers
-                .iter()
-                .map(|(name, _, register, _)| (name.clone(), register.clone()))
-                .collect(),
-        ));
         let mut module = Self {
             name: spec.name.clone(),
             instance,
@@ -218,6 +228,7 @@ impl ModbusModule {
             serial_paths: SerialPathRegistry::default(),
             own_serial_path: None,
             path_conflict_cell: None,
+            events,
         };
         module.own_serial_path = endpoint_serial_path(&spec.endpoint);
         module.attach_path_conflict();
@@ -417,6 +428,7 @@ impl ModbusModule {
             self.memory.clone(),
             self.virtual_values.clone(),
             self.lua_registers.clone(),
+            self.events.clone(),
             self.scripts.clone(),
             self.script_interval,
             self.script_log.clone(),
@@ -430,6 +442,10 @@ impl ModbusModule {
         if let Some(mut sim) = self.sim.take() {
             sim.stop();
         }
+    }
+
+    pub fn events(&self) -> EventStream<RegisterEvent> {
+        self.events.clone()
     }
 
     /// Whether the Lua simulation thread is currently running. Test-only: production code never
@@ -461,6 +477,7 @@ impl ModbusModule {
             self.memory.clone(),
             self.virtual_values.clone(),
             self.lua_registers.clone(),
+            self.events.clone(),
             name,
             code,
             self.script_log.clone(),
@@ -1763,5 +1780,79 @@ if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
                 .is_ok()
         );
         assert_eq!(ops.read().await.len(), 2);
+    }
+
+    fn holding_key() -> ferrowl_modbus::Key<ferrowl_modbus::SlaveKey> {
+        ferrowl_modbus::Key {
+            id: ferrowl_modbus::SlaveKey {
+                slave_id: UnitId(1),
+                kind: Kind::HoldingRegister,
+            },
+        }
+    }
+
+    fn write_marker(module: &super::ModbusModule, word: u16) {
+        use ferrowl_store::{Range, WriteSource};
+        assert!(module.memory().write().write_unchecked_from(
+            WriteSource::Remote,
+            holding_key(),
+            &Range::new(0, 1),
+            &[word],
+        ));
+    }
+
+    #[test]
+    /// MB-E-118 — seeding the store at build, fixed defaults and virtual values alike, produces
+    /// no event: the first event after the build has sequence number 1.
+    fn ut_module_build_seeding_produces_no_event() {
+        use super::ModbusModule;
+        use crate::config::device::Scalar;
+
+        let mut device = device_with_script(Vec::new());
+        let mut virt = device.definitions["marker"].clone();
+        virt.is_virtual = true;
+        virt.address = None;
+        virt.default = Some(Scalar::Int(5));
+        device.definitions.insert("virt".into(), virt);
+        let module = ModbusModule::new(&test_spec("seeded", 5020), &device);
+        let queue = super::super::events::capture_events(&module.events());
+        assert!(queue.pop().is_none());
+
+        write_marker(&module, 9);
+        let event = queue.pop().expect("an event for the write");
+        assert_eq!(event.seq, 1);
+        assert_eq!(&*event.name, "marker");
+    }
+
+    #[tokio::test]
+    /// MB-R-304 — sequence numbers keep rising across a sim restart and a reconfigure.
+    async fn ut_seq_continues_across_sim_restart_and_reconfigure() {
+        use super::ModbusModule;
+        use crate::config::{Endpoint, Role};
+
+        let device = device_with_script(Vec::new());
+        let mut module = ModbusModule::new(&test_spec("seq", 5021), &device);
+        let queue = super::super::events::capture_events(&module.events());
+
+        write_marker(&module, 1);
+        module.reload_scripts(vec![("idle".to_string(), String::new())]);
+        write_marker(&module, 2);
+        let timing = ModbusModule::resolve_timing(&device);
+        module
+            .reconfigure(
+                &Endpoint::Tcp {
+                    ip: "127.0.0.1".into(),
+                    port: 5098,
+                },
+                Role::Client,
+                timing,
+                device.tls.clone(),
+            )
+            .await
+            .expect("reconfigure");
+        write_marker(&module, 3);
+
+        let seqs: Vec<u64> = std::iter::from_fn(|| queue.pop()).map(|e| e.seq).collect();
+        assert_eq!(seqs, vec![1, 2, 3]);
     }
 }

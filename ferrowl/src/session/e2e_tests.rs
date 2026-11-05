@@ -120,6 +120,7 @@ fn modbus_host_with(
         role,
         instance_id: next_instance_id(),
         status: StatusCell::default(),
+        events: crate::sim::events::EventStream::new(),
     }
 }
 

@@ -1172,6 +1172,7 @@ impl ModuleView for ModbusModuleView {
             instance_id: self.instance_id,
             role,
             status: self.module.status_cell(),
+            events: self.module.events(),
         }))
     }
 }
