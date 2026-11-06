@@ -129,15 +129,15 @@ impl SimScheduler {
             stop,
             log,
         } = self;
-        let mut next_cycle = Instant::now();
+        let mut next_cycle = Some(Instant::now());
         while !stop.load(Ordering::Relaxed) {
-            if !every_cycle.is_empty() && Instant::now() >= next_cycle {
+            if !every_cycle.is_empty() && next_cycle.is_some_and(|t| Instant::now() >= t) {
                 if let Err(errors) = context.call_each(every_cycle.iter()) {
                     for e in errors {
                         log(Level::Error, &format!("[sim] {e}"));
                     }
                 }
-                next_cycle = Instant::now() + cycle;
+                next_cycle = Instant::now().checked_add(cycle);
             }
             let mut ran = false;
             for script in &mut events {
@@ -155,10 +155,9 @@ impl SimScheduler {
             if ran {
                 continue;
             }
-            let until_cycle = if every_cycle.is_empty() {
-                STOP_POLL
-            } else {
-                next_cycle.saturating_duration_since(Instant::now())
+            let until_cycle = match next_cycle {
+                Some(t) if !every_cycle.is_empty() => t.saturating_duration_since(Instant::now()),
+                _ => Duration::MAX,
             };
             wake.wait(STOP_POLL.min(until_cycle));
         }
@@ -418,6 +417,24 @@ mod tests {
         );
         sim.handle.unwrap().join().unwrap();
         assert_eq!(*sim.lines.lock(), ["a", "b", "a"]);
+    }
+
+    #[test]
+    /// SC-R-013, SC-R-014 — a cycle interval past the clock's range runs the every-cycle scripts
+    /// once and then waits for stop without panicking.
+    fn ut_cycle_past_clock_range_runs_once_and_stops() {
+        let sim = Sim::spawn(
+            &[("c", "print('tick')")],
+            vec![every_cycle("c")],
+            Duration::MAX,
+            SimWake::default(),
+            None,
+        );
+        sim.wait_lines("first cycle", 1);
+        let start = Instant::now();
+        let lines = sim.finish();
+        assert!(start.elapsed() < Duration::from_secs(2));
+        assert_eq!(lines, vec!["tick".to_string()]);
     }
 
     #[test]
