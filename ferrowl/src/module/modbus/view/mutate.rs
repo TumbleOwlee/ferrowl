@@ -1133,18 +1133,23 @@ mod tests {
             .set_register_value("hold", "5", ValueWrite::Command)
             .await;
         assert!(msg(&result).contains("(sent)"));
-        while let Some(event) = queue.pop() {
-            assert!(
-                !matches!(event.source, RegisterEventSource::Set),
-                "the `:set` itself publishes nothing"
-            );
-        }
 
         let event = wait_until(
             "poll event with the new value",
             std::time::Duration::from_millis(5),
             std::time::Duration::from_secs(10),
-            || queue.pop().filter(|e| e.changed),
+            || {
+                while let Some(event) = queue.pop() {
+                    assert!(
+                        !matches!(event.source, RegisterEventSource::Set),
+                        "the `:set` itself publishes nothing"
+                    );
+                    if event.changed {
+                        return Some(event);
+                    }
+                }
+                None
+            },
         )
         .await;
         assert!(matches!(event.source, RegisterEventSource::Poll));
@@ -1166,6 +1171,42 @@ mod tests {
         assert!(msg(&result).contains("(sent)"));
         let event = queue.pop().expect("event at once");
         assert!(matches!(event.source, RegisterEventSource::Set));
+        assert!(queue.pop().is_none());
+        client.module.stop().await.expect("stop");
+        server.module.stop().await.expect("stop");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// MB-E-112 — a default seeded onto a connected client's write-only register publishes
+    /// nothing, though the value reaches the server.
+    async fn ut_client_write_only_default_seed_produces_no_event() {
+        let (mut server, mut client) = connected_pair(holding_write_only(0)).await;
+        let queue = capture_events(&client.module.events());
+        drain(&queue);
+
+        let mut seed = edited("seed", holding_write_only(0), None);
+        seed.default = Some(crate::config::device::Scalar::Int(4));
+        client.apply_add(seed).await;
+
+        let key = Key {
+            id: SlaveKey {
+                slave_id: UnitId(1),
+                kind: Kind::HoldingRegister,
+            },
+        };
+        let range = Range::new(0, 1);
+        for (what, module) in [("server", &server.module), ("client", &client.module)] {
+            wait_until(
+                what,
+                std::time::Duration::from_millis(5),
+                std::time::Duration::from_secs(10),
+                || {
+                    (module.memory().read().read_unchecked(key.clone(), &range) == Some(vec![4]))
+                        .then_some(())
+                },
+            )
+            .await;
+        }
         assert!(queue.pop().is_none());
         client.module.stop().await.expect("stop");
         server.module.stop().await.expect("stop");
