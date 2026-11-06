@@ -110,28 +110,30 @@ fn serve(names: &[&str], scripts: &str) -> Server {
         port,
         _dir: dir,
     };
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while TcpStream::connect(("127.0.0.1", port)).is_err() {
-        assert!(Instant::now() < deadline, "server never listened");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while try_request(port, 3, 0, 1).is_err() {
+        assert!(Instant::now() < deadline, "server never answered");
         std::thread::sleep(Duration::from_millis(20));
     }
     server
 }
 
-fn request(port: u16, function: u8, address: u16, value: u16) -> Vec<u8> {
-    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
-    stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
-        .unwrap();
+fn try_request(port: u16, function: u8, address: u16, value: u16) -> std::io::Result<Vec<u8>> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port))?;
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
     let mut frame = vec![0, 1, 0, 0, 0, 6, 1, function];
     frame.extend_from_slice(&address.to_be_bytes());
     frame.extend_from_slice(&value.to_be_bytes());
-    stream.write_all(&frame).unwrap();
+    stream.write_all(&frame)?;
     let mut header = [0u8; 7];
-    stream.read_exact(&mut header).unwrap();
+    stream.read_exact(&mut header)?;
     let mut pdu = vec![0u8; usize::from(u16::from_be_bytes([header[4], header[5]])) - 1];
-    stream.read_exact(&mut pdu).unwrap();
-    pdu
+    stream.read_exact(&mut pdu)?;
+    Ok(pdu)
+}
+
+fn request(port: u16, function: u8, address: u16, value: u16) -> Vec<u8> {
+    try_request(port, function, address, value).expect("request")
 }
 
 fn write_register(port: u16, address: u16, value: u16) {
