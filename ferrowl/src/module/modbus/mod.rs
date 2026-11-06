@@ -15,11 +15,15 @@ pub mod table;
 pub mod view;
 
 mod build;
+mod events;
 mod log;
 mod module;
 pub mod monitor;
 mod serial_paths;
 
+pub(crate) use events::{
+    RegisterEvent, RegisterEventSource, RegisterTap, publish_virtual, register_selector,
+};
 pub use module::{ModbusModule, ModuleLog, ModuleMemory, VirtualStore};
 pub use monitor::{ModbusMonitorModule, ModbusMonitorModuleView};
 

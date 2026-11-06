@@ -4,6 +4,7 @@ use crate::cell::{Access, CellKind, CellType};
 use crate::range::Range;
 use crate::slice::Slice;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::{collections::HashMap, fmt::Debug, hash::Hash};
 
 /// Why a [`Memory`] read or write operation failed.
@@ -29,12 +30,52 @@ pub enum MemoryError {
 /// Regions must be declared up front with [`add_ranges`](Self::add_ranges);
 /// reads and writes only succeed on addresses that are fully covered by
 /// declared slices and permit the requested access.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Memory<K>
 where
     K: Hash + Eq + Clone + Default,
 {
     slices: HashMap<K, BTreeMap<Range, Slice>>,
+    tap: Option<Arc<dyn WriteTap<K>>>,
+}
+
+impl<K> Debug for Memory<K>
+where
+    K: Hash + Eq + Clone + Default + Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Memory")
+            .field("slices", &self.slices)
+            .field("tap", &self.tap.is_some())
+            .finish()
+    }
+}
+
+/// Where a store write originated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteSource {
+    Remote,
+    Poll,
+    Command,
+    Script,
+}
+
+/// A completed write handed to a [`WriteTap`] with the words it replaced.
+pub struct StoreWrite<'a, K> {
+    pub source: WriteSource,
+    pub id: &'a K,
+    pub range: &'a Range,
+    pub old: &'a [u16],
+    pub new: &'a [u16],
+}
+
+/// Observer of successful sourced writes.
+pub trait WriteTap<K>: Send + Sync
+where
+    K: Hash + Eq + Clone + Default,
+{
+    /// Runs under the memory write guard; must not block or lock the memory.
+    fn written(&self, write: &StoreWrite<'_, K>, memory: &Memory<K>);
 }
 
 impl<K> Memory<K>
@@ -148,6 +189,76 @@ where
             true
         });
         Ok(())
+    }
+
+    /// Installs the observer that [`write_from`](Self::write_from) and
+    /// [`write_unchecked_from`](Self::write_unchecked_from) report to.
+    pub fn set_write_tap(&mut self, tap: Arc<dyn WriteTap<K>>) {
+        self.tap = Some(tap);
+    }
+
+    /// [`write`](Self::write), reporting the old and new words to the tap.
+    pub fn write_from(
+        &mut self,
+        source: WriteSource,
+        id: K,
+        ty: &CellType,
+        range: &Range,
+        values: &[u16],
+    ) -> Result<(), MemoryError> {
+        if range.length() != values.len() {
+            return Err(MemoryError::LengthMismatch {
+                expected: range.length(),
+                got: values.len(),
+            });
+        }
+        self.writable(&id, ty, range)?;
+        let old = self
+            .tap
+            .as_ref()
+            .and_then(|_| self.read_unchecked(id.clone(), range));
+        self.write(id.clone(), ty, range, values)?;
+        if let (Some(tap), Some(old)) = (self.tap.clone(), old) {
+            tap.written(
+                &StoreWrite {
+                    source,
+                    id: &id,
+                    range,
+                    old: &old,
+                    new: values,
+                },
+                self,
+            );
+        }
+        Ok(())
+    }
+
+    /// [`write_unchecked`](Self::write_unchecked), reporting the old and new words to the tap.
+    pub fn write_unchecked_from(
+        &mut self,
+        source: WriteSource,
+        id: K,
+        range: &Range,
+        values: &[u16],
+    ) -> bool {
+        let old = self
+            .tap
+            .as_ref()
+            .and_then(|_| self.read_unchecked(id.clone(), range));
+        let written = self.write_unchecked(id.clone(), range, values);
+        if let (true, Some(tap), Some(old)) = (written, self.tap.clone(), old) {
+            tap.written(
+                &StoreWrite {
+                    source,
+                    id: &id,
+                    range,
+                    old: &old,
+                    new: values,
+                },
+                self,
+            );
+        }
+        written
     }
 
     /// Write values regardless of cell kind — bypasses the `writable` check and forces writes to
@@ -295,7 +406,130 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::{StoreWrite, WriteSource, WriteTap};
     use crate::{Cell, CellKind, CellType, Memory, MemoryError, range::Range};
+    use std::sync::{Arc, Mutex};
+
+    type Seen = (WriteSource, Vec<u16>, Vec<u16>, Vec<u16>);
+
+    #[derive(Default)]
+    struct Recorder(Mutex<Vec<Seen>>);
+
+    impl WriteTap<i32> for Recorder {
+        fn written(&self, write: &StoreWrite<'_, i32>, memory: &Memory<i32>) {
+            let stored = memory
+                .read_unchecked(*write.id, write.range)
+                .expect("range covered");
+            self.0.lock().unwrap().push((
+                write.source,
+                write.old.to_vec(),
+                write.new.to_vec(),
+                stored,
+            ));
+        }
+    }
+
+    fn tapped() -> (Memory<i32>, Arc<Recorder>) {
+        let mut memory = Memory::default();
+        memory.add_ranges(
+            1,
+            &CellKind::read_write(CellType::Register),
+            &[Range::new(0, 10)],
+        );
+        memory
+            .write(1, &CellType::Register, &Range::new(0, 3), &[7, 8, 9])
+            .unwrap();
+        let rec = Arc::new(Recorder::default());
+        memory.set_write_tap(rec.clone());
+        (memory, rec)
+    }
+
+    #[test]
+    fn ut_write_from_reports_old_and_new_words() {
+        let (mut memory, rec) = tapped();
+        memory
+            .write_from(
+                WriteSource::Remote,
+                1,
+                &CellType::Register,
+                &Range::new(1, 2),
+                &[1, 2],
+            )
+            .unwrap();
+        assert_eq!(
+            *rec.0.lock().unwrap(),
+            vec![(WriteSource::Remote, vec![8, 9], vec![1, 2], vec![1, 2])]
+        );
+    }
+
+    #[test]
+    fn ut_write_unchecked_from_reports_old_and_new_words() {
+        let (mut memory, rec) = tapped();
+        assert!(memory.write_unchecked_from(WriteSource::Poll, 1, &Range::new(0, 2), &[4, 5]));
+        assert_eq!(
+            *rec.0.lock().unwrap(),
+            vec![(WriteSource::Poll, vec![7, 8], vec![4, 5], vec![4, 5])]
+        );
+    }
+
+    #[test]
+    fn ut_tap_reads_new_words_from_memory() {
+        let (mut memory, rec) = tapped();
+        memory
+            .write_from(
+                WriteSource::Script,
+                1,
+                &CellType::Register,
+                &Range::new(0, 1),
+                &[99],
+            )
+            .unwrap();
+        let seen = rec.0.lock().unwrap();
+        assert_eq!(seen[0].3, vec![99]);
+    }
+
+    #[test]
+    fn ut_silent_writes_never_call_the_tap() {
+        let (mut memory, rec) = tapped();
+        memory
+            .write(1, &CellType::Register, &Range::new(0, 1), &[1])
+            .unwrap();
+        assert!(memory.write_unchecked(1, &Range::new(0, 1), &[2]));
+        assert!(rec.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    /// MB-E-117 — a rejected write produces no event.
+    fn ut_rejected_write_from_never_calls_the_tap() {
+        let (mut memory, rec) = tapped();
+        memory.add_ranges(3, &CellKind::read(CellType::Register), &[Range::new(0, 5)]);
+        let ty = CellType::Register;
+        assert_eq!(
+            memory.write_from(WriteSource::Remote, 1, &ty, &Range::new(0, 2), &[1]),
+            Err(MemoryError::LengthMismatch {
+                expected: 2,
+                got: 1
+            })
+        );
+        assert_eq!(
+            memory.write_from(WriteSource::Remote, 2, &ty, &Range::new(0, 1), &[1]),
+            Err(MemoryError::UnknownKey)
+        );
+        assert_eq!(
+            memory.write_from(WriteSource::Remote, 3, &ty, &Range::new(0, 1), &[1]),
+            Err(MemoryError::AddressNotWritable)
+        );
+        assert!(rec.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn ut_failed_write_unchecked_from_never_calls_the_tap() {
+        let (mut memory, rec) = tapped();
+        assert!(!memory.write_unchecked_from(WriteSource::Poll, 1, &Range::new(0, 2), &[1]));
+        assert!(!memory.write_unchecked_from(WriteSource::Poll, 2, &Range::new(0, 1), &[1]));
+        assert!(!memory.write_unchecked_from(WriteSource::Poll, 1, &Range::new(20, 1), &[1]));
+        assert!(rec.0.lock().unwrap().is_empty());
+    }
 
     #[test]
     /// MB-R-030 — a zero-initialized cell carries its cell type and access direction.

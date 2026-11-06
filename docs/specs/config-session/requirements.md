@@ -92,6 +92,10 @@ Per [`../README.md`](../README.md)'s ownership rule, this area owns only the *en
 
 **CS-R-034** — Serialization omits fields carrying their default/empty value where the schema declares them omittable (informational `version` when unset, empty `scripts`, unset optional endpoint sub-fields). A file so written reloads to an equal value because each omitted field's load-time default matches.
 
+**CS-R-077** — A script with no trigger is saved with no trigger field (CS-R-034).
+
+**CS-R-080** — A script with a trigger reloads from its saved file to an equal trigger (CS-R-033).
+
 ---
 
 ## Migration
@@ -126,7 +130,7 @@ Per [`../README.md`](../README.md)'s ownership rule, this area owns only the *en
 
 **CS-R-051** — Valid TOML/JSON omitting a required field (e.g. a module instance with no `name` or no endpoint) fails to load with a deserialize error.
 
-**CS-R-052** — A field present in a file but not in the schema is ignored silently on load, except within a TLS block, governed by CS-R-055.
+**CS-R-052** — A field present in a file but not in the schema is ignored silently on load, except within a TLS block, governed by CS-R-055, and within a script trigger, governed by CS-R-078.
 
 **CS-R-053** — When a session references a missing or unreadable device-config file, startup does not abort. The instance is skipped with a warning naming it and the resolved path that failed (CS-R-073), identically for Modbus and OCPP; neither falls back to a default device config.
 
@@ -138,8 +142,12 @@ Per [`../README.md`](../README.md)'s ownership rule, this area owns only the *en
 
 **CS-R-071** — `username` and `password` remain defined members of the OCPP `security` table, so neither is rejected by CS-R-055's strict checking.
 
-**CS-R-072** — CS-R-055 is the sole exception to CS-R-052: no table outside a TLS subtree and its enclosing OCPP `security` table is strict-checked, the exception being made because silently ignoring a retired TLS field can weaken an endpoint's security posture.
+**CS-R-072** — CS-R-055 and CS-R-078 are the only exceptions to CS-R-052: no table outside a TLS subtree and its enclosing OCPP `security` table, or a script trigger, is strict-checked, the TLS exception being made because silently ignoring a retired TLS field can weaken an endpoint's security posture.
 
 **CS-R-068** — A table in the strictly checked TLS subtree or OCPP `security` table (CS-R-055) naming a pre-merge field (`require_client_cert`, `client_ca_files`, `client_ca_file`, `client_cert_skip_verify`, `insecure_skip_verify`, `client_cert_file`, `client_key_file`, `client_self_signed`, `ca_file`, or a bare `self_signed`/`cert_file`/`key_file` outside an `identity` block) fails the load with an error naming the retired fields found and pointing at the current block shape. No value migrated.
 
 **CS-R-076** — A device-config file carrying a `log_file` key written by an earlier build loads without error and without configuring a log sink; the key is ignored like any other unrecognized field (CS-R-052).
+
+**CS-R-078** — Strict field checking applies to a script's `trigger` table, so a field its `kind` does not define fails the load rather than being ignored under CS-R-052.
+
+**CS-R-079** — A config file failing to load with a deserialize error (CS-R-050, CS-R-051) names the failure's line, and its key path when the failure has one; a syntax error sits at no key.

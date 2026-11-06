@@ -17,10 +17,11 @@ use ferrowl_lua::module::{
 use mlua::{AnyUserData, Lua, Result as LuaResult};
 
 use crate::lua::{RegisterBridge, SharedRegisters};
-use crate::module::modbus::{ModuleMemory, VirtualStore};
+use crate::module::modbus::{ModuleMemory, RegisterEvent, VirtualStore};
 use crate::module::ocpp::client::lua_sim::{ClientCsHandle, ClientFields, ScopedActionQueue};
 use crate::module::ocpp::server::lua::{ServerActionQueue, ServerHost, SharedServerStates};
 use crate::module::ocpp::server::view::ServerVersion;
+use crate::sim::events::EventStream;
 use crate::view::status_bar::StatusCell;
 
 /// Mints the identity of one module instance in the registry (SC-R-080).
@@ -68,6 +69,7 @@ pub struct ModbusHost {
     pub role: &'static str,
     pub instance_id: u64,
     pub status: StatusCell,
+    pub events: EventStream<RegisterEvent>,
 }
 
 impl ModuleHost for ModbusHost {
@@ -89,6 +91,7 @@ impl ModuleHost for ModbusHost {
             self.virtual_store.clone(),
             self.registers.clone(),
             self.status.clone(),
+            self.events.clone(),
         )))
     }
 
@@ -411,6 +414,7 @@ mod tests {
             role: "client",
             instance_id: next_instance_id(),
             status: StatusCell::default(),
+            events: EventStream::new(),
         };
 
         let registry = ModuleRegistry::new();
@@ -614,6 +618,7 @@ mod tests {
             role: "client",
             instance_id: next_instance_id(),
             status: modbus_cell.clone(),
+            events: EventStream::new(),
         };
         let client_cell = StatusCell::default();
         let client = OcppClientEntry {

@@ -14,13 +14,20 @@ use ferrowl_lua::module::{
 };
 use ferrowl_lua::{ContextBuilder, Error, Result};
 use ferrowl_modbus::{Key, SlaveKey};
-use ferrowl_store::Range;
+use ferrowl_store::{Range, WriteSource};
 
 use crate::app::Level;
-use crate::module::modbus::{FileSink, ModuleLog, ModuleMemory, VirtualStore, append};
+use crate::config::script::{ModbusTrigger, ScriptDef, Selection};
+use crate::module::modbus::{
+    FileSink, ModuleLog, ModuleMemory, RegisterEvent, RegisterEventSource, VirtualStore, append,
+    publish_virtual, register_selector,
+};
+use crate::sim::events::{EventStream, SimWake};
+use crate::sim::scheduler::{PlannedScript, QueueFeed, ScriptSchedule, SimScheduler};
+use crate::sim::script_id::{ExecutionGuard, ScriptId, ScriptOwner, executing_script};
 use crate::view::status_bar::StatusCell;
 
-mod value_conv;
+pub(crate) mod value_conv;
 use value_conv::{typed_value_from_type, value_to_type, virtual_value_from_type};
 
 /// Name to `Register` map shared between a module and its Lua bridges.
@@ -36,6 +43,7 @@ pub struct RegisterBridge {
     virtual_store: VirtualStore,
     registers: SharedRegisters,
     status: StatusCell,
+    events: EventStream<RegisterEvent>,
 }
 
 impl RegisterBridge {
@@ -44,12 +52,14 @@ impl RegisterBridge {
         virtual_store: VirtualStore,
         registers: SharedRegisters,
         status: StatusCell,
+        events: EventStream<RegisterEvent>,
     ) -> Self {
         Self {
             memory,
             virtual_store,
             registers,
             status,
+            events,
         }
     }
 
@@ -110,7 +120,17 @@ impl Write for RegisterBridge {
             Address::Fixed(addr) => *addr,
             Address::Virtual => {
                 let value = virtual_value_from_type(value, &register)?;
-                self.virtual_store.blocking_write().insert(name, value);
+                let mut guard = self.virtual_store.blocking_write();
+                let old = guard.insert(name.clone(), value.clone());
+                publish_virtual(
+                    &self.events,
+                    &name,
+                    old,
+                    value,
+                    RegisterEventSource::Lua {
+                        script: executing_script(),
+                    },
+                );
                 return Ok(());
             }
         };
@@ -133,10 +153,12 @@ impl Write for RegisterBridge {
                 kind: register.kind().clone(),
             },
         };
-        let ok =
-            self.memory
-                .write()
-                .write_unchecked(key, &Range::new(addr as usize, raw.len()), &raw);
+        let ok = self.memory.write().write_unchecked_from(
+            WriteSource::Script,
+            key,
+            &Range::new(addr as usize, raw.len()),
+            &raw,
+        );
         if ok {
             Ok(())
         } else {
@@ -185,14 +207,16 @@ impl Drop for SimHandle {
 }
 
 /// Spawn the simulation thread for a module. Returns `None` when there are no `update` scripts.
-/// The Lua `Context` is built inside the thread because it is `!Send`. Each cycle runs every
-/// script via `call_all`; script errors are surfaced into the module log (ring + file).
+/// The Lua `Context` is built inside the thread because it is `!Send`. An untriggered script
+/// runs each cycle and a triggered one on its register events; script errors are surfaced into
+/// the module log (ring + file).
 #[allow(clippy::too_many_arguments)]
 pub fn run_sim(
     memory: ModuleMemory,
     virtual_store: VirtualStore,
     registers: SharedRegisters,
-    scripts: Vec<(String, String)>,
+    events: EventStream<RegisterEvent>,
+    scripts: Vec<ScriptDef<ModbusTrigger>>,
     interval: Duration,
     log: ModuleLog,
     sink: FileSink,
@@ -204,8 +228,33 @@ pub fn run_sim(
 
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = stop.clone();
+    let wake = SimWake::default();
+    let mut watched: Vec<(String, Selection)> = Vec::new();
+    let planned: Vec<PlannedScript> = scripts
+        .iter()
+        .map(|script| {
+            let id = ScriptId {
+                owner: ScriptOwner::Module,
+                name: Arc::from(script.name.as_str()),
+            };
+            let schedule = match &script.trigger {
+                None => ScriptSchedule::EveryCycle,
+                Some(trigger) => {
+                    let ModbusTrigger::Register { registers, .. } = trigger;
+                    watched.push((script.name.clone(), registers.clone()));
+                    ScriptSchedule::Events(Box::new(QueueFeed::attach(
+                        events.clone(),
+                        register_selector(trigger, id.clone()),
+                        wake.clone(),
+                    )))
+                }
+            };
+            PlannedScript { id, schedule }
+        })
+        .collect();
     let handle = std::thread::spawn(move || {
-        let bridge = RegisterBridge::new(memory, virtual_store, registers, status);
+        let known = registers.clone();
+        let bridge = RegisterBridge::new(memory, virtual_store, registers, status, events);
         let mut builder = ContextBuilder::<String>::default()
             .with_stdlib()
             .with_module(RegisterModule::init(bridge))
@@ -220,8 +269,8 @@ pub fn run_sim(
                 sink: sink.clone(),
             })
             .with_stop_flag(thread_stop.clone());
-        for (name, code) in &scripts {
-            builder = builder.with_script(name.clone(), code);
+        for script in &scripts {
+            builder = builder.with_script(script.name.clone(), &script.code);
         }
         let mut context = match builder.build() {
             Ok(context) => context,
@@ -236,14 +285,38 @@ pub fn run_sim(
             }
         };
 
-        while !thread_stop.load(Ordering::Relaxed) {
-            if let Err(errors) = context.call_all() {
-                for e in errors {
-                    emit(&log, &sink, Level::Error, &format!("[sim] {e}"));
+        for (script, selection) in &watched {
+            match selection {
+                Selection::All(_) => {}
+                Selection::Names(names) if names.is_empty() => emit(
+                    &log,
+                    &sink,
+                    Level::Warning,
+                    &format!("[sim] script '{script}' watches no registers"),
+                ),
+                Selection::Names(names) => {
+                    let known = known.read();
+                    for name in names.iter().filter(|n| !known.contains_key(*n)) {
+                        emit(
+                            &log,
+                            &sink,
+                            Level::Warning,
+                            &format!("[sim] script '{script}' watches unknown register '{name}'"),
+                        );
+                    }
                 }
             }
-            sleep_responsive(interval, &thread_stop);
         }
+
+        let (scheduler_log, scheduler_sink) = (log.clone(), sink.clone());
+        SimScheduler::new(
+            planned,
+            interval,
+            wake,
+            thread_stop.clone(),
+            Box::new(move |level, line| emit(&scheduler_log, &scheduler_sink, level, line)),
+        )
+        .run(&mut context);
         emit(&log, &sink, Level::Info, "[sim] stopped completely ");
     });
 
@@ -265,6 +338,7 @@ pub fn run_script_once(
     memory: ModuleMemory,
     virtual_store: VirtualStore,
     registers: SharedRegisters,
+    events: EventStream<RegisterEvent>,
     name: String,
     code: String,
     log: ModuleLog,
@@ -272,7 +346,7 @@ pub fn run_script_once(
     status: StatusCell,
 ) {
     std::thread::spawn(move || {
-        let bridge = RegisterBridge::new(memory, virtual_store, registers, status);
+        let bridge = RegisterBridge::new(memory, virtual_store, registers, status, events);
         let context = ContextBuilder::<String>::default()
             .with_stdlib()
             .with_module(RegisterModule::init(bridge))
@@ -290,6 +364,10 @@ pub fn run_script_once(
             .build();
         match context {
             Ok(mut context) => {
+                let _guard = ExecutionGuard::enter(ScriptId {
+                    owner: ScriptOwner::Module,
+                    name: Arc::from(name.as_str()),
+                });
                 if let Err(e) = context.call(&name) {
                     emit(&log, &sink, Level::Error, &format!("[run] {e}"));
                 }
@@ -323,17 +401,6 @@ impl LogSink for LuaLogSink {
     }
 }
 
-/// Sleep up to `interval` in small chunks so the stop flag is observed promptly.
-fn sleep_responsive(interval: Duration, stop: &AtomicBool) {
-    let chunk = Duration::from_millis(50);
-    let mut slept = Duration::ZERO;
-    while slept < interval && !stop.load(Ordering::Relaxed) {
-        let step = chunk.min(interval - slept);
-        std::thread::sleep(step);
-        slept += step;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,6 +412,15 @@ mod tests {
     use ferrowl_test_support::wait_until_blocking;
     use parking_lot::RwLock as MemLock;
     use tokio::sync::RwLock;
+
+    fn sim_script(name: &str, code: &str) -> ScriptDef<ModbusTrigger> {
+        ScriptDef {
+            name: name.into(),
+            code: code.into(),
+            enabled: true,
+            trigger: None,
+        }
+    }
 
     fn holding(addr: u16) -> Register {
         RegisterBuilder::default()
@@ -416,6 +492,7 @@ mod tests {
             virtual_store.clone(),
             Arc::new(MemLock::new(registers)),
             StatusCell::default(),
+            EventStream::new(),
         );
 
         // Reading before any write errors; after a write the value round-trips via the store.
@@ -444,6 +521,7 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             StatusCell::default(),
+            EventStream::new(),
         );
         bridge
             .write("setpoint".to_string(), ValueType::Int(100))
@@ -463,6 +541,7 @@ mod tests {
             vstore(),
             shared.clone(),
             StatusCell::default(),
+            EventStream::new(),
         );
         shared.write().insert("late".to_string(), holding(1));
         bridge
@@ -483,6 +562,7 @@ mod tests {
             vstore(),
             shared.clone(),
             StatusCell::default(),
+            EventStream::new(),
         );
         {
             let mut map = shared.write();
@@ -507,6 +587,7 @@ mod tests {
             vstore(),
             shared.clone(),
             StatusCell::default(),
+            EventStream::new(),
         );
         shared.write().remove("power");
         for err in [
@@ -530,6 +611,7 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             StatusCell::default(),
+            EventStream::new(),
         );
         assert!(bridge.read("nope".to_string()).is_err());
         assert!(bridge.write("nope".to_string(), ValueType::Int(1)).is_err());
@@ -545,6 +627,7 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             StatusCell::default(),
+            EventStream::new(),
         );
         bridge
             .write("setpoint".to_string(), ValueType::Int(42))
@@ -589,6 +672,7 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             StatusCell::default(),
+            EventStream::new(),
         );
         let mut context = ContextBuilder::<String>::default()
             .with_stdlib()
@@ -637,6 +721,7 @@ mod tests {
             memory.clone(),
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
+            EventStream::new(),
             "once".to_string(),
             "C_Register:Set(\"power\", 7)".to_string(),
             log,
@@ -676,6 +761,7 @@ mod tests {
             evse_memory(),
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
+            EventStream::new(),
             "bad".to_string(),
             "C_Register:Set(\"nope\", 1)".to_string(),
             log.clone(),
@@ -706,6 +792,7 @@ mod tests {
             evse_memory(),
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
+            EventStream::new(),
             "sandbox".to_string(),
             r#"print(os == nil and "os-nil" or "os-present")
                print("time-ok:" .. tostring(C_Time:Get() >= 0))"#
@@ -751,6 +838,7 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             StatusCell::default(),
+            EventStream::new(),
         );
 
         bridge
@@ -778,6 +866,7 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             StatusCell::default(),
+            EventStream::new(),
         );
         bridge
             .write("setpoint".to_string(), ValueType::Float(42.0))
@@ -796,6 +885,7 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             StatusCell::default(),
+            EventStream::new(),
         );
         assert!(
             bridge
@@ -812,6 +902,7 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             StatusCell::default(),
+            EventStream::new(),
         );
         bridge
             .write("setpoint".to_string(), ValueType::String("77".to_string()))
@@ -830,6 +921,7 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             StatusCell::default(),
+            EventStream::new(),
         );
         let err = bridge
             .write("setpoint".to_string(), ValueType::Nil)
@@ -845,6 +937,7 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             StatusCell::default(),
+            EventStream::new(),
         );
         assert!(
             bridge
@@ -880,6 +973,7 @@ mod tests {
             virtual_store,
             Arc::new(MemLock::new(registers)),
             StatusCell::default(),
+            EventStream::new(),
         );
         bridge
             .write("calc".to_string(), ValueType::Int(i128::MAX))
@@ -916,14 +1010,13 @@ mod tests {
             virtual_store,
             Arc::new(MemLock::new(registers)),
             StatusCell::default(),
+            EventStream::new(),
         );
         let err = bridge
             .write("calc".to_string(), ValueType::Nil)
             .unwrap_err();
         assert!(err.to_string().contains("cannot Set nil value"));
     }
-
-    // --- Execution model: dedicated thread, stop control, responsive sleep, shared locking ---
 
     /// A log sink that records the OS thread on which Lua logging (and thus execution) occurred.
     #[derive(Clone)]
@@ -967,7 +1060,7 @@ mod tests {
     /// SC-R-012 — setting the stop flag and joining stops the sim; the sim handle's destruction
     /// (Drop) also stops and joins its thread.
     fn ut_sim_stops_on_flag_and_on_drop() {
-        let noop = || vec![("noop".to_string(), "local x = 1".to_string())];
+        let noop = || vec![sim_script("noop", "local x = 1")];
 
         // Explicit stop(): once it returns, the thread has been joined and logged its exit.
         let log = script_log();
@@ -975,6 +1068,7 @@ mod tests {
             evse_memory(),
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
+            EventStream::new(),
             noop(),
             Duration::from_millis(20),
             log.clone(),
@@ -996,6 +1090,7 @@ mod tests {
                 evse_memory(),
                 vstore(),
                 Arc::new(MemLock::new(evse_registers())),
+                EventStream::new(),
                 noop(),
                 Duration::from_millis(20),
                 log2.clone(),
@@ -1021,7 +1116,8 @@ mod tests {
             evse_memory(),
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
-            vec![("runaway".to_string(), "while true do end".to_string())],
+            EventStream::new(),
+            vec![sim_script("runaway", "while true do end")],
             Duration::from_secs(10), // long interval: a between-cycle-only check would never fire
             log.clone(),
             no_sink(),
@@ -1045,26 +1141,6 @@ mod tests {
     }
 
     #[test]
-    /// SC-R-013 — the cycle sleep is chunked and re-checks the stop flag, so a stop set during the
-    /// idle portion of a cycle is observed promptly instead of after the full interval.
-    fn ut_sleep_responsive_observes_stop_promptly() {
-        // Already-requested stop: the chunked sleep must bail out well before the 10s interval.
-        let stopped = AtomicBool::new(true);
-        let start = std::time::Instant::now();
-        sleep_responsive(Duration::from_secs(10), &stopped);
-        assert!(
-            start.elapsed() < Duration::from_secs(1),
-            "a stopped sim must not sleep the full cycle interval"
-        );
-
-        // Without a stop, it does sleep roughly the (short) interval.
-        let running = AtomicBool::new(false);
-        let start = std::time::Instant::now();
-        sleep_responsive(Duration::from_millis(80), &running);
-        assert!(start.elapsed() >= Duration::from_millis(60));
-    }
-
-    #[test]
     /// SC-R-029 — host state reached from Lua is guarded by the same lock the network task uses: a
     /// bridge write blocks while that lock is held elsewhere and completes once it is released.
     fn ut_bridge_write_contends_on_the_host_lock() {
@@ -1074,6 +1150,7 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             StatusCell::default(),
+            EventStream::new(),
         );
         let done = Arc::new(AtomicBool::new(false));
 
@@ -1133,9 +1210,10 @@ mod tests {
             evse_memory(),
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
-            vec![(
-                "status".to_string(),
-                r#"C_Log:Info("status=" .. C_Register:ConnectionStatus())"#.to_string(),
+            EventStream::new(),
+            vec![sim_script(
+                "status",
+                r#"C_Log:Info("status=" .. C_Register:ConnectionStatus())"#,
             )],
             Duration::ZERO,
             log.clone(),

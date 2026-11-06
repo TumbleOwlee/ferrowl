@@ -3,7 +3,7 @@
 
 use ferrowl_codec::{Access, Address, Kind};
 use ferrowl_modbus::{Address as WireAddress, Key, SlaveKey};
-use ferrowl_store::Range;
+use ferrowl_store::{Range, WriteSource};
 use ferrowl_ui::widgets::Header;
 
 use crate::app::Level;
@@ -17,6 +17,13 @@ use super::super::ModbusModule;
 use super::super::build::declare_or_reject_msg;
 use super::super::registers::{register_mem_binding, sync_register_def, write_command};
 use super::{ModbusModuleView, PendingLifecycle};
+
+/// Whether a `:set`-style register write is a command that scripts see or a silent seed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ValueWrite {
+    Command,
+    Silent,
+}
 
 impl ModbusModuleView {
     /// Adopts confirmed read ranges in the device config and the running module; memory only,
@@ -126,7 +133,11 @@ impl ModbusModuleView {
             && let Some(ref default_scalar) = edited.default
         {
             let result = self
-                .set_register_value(&edited.name, &default_scalar.to_string())
+                .set_register_value(
+                    &edited.name,
+                    &default_scalar.to_string(),
+                    ValueWrite::Silent,
+                )
                 .await;
             if let CommandResult::Handled(Some((level, msg))) = result {
                 self.module.log().write().await.write(level, &msg);
@@ -134,7 +145,9 @@ impl ModbusModuleView {
         }
 
         if let Some(value) = edited.value {
-            let result = self.set_register_value(&edited.name, &value).await;
+            let result = self
+                .set_register_value(&edited.name, &value, ValueWrite::Command)
+                .await;
             if let CommandResult::Handled(Some((level, msg))) = result {
                 self.module.log().write().await.write(level, &msg);
             }
@@ -221,14 +234,18 @@ impl ModbusModuleView {
         if let Some(v) = preserved_value
             && edited.value.is_none()
         {
-            let result = self.set_register_value(&edited.name, &v).await;
+            let result = self
+                .set_register_value(&edited.name, &v, ValueWrite::Silent)
+                .await;
             if let CommandResult::Handled(Some((level, msg))) = result {
                 self.module.log().write().await.write(level, &msg);
             }
         }
 
         if let Some(value) = edited.value {
-            let result = self.set_register_value(&edited.name, &value).await;
+            let result = self
+                .set_register_value(&edited.name, &value, ValueWrite::Command)
+                .await;
             if let CommandResult::Handled(Some((level, msg))) = result {
                 self.module.log().write().await.write(level, &msg);
             }
@@ -343,6 +360,7 @@ impl ModbusModuleView {
         &mut self,
         register_name: &str,
         value: &str,
+        write: ValueWrite,
     ) -> CommandResult {
         use crate::config::ClientOrServer;
 
@@ -362,12 +380,15 @@ impl ModbusModuleView {
 
         if let Address::Virtual = register.address() {
             if role == ClientOrServer::Server {
-                self.module
-                    .set_virtual_value(
-                        register_name,
-                        crate::module::modbus::str_to_value(value, &register),
-                    )
-                    .await;
+                let val = crate::module::modbus::str_to_value(value, &register);
+                match write {
+                    ValueWrite::Command => {
+                        self.module
+                            .set_virtual_value_from_command(register_name, val)
+                            .await;
+                    }
+                    ValueWrite::Silent => self.module.set_virtual_value(register_name, val).await,
+                }
                 return CommandResult::Handled(Some((
                     Level::Info,
                     format!("set {register_name} = {value} (virtual)"),
@@ -411,7 +432,12 @@ impl ModbusModuleView {
                         .read_unchecked(key.clone(), &range)
                         .unwrap_or_default();
                     let merged = register.merge_write(&old, &raw);
-                    guard.write_unchecked(key, &range, &merged)
+                    match write {
+                        ValueWrite::Command => {
+                            guard.write_unchecked_from(WriteSource::Command, key, &range, &merged)
+                        }
+                        ValueWrite::Silent => guard.write_unchecked(key, &range, &merged),
+                    }
                 };
                 if ok {
                     CommandResult::Handled(Some((
@@ -450,7 +476,18 @@ impl ModbusModuleView {
                         Ok(()) => {
                             if *register.access() == Access::WriteOnly {
                                 let memory = self.module.memory();
-                                memory.write().write_unchecked(key, &range, &merged);
+                                let mut guard = memory.write();
+                                match write {
+                                    ValueWrite::Command => guard.write_unchecked_from(
+                                        WriteSource::Command,
+                                        key,
+                                        &range,
+                                        &merged,
+                                    ),
+                                    ValueWrite::Silent => {
+                                        guard.write_unchecked(key, &range, &merged)
+                                    }
+                                };
                             }
                             CommandResult::Handled(Some((
                                 Level::Info,
@@ -476,10 +513,13 @@ mod tests {
     use crate::config::{DeviceConfig, Endpoint, ModuleSpec, Role};
     use crate::convert::{Converter, FileType};
     use crate::module::modbus::dialog::EditedRegister;
+    use crate::module::modbus::events::capture_events;
+    use crate::module::modbus::{RegisterEvent, RegisterEventSource};
+    use crate::module::view::ModuleView;
     use ferrowl_codec::format::{BitField, Endian, Format, Resolution, WordOrder};
     use ferrowl_codec::{Access, Address, Kind, Register, RegisterBuilder};
     use ferrowl_modbus::UnitId;
-    use ferrowl_test_support::reserve_temp_dir;
+    use ferrowl_test_support::{reserve_tcp_port, reserve_temp_dir, wait_until};
 
     fn spec(role: Role) -> ModuleSpec {
         ModuleSpec {
@@ -610,12 +650,20 @@ mod tests {
     async fn ut_set_virtual_value_server_accepts_client_rejects() {
         let mut server = view(Role::Server);
         server.apply_add(edited("v", virtual_reg(), None)).await;
-        assert!(msg(&server.set_register_value("v", "42").await).contains("(virtual)"));
+        assert!(
+            msg(&server
+                .set_register_value("v", "42", ValueWrite::Command)
+                .await)
+            .contains("(virtual)")
+        );
 
         let mut client = view(Role::Client);
         client.apply_add(edited("v", virtual_reg(), None)).await;
         assert!(
-            msg(&client.set_register_value("v", "42").await).contains("only writable on servers")
+            msg(&client
+                .set_register_value("v", "42", ValueWrite::Command)
+                .await)
+            .contains("only writable on servers")
         );
     }
 
@@ -630,7 +678,9 @@ mod tests {
 
         // The client path sends a Modbus write command; with no running instance the send fails,
         // and either way a read-write register's store is not written directly by `:set`.
-        let result = client.set_register_value("hold", "5").await;
+        let result = client
+            .set_register_value("hold", "5", ValueWrite::Command)
+            .await;
         assert!(msg(&result).contains("failed")); // took the client send-command branch, not the server memory-write branch
 
         let key = Key {
@@ -672,7 +722,9 @@ mod tests {
             .read()
             .read_unchecked(key.clone(), &range);
 
-        let result = client.set_register_value("ro", "5").await;
+        let result = client
+            .set_register_value("ro", "5", ValueWrite::Command)
+            .await;
         assert!(
             matches!(result, CommandResult::Handled(None)),
             "a ReadOnly client write is silently accepted: no message, error or otherwise"
@@ -733,14 +785,20 @@ mod tests {
     #[tokio::test]
     async fn ut_set_register_value_unknown_warns() {
         let mut v = view(Role::Server);
-        assert!(msg(&v.set_register_value("nope", "1").await).contains("unknown register"));
+        assert!(
+            msg(&v.set_register_value("nope", "1", ValueWrite::Command).await)
+                .contains("unknown register")
+        );
     }
 
     #[tokio::test]
     async fn ut_set_fixed_value_on_server_writes_memory() {
         let mut v = view(Role::Server);
         v.apply_add(edited("hold", holding(0), None)).await;
-        assert!(msg(&v.set_register_value("hold", "7").await).contains("set hold = 7"));
+        assert!(
+            msg(&v.set_register_value("hold", "7", ValueWrite::Command).await)
+                .contains("set hold = 7")
+        );
     }
 
     #[test]
@@ -992,5 +1050,231 @@ mod tests {
             warned,
             "expected a Warning naming the rejected register/range"
         );
+    }
+
+    fn holding_write_only(addr: u16) -> Register {
+        RegisterBuilder::default()
+            .slave_id(UnitId(1))
+            .access(Access::WriteOnly)
+            .kind(Kind::HoldingRegister)
+            .address(Address::Fixed(addr))
+            .format(Format::u16(
+                Endian::Big,
+                WordOrder::Normal,
+                Resolution(1.0),
+                BitField::default(),
+            ))
+            .build()
+            .unwrap()
+    }
+
+    fn view_on(role: Role, port: u16) -> ModbusModuleView {
+        let device = DeviceConfig {
+            interval_ms: Some(300),
+            ..DeviceConfig::default()
+        };
+        let spec = ModuleSpec {
+            endpoint: Endpoint::Tcp {
+                ip: "127.0.0.1".into(),
+                port,
+            },
+            ..spec(role)
+        };
+        let module = ModbusModule::new(&spec, &device);
+        ModbusModuleView::new(module, spec, device)
+    }
+
+    /// A started server holding a read-write register `hold` at 0, and a connected client that
+    /// has the same register under `client_register`.
+    async fn connected_pair(client_register: Register) -> (ModbusModuleView, ModbusModuleView) {
+        let port = reserve_tcp_port().release();
+        let mut server = view_on(Role::Server, port);
+        server.apply_add(edited("hold", holding(0), None)).await;
+        server.module.start().await.expect("server start");
+        let mut client = view_on(Role::Client, port);
+        client
+            .apply_add(edited("hold", client_register, None))
+            .await;
+        client.module.start().await.expect("client start");
+        wait_until(
+            "client connects",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            || {
+                (client.module.connection_status()
+                    == crate::view::status_bar::ConnStatus::Connected)
+                    .then_some(())
+            },
+        )
+        .await;
+        (server, client)
+    }
+
+    fn drain(queue: &crate::sim::events::ScriptQueue<RegisterEvent>) {
+        while queue.pop().is_some() {}
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// MB-E-107 — a client `:set` of a read-write register publishes nothing until the next
+    /// poll brings the value back, and that event's source is `Poll`.
+    async fn ut_client_set_produces_event_only_on_next_poll() {
+        let (mut server, mut client) = connected_pair(holding(0)).await;
+        let queue = capture_events(&client.module.events());
+        wait_until(
+            "first poll event",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            || queue.pop(),
+        )
+        .await;
+        drain(&queue);
+
+        let result = client
+            .set_register_value("hold", "5", ValueWrite::Command)
+            .await;
+        assert!(msg(&result).contains("(sent)"));
+
+        let event = wait_until(
+            "poll event with the new value",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            || {
+                while let Some(event) = queue.pop() {
+                    assert!(
+                        !matches!(event.source, RegisterEventSource::Set),
+                        "the `:set` itself publishes nothing"
+                    );
+                    if event.changed {
+                        return Some(event);
+                    }
+                }
+                None
+            },
+        )
+        .await;
+        assert!(matches!(event.source, RegisterEventSource::Poll));
+        client.module.stop().await.expect("stop");
+        server.module.stop().await.expect("stop");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// MB-E-119 — a client `:set` of a write-only register is never polled back, so the
+    /// command publishes its own `Set` event at once.
+    async fn ut_client_write_only_set_produces_event_at_once() {
+        let (mut server, mut client) = connected_pair(holding_write_only(0)).await;
+        let queue = capture_events(&client.module.events());
+        drain(&queue);
+
+        let result = client
+            .set_register_value("hold", "5", ValueWrite::Command)
+            .await;
+        assert!(msg(&result).contains("(sent)"));
+        let event = queue.pop().expect("event at once");
+        assert!(matches!(event.source, RegisterEventSource::Set));
+        assert!(queue.pop().is_none());
+        client.module.stop().await.expect("stop");
+        server.module.stop().await.expect("stop");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// MB-E-112 — a default seeded onto a connected client's write-only register publishes
+    /// nothing, though the value reaches the server.
+    async fn ut_client_write_only_default_seed_produces_no_event() {
+        let (mut server, mut client) = connected_pair(holding_write_only(0)).await;
+        let queue = capture_events(&client.module.events());
+        drain(&queue);
+
+        let mut seed = edited("seed", holding_write_only(0), None);
+        seed.default = Some(crate::config::device::Scalar::Int(4));
+        client.apply_add(seed).await;
+
+        let key = Key {
+            id: SlaveKey {
+                slave_id: UnitId(1),
+                kind: Kind::HoldingRegister,
+            },
+        };
+        let range = Range::new(0, 1);
+        for (what, module) in [("server", &server.module), ("client", &client.module)] {
+            wait_until(
+                what,
+                std::time::Duration::from_millis(5),
+                std::time::Duration::from_secs(10),
+                || {
+                    (module.memory().read().read_unchecked(key.clone(), &range) == Some(vec![4]))
+                        .then_some(())
+                },
+            )
+            .await;
+        }
+        assert!(queue.pop().is_none());
+        client.module.stop().await.expect("stop");
+        server.module.stop().await.expect("stop");
+    }
+
+    #[tokio::test]
+    /// MB-E-108 — a client `:set` of a read-only register sends nothing and publishes nothing.
+    async fn ut_client_read_only_set_produces_no_event() {
+        let mut client = view(Role::Client);
+        client
+            .apply_add(edited("ro", holding_read_only(0), None))
+            .await;
+        let queue = capture_events(&client.module.events());
+        let result = client
+            .set_register_value("ro", "5", ValueWrite::Command)
+            .await;
+        assert!(matches!(result, CommandResult::Handled(None)));
+        assert!(queue.pop().is_none());
+    }
+
+    #[tokio::test]
+    /// MB-E-112 — a default seeded by the add dialog publishes nothing, fixed or virtual.
+    async fn ut_add_register_default_seed_produces_no_event() {
+        for register in [holding(0), virtual_reg()] {
+            let mut v = view(Role::Server);
+            let queue = capture_events(&v.module.events());
+            let mut added = edited("r", register, None);
+            added.default = Some(crate::config::device::Scalar::Int(4));
+            v.apply_add(added).await;
+            assert!(queue.pop().is_none());
+        }
+    }
+
+    #[tokio::test]
+    /// MB-E-106 — an edit with an empty value re-writes the preserved value silently.
+    async fn ut_edit_with_empty_value_produces_no_event() {
+        for register in [holding(0), virtual_reg()] {
+            let mut v = view(Role::Server);
+            v.apply_add(edited("r", register.clone(), Some("3"))).await;
+            v.refresh().await;
+            assert!(
+                !v.table.definitions()[0].value.is_empty(),
+                "the edit has a value to preserve"
+            );
+            let queue = capture_events(&v.module.events());
+            v.apply_edit(edited("r", register, None), 0, "r".into())
+                .await;
+            assert!(queue.pop().is_none());
+        }
+    }
+
+    #[tokio::test]
+    /// MB-R-302, MB-E-114 — a value typed in the add or edit dialog publishes one `Set` event,
+    /// like `:set`, for a fixed and a virtual register.
+    async fn ut_dialog_value_produces_event_like_set() {
+        for register in [holding(0), virtual_reg()] {
+            let mut v = view(Role::Server);
+            let queue = capture_events(&v.module.events());
+            v.apply_add(edited("r", register.clone(), Some("7"))).await;
+            let event = queue.pop().expect("add event");
+            assert!(matches!(event.source, RegisterEventSource::Set));
+            assert!(queue.pop().is_none());
+
+            v.apply_edit(edited("r", register, Some("9")), 0, "r".into())
+                .await;
+            let event = queue.pop().expect("edit event");
+            assert!(matches!(event.source, RegisterEventSource::Set));
+            assert!(queue.pop().is_none());
+        }
     }
 }

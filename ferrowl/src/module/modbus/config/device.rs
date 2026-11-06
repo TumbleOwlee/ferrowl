@@ -9,7 +9,7 @@ use ferrowl_store::{CellType, Range};
 use ferrowl_ui::traits::ToLabel;
 use serde::{Deserialize, Serialize};
 
-use crate::config::script::ScriptDef;
+use crate::config::script::{ModbusTrigger, ScriptDef};
 
 mod monitor;
 mod value_types;
@@ -69,7 +69,7 @@ pub struct DeviceConfig {
     /// Global Lua simulation scripts (named, toggleable; run on the sim thread). Managed via
     /// the `:script` dialog; replaces the legacy per-register `update` snippets.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub scripts: Vec<ScriptDef>,
+    pub scripts: Vec<ScriptDef<ModbusTrigger>>,
     /// Script sim cycle interval in seconds — separate from `interval_ms` (device-polling
     /// cadence). Older device config files without this field load as the default (1.0s).
     #[serde(default = "default_script_interval")]
@@ -109,6 +109,7 @@ impl DeviceConfig {
                 continue;
             }
             self.scripts.push(ScriptDef {
+                trigger: None,
                 name: name.clone(),
                 code,
                 enabled: true,
@@ -404,6 +405,7 @@ mod tests {
             },
             definitions,
             scripts: vec![ScriptDef {
+                trigger: None,
                 name: "sim".into(),
                 code: "C_Register:Set(\"power\", C_Register:GetInt(\"setpoint\"))".into(),
                 enabled: true,
@@ -432,6 +434,17 @@ mod tests {
         cfg.migrate_update_scripts();
         assert_eq!(cfg.scripts.len(), 1);
         assert_eq!(cfg.scripts[0].code, "C_Time:Sleep(1)");
+    }
+
+    #[test]
+    /// SC-R-097 — a script migrated from a legacy `update` snippet has no trigger.
+    fn ut_migrated_update_script_has_no_trigger() {
+        let mut cfg = sample();
+        cfg.scripts.clear();
+        cfg.definitions.get_mut("state").unwrap().update = Some("C_Time:Sleep(1)".into());
+        cfg.migrate_update_scripts();
+        assert_eq!(cfg.scripts.len(), 1);
+        assert_eq!(cfg.scripts[0].trigger, None);
     }
 
     fn roundtrip(ty: FileType, ext: &str) {

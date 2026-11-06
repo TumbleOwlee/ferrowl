@@ -78,13 +78,13 @@ impl Validate for Interval {
 /// code editor (skipped while no script is selected) → log.
 #[focusable]
 #[derive(Focus)]
-pub struct ScriptDialog {
+pub struct ScriptDialog<T> {
     #[focus]
     interval: Widget<InputFieldState, InputField<Interval>>,
     /// Interval the dialog was opened with — the fallback if the field is left invalid at close,
     /// so a fat-fingered edit reverts to what was already running instead of a hardcoded default.
     initial_interval: Duration,
-    scripts: Vec<ScriptDef>,
+    scripts: Vec<ScriptDef<T>>,
     #[focus]
     table: ScriptTable,
     #[focus]
@@ -103,7 +103,7 @@ pub struct ScriptDialog {
     /// Set by `e` on the script table: the selected script, to be executed once by the owner
     /// (which holds the Lua modules the dialog knows nothing about). Pulled out with
     /// [`ScriptDialog::take_run_request`] after each key.
-    pending_run: Option<ScriptDef>,
+    pending_run: Option<ScriptDef<T>>,
     /// Compact (no vertical row margin) script table; toggled with `c`. Default off (margin 1).
     compact: bool,
     close_confirm: Option<CloseConfirmDialog>,
@@ -113,8 +113,16 @@ pub struct ScriptDialog {
     help: Option<HelpOverlay>,
 }
 
-impl ScriptDialog {
-    pub fn new(scripts: &[ScriptDef], interval: Duration, bindings: LuaBindings) -> Self {
+impl<T> ScriptDialog<T> {
+    /// A separate impl without the `Clone` bound: the focus derive calls it from generated code
+    /// that carries only `T`'s own bounds.
+    fn selected(&self) -> Option<usize> {
+        script_manager::selected(&self.scripts, &self.table)
+    }
+}
+
+impl<T: Clone> ScriptDialog<T> {
+    pub fn new(scripts: &[ScriptDef<T>], interval: Duration, bindings: LuaBindings) -> Self {
         let scripts = scripts.to_vec();
         let mut interval_field = interval_input();
         set_input(&mut interval_field, &format_interval(interval));
@@ -147,7 +155,7 @@ impl ScriptDialog {
     /// must never propagate a bogus duration, and must not silently discard whatever was already
     /// running either) and the scripts list, with the open editor flushed into the selected script
     /// first so unsaved keystrokes aren't lost.
-    pub fn resolve(mut self) -> (Vec<ScriptDef>, Duration) {
+    pub fn resolve(mut self) -> (Vec<ScriptDef<T>>, Duration) {
         self.flush_code_to_selection();
         let interval = parse_interval(self.interval.state.input()).unwrap_or(self.initial_interval);
         (self.scripts, interval)
@@ -163,7 +171,7 @@ impl ScriptDialog {
         }
     }
 
-    fn manager(&mut self) -> ScriptManagerRef<'_> {
+    fn manager(&mut self) -> ScriptManagerRef<'_, T> {
         ScriptManagerRef {
             scripts: &mut self.scripts,
             table: &mut self.table,
@@ -171,10 +179,6 @@ impl ScriptDialog {
             code: &mut self.code,
             compact: &mut self.compact,
         }
-    }
-
-    fn selected(&self) -> Option<usize> {
-        script_manager::selected(&self.scripts, &self.table)
     }
 
     /// Load the selected script's code into the editor. Without a selection the editor is
@@ -222,7 +226,7 @@ impl ScriptDialog {
 
     /// Take the script queued by `e`, if any. The owner calls this after every key and executes
     /// the script once against its own Lua modules (SC-R-035).
-    pub fn take_run_request(&mut self) -> Option<ScriptDef> {
+    pub fn take_run_request(&mut self) -> Option<ScriptDef<T>> {
         self.pending_run.take()
     }
 
@@ -536,10 +540,12 @@ pub async fn snapshot_log(log: &SharedLog, max: usize) -> Vec<LogEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::script::ModbusTrigger;
 
-    fn dialog() -> ScriptDialog {
-        ScriptDialog::new(
+    fn dialog() -> ScriptDialog<ModbusTrigger> {
+        ScriptDialog::<ModbusTrigger>::new(
             &[ScriptDef {
+                trigger: None,
                 name: "boot".into(),
                 code: String::new(),
                 enabled: true,
@@ -656,7 +662,8 @@ mod tests {
     #[test]
     /// UI-R-078 — the focus cycle skips a disabled field (the code editor).
     fn ut_rotation_skips_disabled_code_editor() {
-        let mut d = ScriptDialog::new(&[], Duration::from_secs(1), LuaBindings::Modbus);
+        let mut d =
+            ScriptDialog::<ModbusTrigger>::new(&[], Duration::from_secs(1), LuaBindings::Modbus);
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> templates button
@@ -687,7 +694,8 @@ mod tests {
     #[test]
     /// UI-R-058 — the script table adds, toggles-enabled, and deletes scripts in its working list.
     fn ut_create_toggle_delete_script() {
-        let mut d = ScriptDialog::new(&[], Duration::from_secs(1), LuaBindings::Modbus);
+        let mut d =
+            ScriptDialog::<ModbusTrigger>::new(&[], Duration::from_secs(1), LuaBindings::Modbus);
         // Tab to the name input, type a name, Enter creates an enabled script.
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> name input
@@ -704,8 +712,9 @@ mod tests {
     #[test]
     /// UI-R-051 — `e` on the script table requests a one-shot run of the selected script.
     fn ut_e_requests_run_of_selected_script() {
-        let mut d = ScriptDialog::new(
+        let mut d = ScriptDialog::<ModbusTrigger>::new(
             &[ScriptDef {
+                trigger: None,
                 name: "boot".into(),
                 code: "print(1)".into(),
                 enabled: false,
@@ -743,7 +752,8 @@ mod tests {
     #[test]
     /// UI-R-335 — `e` with no script selected is a no-op.
     fn ut_e_without_selection_is_noop() {
-        let mut d = ScriptDialog::new(&[], Duration::from_secs(1), LuaBindings::Modbus);
+        let mut d =
+            ScriptDialog::<ModbusTrigger>::new(&[], Duration::from_secs(1), LuaBindings::Modbus);
         d.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table (empty)
         d.handle_events(KeyModifiers::NONE, KeyCode::Char('e'));
         assert!(d.take_run_request().is_none());
@@ -949,7 +959,8 @@ mod tests {
             cs_actions: vec!["Heartbeat"],
             conn_actions: vec!["StatusNotification"],
         };
-        let scripts = [ScriptDef {
+        let scripts = [ScriptDef::<ModbusTrigger> {
+            trigger: None,
             name: "s".into(),
             enabled: true,
             code: String::new(),
@@ -989,7 +1000,7 @@ mod tests {
     // --- templates ------------------------------------------------------
 
     /// Tab to the Templates button (interval → table → name input → button).
-    fn focus_templates_button(d: &mut ScriptDialog) {
+    fn focus_templates_button(d: &mut ScriptDialog<ModbusTrigger>) {
         while d.focus != ScriptDialogFocus::TemplatesButton {
             d.handle_events(KeyModifiers::NONE, KeyCode::Tab);
         }
@@ -1062,8 +1073,9 @@ mod tests {
     #[test]
     /// UI-R-055, UI-R-338, UI-R-340 — Enter on a selected script opens the rename prompt and renames it.
     fn ut_enter_on_table_renames_selected_script() {
-        let mut d = ScriptDialog::new(
+        let mut d = ScriptDialog::<ModbusTrigger>::new(
             &[ScriptDef {
+                trigger: None,
                 name: "boot".into(),
                 code: "print('hi')".into(),
                 enabled: false,
@@ -1090,14 +1102,16 @@ mod tests {
     #[test]
     /// UI-R-089 — an empty or duplicate name is refused and the prompt stays open.
     fn ut_rename_refuses_empty_and_duplicate() {
-        let mut d = ScriptDialog::new(
+        let mut d = ScriptDialog::<ModbusTrigger>::new(
             &[
                 ScriptDef {
+                    trigger: None,
                     name: "boot".into(),
                     code: String::new(),
                     enabled: true,
                 },
                 ScriptDef {
+                    trigger: None,
                     name: "other".into(),
                     code: String::new(),
                     enabled: true,
@@ -1138,7 +1152,8 @@ mod tests {
         assert!(d.close_confirm.is_none(), "Esc belonged to the prompt");
         assert_eq!(d.scripts[0].name, "boot");
 
-        let mut empty = ScriptDialog::new(&[], Duration::from_secs(1), LuaBindings::Modbus);
+        let mut empty =
+            ScriptDialog::<ModbusTrigger>::new(&[], Duration::from_secs(1), LuaBindings::Modbus);
         empty.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table (empty)
         assert!(!empty.handle_events(KeyModifiers::NONE, KeyCode::Enter));
         assert!(empty.rename.is_none());
@@ -1154,7 +1169,8 @@ mod tests {
         assert!(!d.handle_events(KeyModifiers::NONE, KeyCode::Char('?')));
         assert!(d.help.is_some());
 
-        let mut empty = ScriptDialog::new(&[], Duration::from_secs(1), LuaBindings::Modbus);
+        let mut empty =
+            ScriptDialog::<ModbusTrigger>::new(&[], Duration::from_secs(1), LuaBindings::Modbus);
         empty.handle_events(KeyModifiers::NONE, KeyCode::Tab); // -> table (empty)
         empty.handle_events(KeyModifiers::NONE, KeyCode::Char('?'));
         assert!(empty.help.is_some());

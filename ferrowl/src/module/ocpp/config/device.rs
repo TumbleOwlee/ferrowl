@@ -8,6 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::config::script::OcppTrigger;
 pub use crate::config::script::ScriptDef;
 
 use super::session::{OcppRole, OcppSpec, OcppVersion};
@@ -137,7 +138,7 @@ pub struct OcppDeviceConfig {
     pub reconnect: Option<bool>,
     /// Lua simulation scripts (run every ~100ms while enabled; client role only).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub scripts: Vec<ScriptDef>,
+    pub scripts: Vec<ScriptDef<OcppTrigger>>,
     /// Script sim cycle interval in seconds — the period `refresh_all` is called on the sim
     /// thread. Older device config files without this field load as the default (1.0s).
     #[serde(default = "default_script_interval")]
@@ -219,7 +220,7 @@ const MIN_SCRIPT_INTERVAL_SECS: f64 = 0.05;
 impl OcppDeviceConfig {
     /// Assemble a device config from a runtime spec, carrying the given scripts. Used when a
     /// setup/edit dialog supplies version/role/timeout and the scripts are preserved separately.
-    pub fn from_spec(spec: &OcppSpec, scripts: Vec<ScriptDef>) -> Self {
+    pub fn from_spec(spec: &OcppSpec, scripts: Vec<ScriptDef<OcppTrigger>>) -> Self {
         Self {
             version: None,
             ocpp_version: spec.version,
@@ -267,7 +268,8 @@ mod tests {
     /// SC-R-022 — a script entry with no `enabled` flag defaults to enabled.
     fn ut_script_enabled_defaults_true() {
         // A file entry without an `enabled` flag deserializes as active.
-        let s: ScriptDef = serde_json::from_str(r#"{"name":"a","code":"x = 1"}"#).unwrap();
+        let s: ScriptDef<OcppTrigger> =
+            serde_json::from_str(r#"{"name":"a","code":"x = 1"}"#).unwrap();
         assert!(s.enabled);
     }
 
@@ -281,6 +283,7 @@ mod tests {
             timeout_ms: Some(5000),
             reconnect: Some(false),
             scripts: vec![ScriptDef {
+                trigger: None,
                 name: "boot".into(),
                 code: "C_OCPP:Set(\"Power\", 11000)".into(),
                 enabled: false,
@@ -678,6 +681,7 @@ mod tests {
             security: OcppSecurityConfig::default(),
         };
         let scripts = vec![ScriptDef {
+            trigger: None,
             name: "s".into(),
             code: "".into(),
             enabled: true,

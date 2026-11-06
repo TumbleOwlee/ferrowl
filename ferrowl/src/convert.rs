@@ -43,6 +43,23 @@ impl FileType {
 /// functions.
 pub struct Converter {}
 
+/// Parse-failure text naming the key path unless the failure sits at no key (`keyless`, a syntax error).
+fn describe<E: std::fmt::Display>(
+    format: &str,
+    e: &serde_path_to_error::Error<E>,
+    keyless: bool,
+) -> String {
+    let path = e.path();
+    if keyless || path.iter().next().is_none() {
+        format!("Failed to deserialize {format} [{}].", e.inner())
+    } else {
+        format!(
+            "Failed to deserialize {format} [key path {path}: {}].",
+            e.inner()
+        )
+    }
+}
+
 impl Converter {
     /// Deserialize a value from a file of the given type.
     pub fn load<T: DeserializeOwned>(path: &str, ty: FileType) -> Result<T, Error> {
@@ -50,10 +67,27 @@ impl Converter {
         let content = std::fs::read_to_string(&resolved)
             .map_err(|e| Error::Deserialize(format!("Failed to read {path} [{e}].")))?;
         match ty {
-            FileType::Toml => toml::from_str::<T>(&content)
-                .map_err(|e| Error::Deserialize(format!("Failed to deserialize TOML [{e}]."))),
-            FileType::Json => serde_json::from_str::<T>(&content)
-                .map_err(|e| Error::Deserialize(format!("Failed to deserialize JSON [{e}]."))),
+            FileType::Toml => {
+                let de = toml::Deserializer::parse(&content).map_err(|e| {
+                    Error::Deserialize(format!("Failed to deserialize TOML [{e}]."))
+                })?;
+                serde_path_to_error::deserialize(de)
+                    .map_err(|e| Error::Deserialize(describe("TOML", &e, false)))
+            }
+            FileType::Json => {
+                let mut de = serde_json::Deserializer::from_str(&content);
+                let value = serde_path_to_error::deserialize(&mut de).map_err(|e| {
+                    let keyless = matches!(
+                        e.inner().classify(),
+                        serde_json::error::Category::Syntax | serde_json::error::Category::Eof
+                    );
+                    Error::Deserialize(describe("JSON", &e, keyless))
+                })?;
+                de.end().map_err(|e| {
+                    Error::Deserialize(format!("Failed to deserialize JSON [{e}]."))
+                })?;
+                Ok(value)
+            }
         }
     }
 
@@ -310,6 +344,78 @@ mod tests {
         std::fs::write(&path, "{ not valid json ").unwrap();
         let r = Converter::load::<Sample>(path.to_str().unwrap(), FileType::Json);
         assert!(matches!(r, Err(Error::Deserialize(_))));
+    }
+
+    // Lifts when a test reads the fields; they are only deserialized.
+    #[derive(Deserialize, Debug)]
+    #[allow(dead_code)]
+    struct Item {
+        count: u32,
+    }
+
+    #[derive(Deserialize, Debug)]
+    #[allow(dead_code)]
+    struct Holder {
+        items: Vec<Item>,
+    }
+
+    fn load_text(name: &str, text: &str, ty: FileType) -> String {
+        let dir = reserve_temp_dir("ferrowl_convert");
+        let path = dir.join(name);
+        std::fs::write(&path, text).unwrap();
+        match Converter::load::<Holder>(path.to_str().unwrap(), ty) {
+            Err(Error::Deserialize(msg)) => msg,
+            other => panic!("expected a deserialize error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    /// CS-R-079 — a TOML type error names its line and its key path.
+    fn ut_load_toml_error_names_line_and_key_path() {
+        let msg = load_text(
+            "holder.toml",
+            "[[items]]\ncount = 1\n\n[[items]]\ncount = \"x\"\n",
+            FileType::Toml,
+        );
+        assert!(msg.contains("items[1].count"), "{msg}");
+        assert!(msg.contains("line 5"), "{msg}");
+    }
+
+    #[test]
+    /// CS-R-079 — a JSON type error names its line and its key path.
+    fn ut_load_json_error_names_line_and_key_path() {
+        let msg = load_text(
+            "holder.json",
+            "{\n\"items\": [\n{\"count\": 1},\n{\"count\": \"x\"}\n]\n}",
+            FileType::Json,
+        );
+        assert!(msg.contains("items[1].count"), "{msg}");
+        assert!(msg.contains("line 4"), "{msg}");
+    }
+
+    #[test]
+    /// CS-R-079 — a syntax error names its line and sits at no key.
+    fn ut_load_syntax_error_names_line_with_no_key_path() {
+        let toml = load_text("bad.toml", "items = [\n", FileType::Toml);
+        assert!(toml.contains("line 1, column 10"), "{toml}");
+        assert!(!toml.contains("key path"), "{toml}");
+        let json = load_text("bad.json", "{\"items\": []}\n  x", FileType::Json);
+        assert!(json.contains("line 2"), "{json}");
+        assert!(!json.contains("key path"), "{json}");
+        let nested = load_text(
+            "nested.json",
+            "{\"items\": [\n{\"count\": 1,,",
+            FileType::Json,
+        );
+        assert!(nested.contains("line 2"), "{nested}");
+        assert!(!nested.contains("key path"), "{nested}");
+        let truncated = load_text(
+            "truncated.json",
+            "{\"items\": [\n{\"count\": 1},\n{\"count\":",
+            FileType::Json,
+        );
+        assert!(truncated.contains("line 3"), "{truncated}");
+        assert!(!truncated.contains("key path"), "{truncated}");
     }
 
     /// A unique `~/<name>` string plus the real, joined `PathBuf` it should expand to, for

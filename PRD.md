@@ -100,7 +100,7 @@ Summarized here; each links to the exhaustive, normative spec.
 |---|---|---|
 | Modbus | Client, server & passive monitor roles; TCP, UDP, RTU, ASCII, RTU-over-TCP, ASCII-over-TCP; TLS + mutual TLS on TCP-based transports; all four register tables; typed registers (13 formats, both endians, bit-fields, display scaling); client/server auto-reconnect with backoff. | [`docs/specs/modbus/`](./docs/specs/modbus/) |
 | OCPP | CS & CSMS roles; 1.6 (28 actions), 2.0.1 (64), 2.1 (90); TLS + mutual TLS + Basic Auth; typed send dialogs where the payload is flat, raw-JSON editor where it is nested. | [`docs/specs/ocpp/`](./docs/specs/ocpp/) |
-| Scripting | Lua 5.4 sim scripts on a timer, per module and per session, via a small fixed `C_*` API, in a restricted sandbox. | [`docs/specs/scripting/`](./docs/specs/scripting/) |
+| Scripting | Lua 5.4 sim scripts on a timer or on Modbus register events, per module and per session, via a small fixed `C_*` API, in a restricted sandbox. | [`docs/specs/scripting/`](./docs/specs/scripting/) |
 | TUI | Tabbed multi-module UI, live tables, modal dialogs, a vim-style `:` command line, vim + arrow navigation, an in-TUI code editor. | [`docs/specs/tui/`](./docs/specs/tui/) |
 | Config & session | Device + session files, TOML or JSON, save/load, `migrate`. | [`docs/specs/config-session/`](./docs/specs/config-session/) |
 | CLI & headless | The process command line and `ferrowl run` for CI, with an exit-code contract. | [`docs/specs/cli-headless/`](./docs/specs/cli-headless/) |
@@ -126,7 +126,7 @@ Each area's known limitations live in its own `edge-cases.md`.
 | Upstream / Downstream | The bridge's two interfaces: upstream faces the master (bridge acts as server), downstream faces the device (bridge acts as client). |
 | Module | One configured Modbus or OCPP instance, shown as one tab. |
 | Session | A saved file listing multiple module instances plus session-level Lua scripts, restorable in one command. |
-| Sim / sim script | A Lua script attached to a module (or the session) that runs on a timer to simulate device behavior. |
+| Sim / sim script | A Lua script attached to a module (or the session) that runs on a timer or, on a Modbus module, on register events to simulate device behavior. |
 | Virtual register | A Modbus register with no fixed wire address — script-only, never sent over the wire. |
 | `C_*` modules | The fixed set of Lua global tables (`C_Register`, `C_OCPP`, `C_Time`, `C_Log`, `C_Test`, `C_Module`, `C_Statics`) exposed to sim scripts. |
 | Headless mode | `ferrowl run` — runs modules and Lua sims without a terminal UI, for CI. `ferrowl bridge` is headless too but runs no modules or sims. |

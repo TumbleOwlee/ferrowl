@@ -96,6 +96,8 @@ This area owns the *mechanism*: how `:` commands parse and dispatch, generic (ap
 
 **UI-R-017** — App-level commands are dispatched by the application: tab lifecycle (`:quit`, `:qall`, `:new`, `:clone`, `:load`), session persistence (`:write`), tab reordering (`:swap`), session-script management (`:session`, `:script copy`), log-ring clear (`:log clear`). Exact syntax and aliases: [`api-contract.md`](./api-contract.md).
 
+**UI-R-385** — `:script copy` (UI-R-017) carries each script's trigger with it when the trigger fits the target tab.
+
 **UI-R-018** — A command not handled at the app level is forwarded to the active tab's view.
 
 **UI-R-347** — A command the active tab's view handles (UI-R-018) has any `(level, message)` it returns appended to that tab's log.

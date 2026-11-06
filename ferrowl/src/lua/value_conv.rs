@@ -123,7 +123,7 @@ fn float_value_for_format(v: f64, format: &Format) -> Result<Value> {
 
 /// Map a decoded register `Value` to the Lua `ValueType`, exposing the raw (unscaled) stored
 /// number so that a subsequent `Set` round-trips through `Register::encode`.
-pub(super) fn value_to_type(value: Value) -> ValueType {
+pub(crate) fn value_to_type(value: Value) -> ValueType {
     match value {
         Value::Numeric(p, _) => match p {
             NumericPrimitive::U8(v) => ValueType::Int(v as i128),

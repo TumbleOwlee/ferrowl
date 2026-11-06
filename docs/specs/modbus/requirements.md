@@ -114,6 +114,16 @@ See [`../README.md`](../README.md). Companions: [`api-contract.md`](./api-contra
 
 ---
 
+## Register events
+
+**MB-R-302** — A Modbus server or client module produces one event per successful write to a defined register, fixed-address or virtual, for every source: a remote master's write, a client's poll result, `:set`, a Lua write.
+
+**MB-R-303** — A register event carries the register name, old value, new value, source, sequence number and wall-clock timestamp in milliseconds.
+
+**MB-R-304** — A module's register events carry a strictly increasing sequence number, produced whether or not a script selects them, and continuing across a sim restart (SC-R-024) and a reconfigure (MB-R-089) until the module is closed.
+
+---
+
 ## Client
 
 ### Poll loop and retry

@@ -14,7 +14,7 @@ use crate::{
     SerialError, TcpError,
 };
 
-use ferrowl_store::Memory;
+use ferrowl_store::{Memory, WriteSource};
 use parking_lot::RwLock as MemLock;
 use rust_modbus::{
     Address, Client, ClientFraming, ClientTransport, ExceptionCode, FrameTransport, Framing,
@@ -505,7 +505,7 @@ where
                     // Scoped so the (sync) guard is dropped before the log `.await`s below.
                     let ok = {
                         let mut guard = memory.write();
-                        guard.write_unchecked(key, &range, &values)
+                        guard.write_unchecked_from(WriteSource::Poll, key, &range, &values)
                     };
                     if !ok {
                         log.invoke(

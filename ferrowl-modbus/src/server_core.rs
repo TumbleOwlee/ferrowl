@@ -9,7 +9,7 @@ use crate::{
     TcpError,
 };
 
-use ferrowl_store::{CellType, Memory, Range};
+use ferrowl_store::{CellType, Memory, Range, WriteSource};
 use ferrowl_util::backoff::{AttemptOutcome, BackoffPolicy, run_with_backoff};
 use parking_lot::RwLock;
 use rust_modbus::{
@@ -166,7 +166,13 @@ where
     // Scoped so the (sync) guard is dropped before any log `.await` below.
     let result = {
         let mut guard = memory.write();
-        guard.write(key, &cell, &Range::new(addr as usize, values.len()), values)
+        guard.write_from(
+            WriteSource::Remote,
+            key,
+            &cell,
+            &Range::new(addr as usize, values.len()),
+            values,
+        )
     };
     match result {
         Ok(()) => {
@@ -226,7 +232,13 @@ where
     // Scoped so the (sync) guard is dropped before any log `.await` below.
     let result = {
         let mut guard = memory.write();
-        guard.write(key, &cell, &Range::new(addr as usize, 1), &[stored])
+        guard.write_from(
+            WriteSource::Remote,
+            key,
+            &cell,
+            &Range::new(addr as usize, 1),
+            &[stored],
+        )
     };
     match result {
         Ok(()) => {
@@ -462,7 +474,8 @@ where
                             &Range::new(read_addr as usize, cnt as usize),
                         ) {
                             Err(e) => Outcome::Rejected(e),
-                            Ok(v) => match guard.write(
+                            Ok(v) => match guard.write_from(
+                                WriteSource::Remote,
                                 key,
                                 &CellType::Register,
                                 &Range::new(write_addr as usize, values.len()),

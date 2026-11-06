@@ -8,6 +8,7 @@ use ferrowl_store::{CellKind, CellType, Range};
 use crate::config::device::{
     AccessCfg, AlignmentCfg, EndianCfg, RegisterDef, ValueType as DevValueType, WordOrderCfg,
 };
+use crate::config::script::{ModbusTrigger, ScriptDef};
 
 /// Modbus memory type backing a register.
 fn mem_type(register: &Register) -> CellType {
@@ -17,13 +18,15 @@ fn mem_type(register: &Register) -> CellType {
     }
 }
 
-/// (name, code) pairs for every enabled, non-empty global script (run on the sim thread).
-pub(crate) fn collect_scripts(device: &crate::config::DeviceConfig) -> Vec<(String, String)> {
+/// Every enabled, non-empty global script with its trigger (run on the sim thread).
+pub(crate) fn collect_scripts(
+    device: &crate::config::DeviceConfig,
+) -> Vec<ScriptDef<ModbusTrigger>> {
     device
         .scripts
         .iter()
         .filter(|s| s.enabled && !s.code.trim().is_empty())
-        .map(|s| (s.name.clone(), s.code.clone()))
+        .cloned()
         .collect()
 }
 
@@ -247,16 +250,19 @@ mod tests {
         let device = crate::config::DeviceConfig {
             scripts: vec![
                 ScriptDef {
+                    trigger: None,
                     name: "a".into(),
                     code: "x=1".into(),
                     enabled: true,
                 },
                 ScriptDef {
+                    trigger: None,
                     name: "disabled".into(),
                     code: "y=2".into(),
                     enabled: false,
                 },
                 ScriptDef {
+                    trigger: None,
                     name: "blank".into(),
                     code: "   ".into(),
                     enabled: true,
@@ -264,10 +270,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        assert_eq!(
-            collect_scripts(&device),
-            vec![("a".to_string(), "x=1".to_string())]
-        );
+        assert_eq!(collect_scripts(&device), vec![device.scripts[0].clone()]);
     }
 
     #[test]

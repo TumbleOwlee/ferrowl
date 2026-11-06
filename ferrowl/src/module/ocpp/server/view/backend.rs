@@ -1941,6 +1941,7 @@ mod tests {
         let _listener = guard.into_listener();
         let mut v = server_view(port);
         v.device.scripts = vec![crate::config::script::ScriptDef {
+            trigger: None,
             name: "count".into(),
             code: "n = (n or 0) + 1; print(n)".into(),
             enabled: true,

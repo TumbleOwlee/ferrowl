@@ -947,4 +947,82 @@ self_signed = true
         assert!(msg.contains("require_client_cert"), "got: {msg}");
         assert!(msg.contains("[tls.server]/[tls.client]"), "got: {msg}");
     }
+
+    const DEVICE_HEAD: &str = "[definitions.reg]\ntype = \"U16\"\n";
+
+    fn load_error_text(file: &str, text: &str, load: impl Fn(&str) -> ConfigError) -> String {
+        let dir = reserve_temp_dir("ferrowl_cfgmod_trigger");
+        let path = dir.join(file).to_string_lossy().into_owned();
+        std::fs::write(&path, text).unwrap();
+        load(&path).to_string()
+    }
+
+    #[test]
+    /// SC-E-050 — a Modbus device script trigger of any kind but register fails the load,
+    /// naming its line and key path.
+    fn ut_load_device_rejects_non_register_trigger() {
+        let text = format!(
+            "{DEVICE_HEAD}\n[[scripts]]\nname = \"s\"\n[scripts.trigger]\nkind = \"interval\"\n"
+        );
+        let msg = load_error_text("interval.toml", &text, |p| load_device(p).unwrap_err());
+        assert!(msg.contains("scripts[0].trigger"), "{msg}");
+        assert!(msg.contains("line 7"), "{msg}");
+    }
+
+    #[test]
+    /// SC-E-050 — a session script trigger of any kind fails the load, naming its line and key
+    /// path.
+    fn ut_load_session_rejects_any_trigger() {
+        let text = "[[scripts]]\nname = \"s\"\n[scripts.trigger]\nkind = \"register\"\nregisters = \"all\"\n";
+        let msg = load_error_text("session.toml", text, |p| load_session(p).unwrap_err());
+        assert!(msg.contains("scripts[0].trigger"), "{msg}");
+        assert!(msg.contains("line 4"), "{msg}");
+    }
+
+    #[test]
+    /// SC-E-050 — an OCPP device script trigger of any kind fails the load, naming its line and
+    /// key path.
+    fn ut_load_ocpp_device_rejects_any_trigger() {
+        let text = "[[scripts]]\nname = \"s\"\n[scripts.trigger]\nkind = \"register\"\nregisters = \"all\"\n";
+        let msg = load_error_text("ocpp.toml", text, |p| load_ocpp_device(p).unwrap_err());
+        assert!(msg.contains("scripts[0].trigger"), "{msg}");
+        assert!(msg.contains("line 4"), "{msg}");
+    }
+
+    #[test]
+    /// SC-E-051 — a register trigger carrying a `module` key fails the load.
+    fn ut_load_device_rejects_module_key_in_trigger() {
+        let text = format!(
+            "{DEVICE_HEAD}\n[[scripts]]\nname = \"s\"\n[scripts.trigger]\nkind = \"register\"\nregisters = \"all\"\nmodule = \"m\"\n"
+        );
+        let msg = load_error_text("module.toml", &text, |p| load_device(p).unwrap_err());
+        assert!(msg.contains("module"), "{msg}");
+        assert!(msg.contains("scripts[0].trigger"), "{msg}");
+    }
+
+    #[test]
+    /// CS-R-052, CS-R-078 — a key the trigger's kind does not define fails the load.
+    fn ut_trigger_unknown_key_fails_the_load() {
+        let text = format!(
+            "{DEVICE_HEAD}\n[[scripts]]\nname = \"s\"\n[scripts.trigger]\nkind = \"register\"\nregisters = \"all\"\nbogus = 1\n"
+        );
+        let msg = load_error_text("bogus.toml", &text, |p| load_device(p).unwrap_err());
+        assert!(msg.contains("bogus"), "{msg}");
+        assert!(msg.contains("scripts[0].trigger"), "{msg}");
+    }
+
+    #[test]
+    /// CS-R-052, CS-R-072 — a stray key on the script entry itself, beside a trigger, is
+    /// ignored on load.
+    fn ut_unknown_key_beside_trigger_is_ignored() {
+        let dir = reserve_temp_dir("ferrowl_cfgmod_trigger");
+        let path = dir.join("beside.toml").to_string_lossy().into_owned();
+        let text = format!(
+            "{DEVICE_HEAD}\n[[scripts]]\nname = \"s\"\nbogus = 1\n[scripts.trigger]\nkind = \"register\"\nregisters = [\"reg\"]\n"
+        );
+        std::fs::write(&path, text).unwrap();
+        let device = load_device(&path).unwrap();
+        assert_eq!(device.scripts.len(), 1);
+        assert!(device.scripts[0].trigger.is_some());
+    }
 }

@@ -183,3 +183,76 @@ fn it_normal_short_script_unaffected_by_hook() {
     assert!(ctx.call(&"ok".to_string()).is_ok());
     assert!(ctx.call_all().is_ok());
 }
+
+/// A `Read` double whose `read` takes 400 ms, so a few runs together outlast the 1,000 ms cap.
+#[derive(Clone)]
+struct SlowRead;
+
+impl Read for SlowRead {
+    fn read(&self, _name: String) -> ferrowl_lua::Result<ValueType> {
+        std::thread::sleep(Duration::from_millis(400));
+        Ok(ValueType::Int(0))
+    }
+}
+impl StatusSource for SlowRead {
+    fn connection_status(&self) -> ferrowl_lua::Result<ConnectionStatus> {
+        Ok(ConnectionStatus::Disconnected)
+    }
+}
+impl Has for SlowRead {
+    fn has(&self, _name: String) -> ferrowl_lua::Result<bool> {
+        Ok(true)
+    }
+}
+impl Write for SlowRead {
+    fn write(&self, _name: String, _value: ValueType) -> ferrowl_lua::Result<()> {
+        Ok(())
+    }
+}
+
+const SLOW_SCRIPT: &str = r#"C_Register:Get("x"); for i = 1, 10000 do end"#;
+
+fn slow_context() -> ferrowl_lua::Context<String> {
+    ContextBuilder::<String>::default()
+        .with_module(RegisterModule::init(SlowRead))
+        .with_script("a".to_string(), SLOW_SCRIPT)
+        .with_script("b".to_string(), SLOW_SCRIPT)
+        .with_script("c".to_string(), SLOW_SCRIPT)
+        .with_script("runaway".to_string(), INFINITE_LOOP)
+        .build()
+        .expect("context build failed")
+}
+
+#[test]
+/// SC-R-047 — each event-triggered run starts its own wall-clock cap origin, so runs that
+/// together outlast the cap each complete.
+fn it_call_with_gives_each_run_its_own_cap_origin() {
+    let mut ctx = slow_context();
+    for key in ["a", "b", "c"] {
+        ctx.call_with(&key.to_string(), ())
+            .unwrap_or_else(|e| panic!("run {key} hit the cap: {e}"));
+    }
+}
+
+#[test]
+/// SC-R-047 — a batch shares one cap origin, so scripts that together outlast the cap hit it.
+fn it_call_each_shares_one_cap_origin() {
+    let mut ctx = slow_context();
+    let keys = ["a", "b", "c"].map(String::from);
+    let errors = ctx
+        .call_each(keys.iter())
+        .expect_err("batch must hit the cap");
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.to_string().contains("execution cap"))
+    );
+}
+
+#[test]
+/// SC-E-032 — an event-triggered run that runs long is aborted by the cap.
+fn it_call_with_run_past_the_cap_is_aborted() {
+    let mut ctx = slow_context();
+    let err = ctx.call_with(&"runaway".to_string(), ()).unwrap_err();
+    assert!(err.to_string().contains("execution cap"), "got: {err}");
+}

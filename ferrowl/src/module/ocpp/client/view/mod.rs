@@ -39,7 +39,7 @@ use ferrowl_ocpp::Version;
 use ferrowl_ocpp::cs::CsActionHandler;
 
 use crate::app::LogRing;
-use crate::config::script::ScriptDef;
+use crate::config::script::{OcppTrigger, ScriptList};
 use crate::dialog::scripts::ScriptDialog;
 use crate::module::ocpp::action_dialog::ActionDialog;
 use crate::module::ocpp::client::backend::{
@@ -55,7 +55,7 @@ use crate::module::ocpp::scope::Scope;
 use crate::module::ocpp::setup::OcppSetupView;
 use crate::module::ocpp::setup_dialog::OcppSetupDialog;
 use crate::module::type_descriptor::SetupView;
-use crate::module::view::{CommandDescriptor, CommandSpec, ModuleView, SharedLog};
+use crate::module::view::{CommandDescriptor, CommandSpec, ModuleView, SetScriptsError, SharedLog};
 use crate::view::status_bar::StatusCell;
 
 pub use render::{choice, number, text_input};
@@ -379,7 +379,7 @@ enum ClientOverlay {
     #[overlay(focus_cycle)]
     Setup(Box<OcppSetupDialog>),
     /// Lua scripts editor (routes all keys via its own `handle_events()`).
-    Scripts(Box<ScriptDialog>),
+    Scripts(Box<ScriptDialog<OcppTrigger>>),
 }
 
 ferrowl_ui::impl_overlay_keys!(ConfigEditDialog, OcppSetupDialog);
@@ -725,14 +725,14 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
         self.deferred.replacement.take()
     }
 
-    fn scripts(&self) -> Option<&[ScriptDef]> {
-        Some(&self.device.scripts)
+    fn script_list(&self) -> Option<ScriptList> {
+        Some(ScriptList::Ocpp(self.device.scripts.clone()))
     }
 
-    fn set_scripts(&mut self, scripts: Vec<ScriptDef>) -> bool {
-        self.device.scripts = scripts;
+    fn set_script_list(&mut self, scripts: ScriptList) -> Result<(), SetScriptsError> {
+        self.device.scripts = scripts.into_ocpp().map_err(SetScriptsError::Mismatch)?;
         self.start_sim();
-        true
+        Ok(())
     }
 
     fn module_host(&self) -> Option<std::sync::Arc<dyn ferrowl_lua::module::ModuleHost>> {
@@ -1272,7 +1272,8 @@ mod tests {
     /// call actions the new version lacks.
     async fn version_switch_keeps_scripts_and_warns() {
         let mut v = client_view::<V1_6>(OcppVersion::V1_6);
-        v.device.scripts = vec![ScriptDef {
+        v.device.scripts = vec![crate::config::script::ScriptDef {
+            trigger: None,
             name: "sim".into(),
             code: "-- noop".into(),
             enabled: true,
@@ -1294,7 +1295,9 @@ mod tests {
         let replacement = v
             .take_replacement()
             .expect("version switch replaces the view");
-        let scripts = replacement.scripts().expect("client keeps its scripts");
+        let Some(ScriptList::Ocpp(scripts)) = replacement.script_list() else {
+            panic!("client keeps its scripts");
+        };
         assert!(
             scripts.iter().any(|s| s.name == "sim"),
             "the Lua scripts must be carried into the new-version view"

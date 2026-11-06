@@ -14,7 +14,7 @@ use std::{
 
 /// SC-R-034 — the execution hook fires this often, in VM instructions.
 const HOOK_INSTRUCTION_INTERVAL: u32 = 1_000;
-/// SC-R-034 — wall-clock cap on one cycle (or one on-demand run, SC-R-035).
+/// SC-R-034 — wall-clock cap on one cycle, one event-triggered run or one on-demand run (SC-R-035).
 const HOOK_WALL_CLOCK_CAP: Duration = Duration::from_millis(1_000);
 
 /// Lua context handling module and script loading
@@ -24,7 +24,7 @@ where
 {
     lua: Lua,
     scripts: HashMap<K, Script>,
-    /// SC-R-034 — wall-clock origin of the cycle (or on-demand run) currently executing; read by
+    /// SC-R-034 — wall-clock origin of the cycle, event-triggered run or on-demand run currently executing; read by
     /// the hook installed in `install_execution_hook`, reset by every script-invoking method
     /// below before it runs anything.
     cycle_start: Rc<Cell<Instant>>,
@@ -158,6 +158,41 @@ where
         match self.scripts.get_mut(key) {
             Some(script) => script.exec(),
             None => Ok(()),
+        }
+    }
+
+    /// Executes the script under `key` as one run with its own cap origin, passing `args` as
+    /// the chunk's `...`. An absent key is `Ok(())`.
+    pub fn call_with<A: mlua::IntoLuaMulti>(&mut self, key: &K, args: A) -> Result<()> {
+        self.begin_cycle();
+        match self.scripts.get_mut(key) {
+            Some(script) => script.exec_with(args),
+            None => Ok(()),
+        }
+    }
+
+    /// Executes every present script of `keys` as one batch sharing a cap origin, collecting the
+    /// errors of the failing ones.
+    pub fn call_each<'a>(
+        &mut self,
+        keys: impl IntoIterator<Item = &'a K>,
+    ) -> std::result::Result<(), Vec<Error>>
+    where
+        K: 'a,
+    {
+        self.begin_cycle();
+        let mut errors = Vec::new();
+        for key in keys {
+            if let Some(script) = self.scripts.get_mut(key)
+                && let Err(e) = script.exec()
+            {
+                errors.push(e);
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
         }
     }
 

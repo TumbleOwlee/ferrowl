@@ -18,6 +18,7 @@ mod module;
 mod registry;
 mod script_template;
 mod session;
+mod sim;
 mod time;
 mod view;
 
@@ -165,10 +166,12 @@ fn demo_ocpp_tab(name: String, version: OcppVersion, role: OcppRole, port: u16) 
 /// The demo session's example script: the bundled `power-report` template (SC-R-036), which uses
 /// `C_Module` to read the `Power` value of every modbus server instance and every OCPP connector,
 /// printing the total to the session log once per cycle.
-fn demo_session_script() -> crate::config::script::ScriptDef {
+fn demo_session_script() -> crate::config::script::ScriptDef<crate::config::script::SessionTrigger>
+{
     let template = script_template::by_name("power-report")
         .expect("the bundled power-report session template");
     crate::config::script::ScriptDef {
+        trigger: None,
         name: template.name.to_string(),
         code: template.code.to_string(),
         enabled: true,
@@ -184,7 +187,10 @@ fn demo_session_script() -> crate::config::script::ScriptDef {
 /// in which case falling back to the 1s default is preferable to aborting startup a second time.
 fn session_sim_config(
     paths: &[String],
-) -> (Vec<crate::config::script::ScriptDef>, std::time::Duration) {
+) -> (
+    Vec<crate::config::script::ScriptDef<crate::config::script::SessionTrigger>>,
+    std::time::Duration,
+) {
     let mut scripts = Vec::new();
     let mut interval = std::time::Duration::from_secs_f64(1.0);
     for path in paths {

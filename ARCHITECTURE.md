@@ -130,7 +130,9 @@ Three concurrent parties touch that store:
    answering incoming requests), or an OCPP connection (CS dialling a CSMS, or a
    CSMS accepting stations). It reads and writes the store.
 2. **The Lua sim thread** — if scripts are configured, it reads and writes the same
-   store through the typed `C_Register` / `C_OCPP` bridge, on a timer.
+   store through the typed `C_Register` / `C_OCPP` bridge, on a timer. A Modbus
+   script with a register trigger also runs when a write reaches a register it
+   watches, with the event as its argument.
 3. **The UI** — polls the store every redraw tick and renders it as a table.
 
 ## Concurrency model
@@ -142,6 +144,8 @@ from the tokio runtime and the UI redraw loop, so a slow script cannot stall pol
 or rendering. Modbus and OCPP are architecturally separate: there is no shared
 `Instance<T>`-style lifecycle abstraction spanning both, and a pattern in one does
 not necessarily transfer to the other.
+
+A Modbus register write publishes its event from a tap that runs under the store's write guard, so lock order is memory, then the module's register map, then the event stream, then each script queue. A script queue is bounded and drops its oldest event when full, so a publishing write never waits on the sim thread.
 
 Each module's view publishes its displayed connection status into a shared atomic cell on every refresh tick, and that module's sim threads and session accessors read it from there.
 

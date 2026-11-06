@@ -435,13 +435,26 @@ values = [
     { name = "error", value = -1 },
 ]
 
-# Global Lua scripts, run every simulation cycle while enabled (see :script).
+# Global Lua scripts (see :script). A script with no trigger runs every simulation cycle while enabled.
 [[scripts]]
 name = "mirror setpoint"
 code = """
 C_Register:Set("power", C_Register:Get("setpoint"))
 """
 enabled = true
+
+# A script with a register trigger runs once per matching register event instead.
+[[scripts]]
+name = "log setpoint"
+code = """
+local event = ...
+C_Log:Info("setpoint is now " .. tostring(event.new))
+"""
+enabled = true
+
+[scripts.trigger]
+kind = "register"
+registers = ["setpoint"]
 ```
 
 > [!IMPORTANT]
@@ -647,7 +660,15 @@ rather than being silently ignored.
 
 ## Lua Support
 
-As an additional feature, the tool also includes a Lua runtime to execute custom scripts that drive a simulation. For **Modbus** modules scripts are attached to the device config as a global, toggleable list managed from the `:script` dialog (legacy per-register `update` snippets are migrated into it on load); all enabled scripts run each simulation cycle, interacting with the registers through `C_Register` and able to print to the module log via `C_Log`. For **OCPP** modules — in both the Charging Station (client) and CSMS (server) roles — scripts are attached to the device config and managed from the *Lua Scripts* dialog (the button under the state table); all enabled scripts run about once per second and interact with the OCPP state and actions through `C_OCPP`, and may print to the module log via `C_Log`. Besides the standard Lua libraries, the exposed modules are `C_Time`, `C_Log` and `C_Test` (all module types), `C_Register` (Modbus only), and `C_OCPP` (OCPP only).
+As an additional feature, the tool also includes a Lua runtime to execute custom scripts that drive a simulation. For **Modbus** modules scripts are attached to the device config as a global, toggleable list managed from the `:script` dialog (legacy per-register `update` snippets are migrated into it on load); enabled scripts with no trigger run each simulation cycle, while a script with a register trigger runs once per register event instead (see below), interacting with the registers through `C_Register` and able to print to the module log via `C_Log`. For **OCPP** modules — in both the Charging Station (client) and CSMS (server) roles — scripts are attached to the device config and managed from the *Lua Scripts* dialog (the button under the state table); all enabled scripts run about once per second and interact with the OCPP state and actions through `C_OCPP`, and may print to the module log via `C_Log`. Besides the standard Lua libraries, the exposed modules are `C_Time`, `C_Log` and `C_Test` (all module types), `C_Register` (Modbus only), and `C_OCPP` (OCPP only).
+
+Modbus register triggers:
+
+- Shape: `kind = "register"`, `registers` a list of register names or `"all"`, and `every_write` (default `false`: only writes that change the value fire).
+- The event is the script's only argument, a table with `name`, `old`, `new`, `source` (`remote`, `poll`, `set` or `lua`), `seq` and `timestamp` (milliseconds).
+- A script's own writes never trigger itself; other scripts selecting the register fire.
+- Each triggered script has a queue of 4096 events; when it is full, the oldest event is dropped.
+- Triggers exist on Modbus module scripts only; on a session or OCPP script, or any other kind, the config fails to load.
 
 ### Session Scripts
 
