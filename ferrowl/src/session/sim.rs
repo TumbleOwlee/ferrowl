@@ -16,6 +16,7 @@ use crate::config::script::{ScriptDef, SessionTrigger};
 use crate::lua::SimHandle;
 use crate::module::ocpp::client::lua_sim::{LuaLogSink, emit, sleep_responsive};
 use crate::module::view::SharedLog;
+use crate::sim::script_id::{ExecutionGuard, ScriptId, ScriptOwner};
 
 /// Owns the session-level Lua sim thread, restarting it whenever the script list or interval
 /// changes (globals reset on restart — intended). Stopped whenever no script is enabled.
@@ -76,6 +77,10 @@ impl SessionSim {
                 .build();
             match context {
                 Ok(mut context) => {
+                    let _guard = ExecutionGuard::enter(ScriptId {
+                        owner: ScriptOwner::Session,
+                        name: Arc::from(name.as_str()),
+                    });
                     if let Err(e) = context.call(&name) {
                         emit(&log, Level::Error, &format!("[run] {e}"));
                     }
@@ -169,6 +174,8 @@ mod tests {
     #[derive(Clone, Default)]
     struct MockReadWrite {
         store: Arc<Mutex<HashMap<String, ValueType>>>,
+        /// The script that was executing at the last write.
+        writer: Arc<Mutex<Option<ScriptId>>>,
     }
     impl Read for MockReadWrite {
         fn read(&self, name: String) -> LuaResult<ValueType> {
@@ -182,6 +189,7 @@ mod tests {
     }
     impl Write for MockReadWrite {
         fn write(&self, name: String, value: ValueType) -> LuaResult<()> {
+            *self.writer.lock().unwrap() = crate::sim::script_id::executing_script();
             self.store.lock().unwrap().insert(name, value);
             Ok(())
         }
@@ -668,5 +676,30 @@ mod tests {
             _ => 0,
         };
         assert!(count >= 3, "expected >= 3 executions, got {count}");
+    }
+
+    #[test]
+    /// SC-R-099 — an on-demand session run executes as a session script: its writes carry the
+    /// session owner, never a module script of the same name.
+    fn ut_session_on_demand_run_is_not_a_module_script() {
+        let rw = MockReadWrite::default();
+        let sim = SessionSim::new(directory_with_mock(rw.clone()), log());
+        sim.run_once(
+            "s".to_string(),
+            r#"C_Module:Get("m"):Register():Set("x", 1)"#.to_string(),
+        );
+        wait_until_blocking(
+            "the run never wrote",
+            Duration::from_millis(10),
+            Duration::from_secs(10),
+            || rw.store.lock().unwrap().get("x").map(|_| ()),
+        );
+        assert_eq!(
+            *rw.writer.lock().unwrap(),
+            Some(ScriptId {
+                owner: ScriptOwner::Session,
+                name: Arc::from("s"),
+            })
+        );
     }
 }

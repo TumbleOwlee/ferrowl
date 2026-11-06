@@ -10,10 +10,11 @@ use ferrowl_modbus::{Key, SlaveKey};
 use ferrowl_store::{Memory, StoreWrite, WriteSource, WriteTap};
 use mlua::IntoLua;
 
+use crate::config::script::{ModbusTrigger, Selection};
 use crate::lua::SharedRegisters;
 use crate::lua::value_conv::value_to_type;
 use crate::module::modbus::registers::register_mem_binding;
-use crate::sim::events::EventStream;
+use crate::sim::events::{EventSelector, EventStream};
 use crate::sim::script_id::{ScriptId, executing_script};
 
 /// Where a register write came from.
@@ -137,6 +138,23 @@ pub fn publish_virtual(
         new: Some(new),
         source,
     });
+}
+
+/// Selects the events a script's trigger asks for.
+pub fn register_selector(trigger: &ModbusTrigger, me: ScriptId) -> EventSelector<RegisterEvent> {
+    let ModbusTrigger::Register {
+        registers,
+        every_write,
+    } = trigger.clone();
+    Arc::new(move |event| {
+        let named = match &registers {
+            Selection::All(_) => true,
+            Selection::Names(names) => names.iter().any(|n| **n == *event.name),
+        };
+        let own_write =
+            matches!(&event.source, RegisterEventSource::Lua { script: Some(id) } if *id == me);
+        named && (every_write || event.changed) && !own_write
+    })
 }
 
 fn values_equal(a: &Value, b: &Value) -> bool {
@@ -510,5 +528,97 @@ mod tests {
             bridge.read("a".to_string()).unwrap(),
             ValueType::Int(0)
         ));
+    }
+
+    fn sel_event(name: &str, changed: bool, source: RegisterEventSource) -> RegisterEvent {
+        RegisterEvent {
+            seq: 1,
+            timestamp_ms: 0,
+            name: name.into(),
+            old: None,
+            new: None,
+            source,
+            changed,
+        }
+    }
+
+    fn trigger(names: &[&str], every_write: bool) -> ModbusTrigger {
+        ModbusTrigger::Register {
+            registers: Selection::Names(names.iter().map(|n| n.to_string()).collect()),
+            every_write,
+        }
+    }
+
+    fn me() -> ScriptId {
+        ScriptId {
+            owner: ScriptOwner::Module,
+            name: "me".into(),
+        }
+    }
+
+    #[test]
+    /// SC-R-091 — a selection holds a register by name; `all` holds every register.
+    fn ut_selector_matches_names_or_all() {
+        let named = register_selector(&trigger(&["temp"], false), me());
+        assert!(named(&sel_event("temp", true, RegisterEventSource::Remote)));
+        assert!(!named(&sel_event(
+            "other",
+            true,
+            RegisterEventSource::Remote
+        )));
+        let all = register_selector(
+            &ModbusTrigger::Register {
+                registers: Selection::All(crate::config::script::AllMarker::All),
+                every_write: false,
+            },
+            me(),
+        );
+        assert!(all(&sel_event(
+            "anything",
+            true,
+            RegisterEventSource::Remote
+        )));
+    }
+
+    #[test]
+    /// SC-R-092 — an unchanged write selects only for an every-write trigger.
+    fn ut_selector_requires_change_unless_every_write() {
+        let changes = register_selector(&trigger(&["temp"], false), me());
+        let every = register_selector(&trigger(&["temp"], true), me());
+        let same = sel_event("temp", false, RegisterEventSource::Poll);
+        assert!(!changes(&same));
+        assert!(every(&same));
+    }
+
+    #[test]
+    /// SC-R-093 — a script's own write is the only one its trigger leaves out.
+    fn ut_selector_excludes_only_the_writing_script() {
+        let selector = register_selector(&trigger(&["temp"], false), me());
+        let from =
+            |id: Option<ScriptId>| sel_event("temp", true, RegisterEventSource::Lua { script: id });
+        assert!(!selector(&from(Some(me()))));
+        assert!(selector(&from(Some(ScriptId {
+            owner: ScriptOwner::Module,
+            name: "other".into(),
+        }))));
+        assert!(selector(&from(None)));
+        assert!(selector(&sel_event("temp", true, RegisterEventSource::Set)));
+    }
+
+    #[test]
+    /// SC-R-094 — a same-named script of another owner still fires.
+    fn ut_selector_same_name_other_owner_still_fires() {
+        let selector = register_selector(&trigger(&["temp"], false), me());
+        let session = ScriptId {
+            owner: ScriptOwner::Session,
+            name: "me".into(),
+        };
+        assert!(selector(&sel_event(
+            "temp",
+            true,
+            RegisterEventSource::Lua {
+                script: Some(session)
+            }
+        )));
     }
 }

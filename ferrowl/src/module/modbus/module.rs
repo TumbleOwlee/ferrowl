@@ -12,6 +12,7 @@ use parking_lot::RwLock as MemLock;
 use tokio::sync::RwLock;
 
 use crate::app::{Level, LogRing};
+use crate::config::script::{ModbusTrigger, ScriptDef};
 use crate::config::{
     DeviceConfig, Endpoint, ModuleSpec, Role,
     device::{
@@ -74,8 +75,8 @@ pub struct ModbusModule {
     /// separate from `log`'s connection/status/traffic lines.
     script_log: ModuleLog,
     file_sink: FileSink,
-    /// Enabled global Lua scripts (name → code), run on the sim thread.
-    scripts: Vec<(String, String)>,
+    /// Enabled global Lua scripts, run on the sim thread.
+    scripts: Vec<ScriptDef<ModbusTrigger>>,
     /// Explicit per-function-code read ranges from the device config (empty = auto-merge).
     read_ranges: ReadRanges,
     /// Script sim cycle period, from the device config's `script_interval` — separate from
@@ -473,7 +474,7 @@ impl ModbusModule {
 
     /// Replace the module's script list and restart the simulation thread so the new scripts take
     /// effect (fresh Lua state — stopped if none remain enabled).
-    pub fn reload_scripts(&mut self, scripts: Vec<(String, String)>) {
+    pub fn reload_scripts(&mut self, scripts: Vec<ScriptDef<ModbusTrigger>>) {
         self.scripts = scripts;
         self.ensure_sim();
     }
@@ -1281,10 +1282,7 @@ mod tests {
         let mut module = ModbusModule::new(&test_spec("sim4", 15205), &device);
         assert!(!module.lua_running());
 
-        module.reload_scripts(vec![(
-            "sim".to_string(),
-            r#"C_Register:Set("marker", 7)"#.to_string(),
-        )]);
+        module.reload_scripts(vec![script(r#"C_Register:Set("marker", 7)"#, true)]);
         assert!(module.lua_running());
         wait_until_blocking(
             "marker reaches 7",
@@ -1310,10 +1308,7 @@ mod tests {
 
         // Fresh Lua state on restart: new code takes over immediately (proves a restart, not the
         // old thread still running the old script).
-        module.reload_scripts(vec![(
-            "sim".to_string(),
-            r#"C_Register:Set("marker", 2)"#.to_string(),
-        )]);
+        module.reload_scripts(vec![script(r#"C_Register:Set("marker", 2)"#, true)]);
         wait_until_blocking(
             "marker reaches 2",
             std::time::Duration::from_millis(10),
@@ -1851,7 +1846,7 @@ if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
         let queue = super::super::events::capture_events(&module.events());
 
         write_marker(&module, 1);
-        module.reload_scripts(vec![("idle".to_string(), String::new())]);
+        module.reload_scripts(vec![script("", true)]);
         write_marker(&module, 2);
         let timing = ModbusModule::resolve_timing(&device);
         module
@@ -1870,5 +1865,490 @@ if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
 
         let seqs: Vec<u64> = std::iter::from_fn(|| queue.pop()).map(|e| e.seq).collect();
         assert_eq!(seqs, vec![1, 2, 3]);
+    }
+
+    use crate::config::script::{ModbusTrigger as Trig, ScriptDef as Def, Selection};
+
+    fn trig(name: &str, code: &str, registers: &[&str], every_write: bool) -> Def<Trig> {
+        Def {
+            name: name.into(),
+            code: code.into(),
+            enabled: true,
+            trigger: Some(Trig::Register {
+                registers: Selection::Names(registers.iter().map(|r| r.to_string()).collect()),
+                every_write,
+            }),
+        }
+    }
+
+    fn plain(name: &str, code: &str) -> Def<Trig> {
+        Def {
+            name: name.into(),
+            code: code.into(),
+            enabled: true,
+            trigger: None,
+        }
+    }
+
+    /// `regs` as U16 holding registers at their address, or virtual for `None`; the sim cycle is
+    /// `cycle` seconds.
+    fn event_device(
+        scripts: Vec<Def<Trig>>,
+        regs: &[(&str, Option<u16>)],
+        cycle: f64,
+    ) -> crate::config::DeviceConfig {
+        let mut device = device_with_script(scripts);
+        let template = device.definitions["marker"].clone();
+        device.definitions.clear();
+        for (name, address) in regs {
+            let mut def = template.clone();
+            def.address = *address;
+            def.is_virtual = address.is_none();
+            def.values.clear();
+            def.default = None;
+            device.definitions.insert(name.to_string(), def);
+        }
+        device.script_interval = cycle;
+        device
+    }
+
+    fn read_at(module: &super::ModbusModule, addr: usize) -> u16 {
+        use ferrowl_store::{CellType, Range};
+        module
+            .memory()
+            .read()
+            .read(holding_key(), &CellType::Register, &Range::new(addr, 1))
+            .unwrap_or_default()
+            .first()
+            .copied()
+            .unwrap_or(0)
+    }
+
+    fn remote_write(module: &super::ModbusModule, addr: usize, word: u16) {
+        use ferrowl_store::{Range, WriteSource};
+        assert!(module.memory().write().write_unchecked_from(
+            WriteSource::Remote,
+            holding_key(),
+            &Range::new(addr, 1),
+            &[word],
+        ));
+    }
+
+    fn wait_reg(module: &super::ModbusModule, addr: usize, want: u16) {
+        wait_until_blocking(
+            &format!("register {addr} never reached {want}"),
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            || (read_at(module, addr) == want).then_some(()),
+        );
+    }
+
+    fn settle() {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+
+    fn script_log_has(module: &super::ModbusModule, needle: &str) -> bool {
+        module.script_log().try_read().is_ok_and(|log| {
+            log.peek_n(crate::app::LOG_SIZE)
+                .into_iter()
+                .any(|(_, level, line)| {
+                    level == crate::app::Level::Warning && line.contains(needle)
+                })
+        })
+    }
+
+    #[test]
+    /// SC-R-014 — a script without a trigger runs every cycle; one with a trigger runs only on
+    /// its events.
+    fn ut_no_trigger_script_runs_every_cycle_and_event_script_does_not() {
+        use super::ModbusModule;
+        let device = event_device(
+            vec![
+                plain("tick", r#"C_Register:Set("a", C_Register:Get("a") + 1)"#),
+                trig("evt", r#"C_Register:Set("b", 1)"#, &["watch"], false),
+            ],
+            &[("a", Some(1)), ("b", Some(2)), ("watch", Some(3))],
+            0.02,
+        );
+        let module = ModbusModule::new(&test_spec("ev1", 0), &device);
+        wait_until_blocking(
+            "the cycle script never ran three times",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            || (read_at(&module, 1) >= 3).then_some(()),
+        );
+        assert_eq!(
+            read_at(&module, 2),
+            0,
+            "the event script ran without an event"
+        );
+        remote_write(&module, 3, 1);
+        wait_reg(&module, 2, 1);
+    }
+
+    #[test]
+    /// SC-E-036 — a script without a trigger gets no arguments, and its return value is ignored.
+    fn ut_no_trigger_script_gets_no_arguments() {
+        use super::ModbusModule;
+        let device = event_device(
+            vec![plain(
+                "p",
+                r#"C_Register:Set("n", select('#', ...) + 10); return 5"#,
+            )],
+            &[("n", Some(1))],
+            0.02,
+        );
+        let module = ModbusModule::new(&test_spec("ev2", 0), &device);
+        wait_reg(&module, 1, 10);
+        assert!(module.lua_running());
+    }
+
+    #[test]
+    /// SC-R-090 — an event script gets the event table as its only argument.
+    fn ut_event_script_gets_event_as_only_argument() {
+        use super::ModbusModule;
+        let device = event_device(
+            vec![trig(
+                "evt",
+                r#"local e = ...
+                C_Register:Set("n", select('#', ...))
+                if e.name == "watch" and e.source == "remote" and e.new == 9 then
+                    C_Register:Set("ok", 1)
+                end"#,
+                &["watch"],
+                false,
+            )],
+            &[("n", Some(1)), ("ok", Some(2)), ("watch", Some(3))],
+            3600.0,
+        );
+        let module = ModbusModule::new(&test_spec("ev3", 0), &device);
+        remote_write(&module, 3, 9);
+        wait_reg(&module, 1, 1);
+        wait_reg(&module, 2, 1);
+    }
+
+    #[test]
+    /// SC-R-093 — a script's own write does not retrigger it; another script watching the
+    /// register still sees it.
+    fn ut_script_write_does_not_retrigger_itself() {
+        use super::ModbusModule;
+        let device = event_device(
+            vec![
+                trig(
+                    "a",
+                    r#"C_Register:Set("ca", C_Register:Get("ca") + 1)
+                    C_Register:Set("temp", 100)"#,
+                    &["temp"],
+                    false,
+                ),
+                trig(
+                    "b",
+                    r#"local e = ...
+                    C_Register:Set("cb", C_Register:Get("cb") + 1)
+                    if e.source == "lua" then C_Register:Set("lua_seen", 1) end"#,
+                    &["temp"],
+                    false,
+                ),
+            ],
+            &[
+                ("ca", Some(1)),
+                ("cb", Some(2)),
+                ("temp", Some(3)),
+                ("lua_seen", Some(4)),
+            ],
+            3600.0,
+        );
+        let module = ModbusModule::new(&test_spec("ev4", 0), &device);
+        remote_write(&module, 3, 1);
+        wait_reg(&module, 2, 2);
+        settle();
+        assert_eq!(read_at(&module, 1), 1, "a retriggered itself");
+        assert_eq!(read_at(&module, 2), 2);
+        assert_eq!(read_at(&module, 4), 1, "b saw a's write with source lua");
+    }
+
+    #[test]
+    /// SC-R-099 — an on-demand run counts as the script itself: the running sim's copy does not
+    /// fire on its writes, a different script does.
+    fn ut_on_demand_run_counts_as_the_script() {
+        use super::ModbusModule;
+        let a = r#"C_Register:Set("ca", C_Register:Get("ca") + 1)
+            C_Register:Set("temp", C_Register:Get("ca"))"#;
+        let device = event_device(
+            vec![
+                trig("a", a, &["temp"], false),
+                trig(
+                    "b",
+                    r#"C_Register:Set("cb", C_Register:Get("cb") + 1)"#,
+                    &["temp"],
+                    false,
+                ),
+            ],
+            &[("ca", Some(1)), ("cb", Some(2)), ("temp", Some(3))],
+            3600.0,
+        );
+        let module = ModbusModule::new(&test_spec("ev5", 0), &device);
+        module.run_script_once("a".into(), a.into());
+        wait_reg(&module, 1, 1);
+        wait_reg(&module, 2, 1);
+        settle();
+        assert_eq!(read_at(&module, 1), 1, "the sim's copy of a fired");
+        assert_eq!(read_at(&module, 2), 1);
+    }
+
+    #[test]
+    /// SC-E-054 — an on-demand run of a triggered script gets no argument.
+    fn ut_on_demand_run_gets_no_argument() {
+        use super::ModbusModule;
+        let code = r#"C_Register:Set("n", select('#', ...) + 10)"#;
+        let device = event_device(
+            vec![trig("a", code, &["watch"], false)],
+            &[("n", Some(1)), ("watch", Some(2))],
+            3600.0,
+        );
+        let module = ModbusModule::new(&test_spec("ev6", 0), &device);
+        module.run_script_once("a".into(), code.into());
+        wait_reg(&module, 1, 10);
+    }
+
+    #[test]
+    /// SC-E-048 — two scripts that keep writing what the other watches overflow their queues;
+    /// the sim keeps running and still stops cleanly. A drop shows as an event whose `old` is not
+    /// the `new` last seen for that register. Every second run writes only one register: a fixed
+    /// number of events per run would make the overflow drop the same register every time.
+    fn ut_mutual_triggers_overflow_and_stop_cleanly() {
+        use super::ModbusModule;
+        let body = |own: [&str; 2]| {
+            format!(
+                r#"local e = ...
+                seen = seen or {{}}
+                if seen[e.name] ~= nil and seen[e.name] ~= e.old then
+                    C_Register:Set("overflowed", 1)
+                end
+                seen[e.name] = e.new
+                runs_{0} = ((runs_{0} or 0) % 60000) + 1
+                C_Register:Set("{0}", runs_{0})
+                if runs_{0} % 2 == 0 then C_Register:Set("{1}", runs_{0}) end"#,
+                own[0], own[1]
+            )
+        };
+        let device = event_device(
+            vec![
+                trig("a", &body(["q1", "q2"]), &["p1", "p2"], false),
+                trig("b", &body(["p1", "p2"]), &["q1", "q2"], false),
+            ],
+            &[
+                ("p1", Some(1)),
+                ("p2", Some(2)),
+                ("q1", Some(3)),
+                ("q2", Some(4)),
+                ("overflowed", None),
+            ],
+            3600.0,
+        );
+        let mut module = ModbusModule::new(&test_spec("ev7", 0), &device);
+        remote_write(&module, 1, 1);
+        remote_write(&module, 2, 1);
+        wait_until_blocking(
+            "no queue overflowed",
+            std::time::Duration::from_millis(10),
+            std::time::Duration::from_secs(20),
+            || {
+                module
+                    .virtual_store()
+                    .blocking_read()
+                    .get("overflowed")
+                    .is_some_and(|v| v.to_string() == "1")
+                    .then_some(())
+            },
+        );
+        module.stop_sim();
+        assert!(!module.lua_running());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// SC-E-049 — a trigger naming an unknown register warns at sim start and fires once the
+    /// register exists.
+    async fn ut_unknown_register_warns_then_fires_once_added() {
+        use super::ModbusModule;
+        let device = event_device(
+            vec![trig("sim", r#"C_Register:Set("out", 1)"#, &["late"], false)],
+            &[("out", Some(1))],
+            3600.0,
+        );
+        let mut module = ModbusModule::new(&test_spec("ev8", 0), &device);
+        wait_until(
+            "no unknown-register warning",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            || {
+                script_log_has(
+                    &module,
+                    "[sim] script 'sim' watches unknown register 'late'",
+                )
+                .then_some(())
+            },
+        )
+        .await;
+        assert_eq!(read_at(&module, 1), 0);
+
+        let late = event_device(vec![], &[("late", None)], 1.0).definitions["late"].register();
+        let value = crate::module::modbus::str_to_value("5", &late);
+        module.add_register("late".into(), String::new(), late, vec![]);
+        module.set_virtual_value_from_command("late", value).await;
+        wait_until(
+            "script never fired",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            || (read_at(&module, 1) == 1).then_some(()),
+        )
+        .await;
+    }
+
+    #[test]
+    /// SC-E-052 — an empty register list warns and the script never fires.
+    fn ut_empty_name_list_warns_and_never_fires() {
+        use super::ModbusModule;
+        let device = event_device(
+            vec![trig("sim", r#"C_Register:Set("out", 1)"#, &[], true)],
+            &[("out", Some(1)), ("watch", Some(2))],
+            3600.0,
+        );
+        let module = ModbusModule::new(&test_spec("ev9", 0), &device);
+        wait_until_blocking(
+            "no empty-list warning",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            || script_log_has(&module, "[sim] script 'sim' watches no registers").then_some(()),
+        );
+        remote_write(&module, 2, 1);
+        settle();
+        assert_eq!(read_at(&module, 1), 0);
+    }
+
+    #[test]
+    /// SC-E-053 — one event reaches every script that selects it.
+    fn ut_one_event_reaches_every_selecting_script() {
+        use super::ModbusModule;
+        let device = event_device(
+            vec![
+                trig(
+                    "a",
+                    r#"if ... then C_Register:Set("ca", C_Register:Get("ca") + 1) end"#,
+                    &["watch"],
+                    false,
+                ),
+                trig(
+                    "b",
+                    r#"if ... then C_Register:Set("cb", C_Register:Get("cb") + 1) end"#,
+                    &["watch"],
+                    false,
+                ),
+            ],
+            &[("ca", Some(1)), ("cb", Some(2)), ("watch", Some(3))],
+            3600.0,
+        );
+        let module = ModbusModule::new(&test_spec("ev10", 0), &device);
+        remote_write(&module, 3, 1);
+        wait_reg(&module, 1, 1);
+        wait_reg(&module, 2, 1);
+        settle();
+        assert_eq!((read_at(&module, 1), read_at(&module, 2)), (1, 1));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    /// MB-R-304 — a reconfigure keeps the subscription, the script's Lua globals and the sequence.
+    async fn ut_reconfigure_keeps_subscription_globals_and_seq() {
+        use super::ModbusModule;
+        use crate::config::{Endpoint, Role};
+        let device = event_device(
+            vec![trig(
+                "evt",
+                r#"local e = ...
+                g = (g or 0) + 1
+                C_Register:Set("g", g)
+                C_Register:Set("sq", e.seq)"#,
+                &["watch"],
+                false,
+            )],
+            &[("g", Some(1)), ("sq", Some(2)), ("watch", Some(3))],
+            3600.0,
+        );
+        let mut module = ModbusModule::new(&test_spec("ev11", 0), &device);
+        remote_write(&module, 3, 1);
+        wait_reg(&module, 1, 1);
+        let first = read_at(&module, 2);
+        assert!(first > 0);
+
+        let timing = ModbusModule::resolve_timing(&device);
+        module
+            .reconfigure(
+                &Endpoint::Tcp {
+                    ip: "127.0.0.1".into(),
+                    port: 0,
+                },
+                Role::Server,
+                timing,
+                Default::default(),
+            )
+            .await
+            .expect("reconfigure");
+        remote_write(&module, 3, 2);
+        wait_reg(&module, 1, 2);
+        assert!(read_at(&module, 2) > first, "the sequence went backwards");
+    }
+
+    #[test]
+    /// SC-R-014, SC-R-097, CS-R-077 — a config saved without any trigger runs every cycle as before and saves back
+    /// without one, for a device and for a session.
+    fn ut_existing_config_runs_every_cycle_and_saves_no_trigger() {
+        use super::ModbusModule;
+        use crate::convert::{Converter, FileType};
+
+        let dir = reserve_temp_dir("ferrowl_no_trigger");
+        let path = dir.join("device.toml").to_str().expect("utf-8").to_string();
+        let device = event_device(
+            vec![plain(
+                "tick",
+                r#"C_Register:Set("a", C_Register:Get("a") + 1)"#,
+            )],
+            &[("a", Some(1))],
+            0.02,
+        );
+        Converter::save(&device, &path, FileType::Toml).expect("save device");
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("trigger"));
+
+        let loaded = crate::config::load_device(&path).expect("load device");
+        assert_eq!(loaded.scripts[0].trigger, None);
+        let module = ModbusModule::new(&test_spec("ev12", 0), &loaded);
+        wait_until_blocking(
+            "the script never ran three times",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            || (read_at(&module, 1) >= 3).then_some(()),
+        );
+        Converter::save(&loaded, &path, FileType::Toml).expect("save again");
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("trigger"));
+
+        let session = crate::module::modbus::config::session::Session {
+            scripts: vec![crate::config::script::ScriptDef {
+                name: "s".into(),
+                code: "x = 1".into(),
+                enabled: true,
+                trigger: None,
+            }],
+            ..Default::default()
+        };
+        let session_path = dir
+            .join("session.toml")
+            .to_str()
+            .expect("utf-8")
+            .to_string();
+        Converter::save(&session, &session_path, FileType::Toml).expect("save session");
+        assert!(
+            !std::fs::read_to_string(&session_path)
+                .unwrap()
+                .contains("trigger")
+        );
     }
 }

@@ -17,12 +17,14 @@ use ferrowl_modbus::{Key, SlaveKey};
 use ferrowl_store::{Range, WriteSource};
 
 use crate::app::Level;
+use crate::config::script::{ModbusTrigger, ScriptDef, Selection};
 use crate::module::modbus::{
     FileSink, ModuleLog, ModuleMemory, RegisterEvent, RegisterEventSource, VirtualStore, append,
-    publish_virtual,
+    publish_virtual, register_selector,
 };
-use crate::sim::events::EventStream;
-use crate::sim::script_id::executing_script;
+use crate::sim::events::{EventStream, SimWake};
+use crate::sim::scheduler::{PlannedScript, QueueFeed, ScriptSchedule, SimScheduler};
+use crate::sim::script_id::{ExecutionGuard, ScriptId, ScriptOwner, executing_script};
 use crate::view::status_bar::StatusCell;
 
 pub(crate) mod value_conv;
@@ -205,15 +207,16 @@ impl Drop for SimHandle {
 }
 
 /// Spawn the simulation thread for a module. Returns `None` when there are no `update` scripts.
-/// The Lua `Context` is built inside the thread because it is `!Send`. Each cycle runs every
-/// script via `call_all`; script errors are surfaced into the module log (ring + file).
+/// The Lua `Context` is built inside the thread because it is `!Send`. An untriggered script
+/// runs each cycle and a triggered one on its register events; script errors are surfaced into
+/// the module log (ring + file).
 #[allow(clippy::too_many_arguments)]
 pub fn run_sim(
     memory: ModuleMemory,
     virtual_store: VirtualStore,
     registers: SharedRegisters,
     events: EventStream<RegisterEvent>,
-    scripts: Vec<(String, String)>,
+    scripts: Vec<ScriptDef<ModbusTrigger>>,
     interval: Duration,
     log: ModuleLog,
     sink: FileSink,
@@ -225,7 +228,32 @@ pub fn run_sim(
 
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = stop.clone();
+    let wake = SimWake::default();
+    let mut watched: Vec<(String, Selection)> = Vec::new();
+    let planned: Vec<PlannedScript> = scripts
+        .iter()
+        .map(|script| {
+            let id = ScriptId {
+                owner: ScriptOwner::Module,
+                name: Arc::from(script.name.as_str()),
+            };
+            let schedule = match &script.trigger {
+                None => ScriptSchedule::EveryCycle,
+                Some(trigger) => {
+                    let ModbusTrigger::Register { registers, .. } = trigger;
+                    watched.push((script.name.clone(), registers.clone()));
+                    ScriptSchedule::Events(Box::new(QueueFeed::attach(
+                        events.clone(),
+                        register_selector(trigger, id.clone()),
+                        wake.clone(),
+                    )))
+                }
+            };
+            PlannedScript { id, schedule }
+        })
+        .collect();
     let handle = std::thread::spawn(move || {
+        let known = registers.clone();
         let bridge = RegisterBridge::new(memory, virtual_store, registers, status, events);
         let mut builder = ContextBuilder::<String>::default()
             .with_stdlib()
@@ -241,8 +269,8 @@ pub fn run_sim(
                 sink: sink.clone(),
             })
             .with_stop_flag(thread_stop.clone());
-        for (name, code) in &scripts {
-            builder = builder.with_script(name.clone(), code);
+        for script in &scripts {
+            builder = builder.with_script(script.name.clone(), &script.code);
         }
         let mut context = match builder.build() {
             Ok(context) => context,
@@ -257,14 +285,38 @@ pub fn run_sim(
             }
         };
 
-        while !thread_stop.load(Ordering::Relaxed) {
-            if let Err(errors) = context.call_all() {
-                for e in errors {
-                    emit(&log, &sink, Level::Error, &format!("[sim] {e}"));
+        for (script, selection) in &watched {
+            match selection {
+                Selection::All(_) => {}
+                Selection::Names(names) if names.is_empty() => emit(
+                    &log,
+                    &sink,
+                    Level::Warning,
+                    &format!("[sim] script '{script}' watches no registers"),
+                ),
+                Selection::Names(names) => {
+                    let known = known.read();
+                    for name in names.iter().filter(|n| !known.contains_key(*n)) {
+                        emit(
+                            &log,
+                            &sink,
+                            Level::Warning,
+                            &format!("[sim] script '{script}' watches unknown register '{name}'"),
+                        );
+                    }
                 }
             }
-            sleep_responsive(interval, &thread_stop);
         }
+
+        let (scheduler_log, scheduler_sink) = (log.clone(), sink.clone());
+        SimScheduler::new(
+            planned,
+            interval,
+            wake,
+            thread_stop.clone(),
+            Box::new(move |level, line| emit(&scheduler_log, &scheduler_sink, level, line)),
+        )
+        .run(&mut context);
         emit(&log, &sink, Level::Info, "[sim] stopped completely ");
     });
 
@@ -312,6 +364,10 @@ pub fn run_script_once(
             .build();
         match context {
             Ok(mut context) => {
+                let _guard = ExecutionGuard::enter(ScriptId {
+                    owner: ScriptOwner::Module,
+                    name: Arc::from(name.as_str()),
+                });
                 if let Err(e) = context.call(&name) {
                     emit(&log, &sink, Level::Error, &format!("[run] {e}"));
                 }
@@ -345,17 +401,6 @@ impl LogSink for LuaLogSink {
     }
 }
 
-/// Sleep up to `interval` in small chunks so the stop flag is observed promptly.
-fn sleep_responsive(interval: Duration, stop: &AtomicBool) {
-    let chunk = Duration::from_millis(50);
-    let mut slept = Duration::ZERO;
-    while slept < interval && !stop.load(Ordering::Relaxed) {
-        let step = chunk.min(interval - slept);
-        std::thread::sleep(step);
-        slept += step;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -367,6 +412,15 @@ mod tests {
     use ferrowl_test_support::wait_until_blocking;
     use parking_lot::RwLock as MemLock;
     use tokio::sync::RwLock;
+
+    fn sim_script(name: &str, code: &str) -> ScriptDef<ModbusTrigger> {
+        ScriptDef {
+            name: name.into(),
+            code: code.into(),
+            enabled: true,
+            trigger: None,
+        }
+    }
 
     fn holding(addr: u16) -> Register {
         RegisterBuilder::default()
@@ -964,8 +1018,6 @@ mod tests {
         assert!(err.to_string().contains("cannot Set nil value"));
     }
 
-    // --- Execution model: dedicated thread, stop control, responsive sleep, shared locking ---
-
     /// A log sink that records the OS thread on which Lua logging (and thus execution) occurred.
     #[derive(Clone)]
     struct ThreadIdSink(Arc<std::sync::Mutex<Option<std::thread::ThreadId>>>);
@@ -1008,7 +1060,7 @@ mod tests {
     /// SC-R-012 — setting the stop flag and joining stops the sim; the sim handle's destruction
     /// (Drop) also stops and joins its thread.
     fn ut_sim_stops_on_flag_and_on_drop() {
-        let noop = || vec![("noop".to_string(), "local x = 1".to_string())];
+        let noop = || vec![sim_script("noop", "local x = 1")];
 
         // Explicit stop(): once it returns, the thread has been joined and logged its exit.
         let log = script_log();
@@ -1065,7 +1117,7 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             EventStream::new(),
-            vec![("runaway".to_string(), "while true do end".to_string())],
+            vec![sim_script("runaway", "while true do end")],
             Duration::from_secs(10), // long interval: a between-cycle-only check would never fire
             log.clone(),
             no_sink(),
@@ -1086,26 +1138,6 @@ mod tests {
             start.elapsed() < Duration::from_millis(500),
             "stop() blocked on the join instead of the hook interrupting the runaway script"
         );
-    }
-
-    #[test]
-    /// SC-R-013 — the cycle sleep is chunked and re-checks the stop flag, so a stop set during the
-    /// idle portion of a cycle is observed promptly instead of after the full interval.
-    fn ut_sleep_responsive_observes_stop_promptly() {
-        // Already-requested stop: the chunked sleep must bail out well before the 10s interval.
-        let stopped = AtomicBool::new(true);
-        let start = std::time::Instant::now();
-        sleep_responsive(Duration::from_secs(10), &stopped);
-        assert!(
-            start.elapsed() < Duration::from_secs(1),
-            "a stopped sim must not sleep the full cycle interval"
-        );
-
-        // Without a stop, it does sleep roughly the (short) interval.
-        let running = AtomicBool::new(false);
-        let start = std::time::Instant::now();
-        sleep_responsive(Duration::from_millis(80), &running);
-        assert!(start.elapsed() >= Duration::from_millis(60));
     }
 
     #[test]
@@ -1179,9 +1211,9 @@ mod tests {
             vstore(),
             Arc::new(MemLock::new(evse_registers())),
             EventStream::new(),
-            vec![(
-                "status".to_string(),
-                r#"C_Log:Info("status=" .. C_Register:ConnectionStatus())"#.to_string(),
+            vec![sim_script(
+                "status",
+                r#"C_Log:Info("status=" .. C_Register:ConnectionStatus())"#,
             )],
             Duration::ZERO,
             log.clone(),
