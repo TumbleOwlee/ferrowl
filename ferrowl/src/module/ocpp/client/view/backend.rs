@@ -2101,7 +2101,7 @@ mod tests {
             !script_lines(&v.script_log)
                 .await
                 .iter()
-                .any(|l| l.contains("[lua]")),
+                .any(|l| l.contains("[sim]")),
             "field access errored after the edit"
         );
     }

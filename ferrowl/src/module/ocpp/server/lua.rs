@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use parking_lot::{Mutex, RwLock};
@@ -19,13 +19,17 @@ use ferrowl_lua::module::{
 use ferrowl_lua::{ContextBuilder, Error};
 
 use crate::app::Level;
+use crate::config::script::{OcppTrigger, ScriptDef};
 use crate::module::ocpp::client::lua_sim::{
-    LuaLogSink, OcppFields, OcppSimHandle, emit, sleep_responsive, vt_to_json,
+    LuaLogSink, OcppFields, OcppSimHandle, emit, vt_to_json,
 };
 use crate::module::ocpp::lock::{with_state, with_state_mut};
 use crate::module::ocpp::scope::Scope;
 use crate::module::ocpp::server::view::ServerVersion;
 use crate::module::view::SharedLog;
+use crate::sim::events::SimWake;
+use crate::sim::scheduler::{CyclePolicy, PlannedScript, ScriptSchedule, SimScheduler};
+use crate::sim::script_id::{ScriptId, ScriptOwner};
 use crate::view::status_bar::StatusCell;
 
 /// Actions enqueued by the server Lua sim: `(identity, scope, action, overrides-json)`, drained by
@@ -261,7 +265,7 @@ impl<V: ServerVersion> OcppServerHost for ServerHost<V> {
 /// module log. Mirrors the client [`run_client_sim`](crate::module::ocpp::client::lua_sim::run_client_sim).
 /// Run one server script exactly once on a short-lived detached thread, outside the sim
 /// (SC-R-035). Fresh context, same `C_*` modules as [`run_server_sim`], one script, no enabled
-/// filter and no loop. Errors log under `[run]`, distinct from the sim's `[lua]`/`[sim]` lines.
+/// filter and no loop. Errors log under `[run]`, distinct from the sim's `[sim]` lines.
 pub fn run_server_script_once<V: ServerVersion>(
     states: SharedServerStates<V>,
     queue: ServerActionQueue,
@@ -299,7 +303,7 @@ pub fn run_server_script_once<V: ServerVersion>(
 pub fn run_server_sim<V: ServerVersion>(
     states: SharedServerStates<V>,
     queue: ServerActionQueue,
-    scripts: Vec<(String, String)>,
+    scripts: Vec<ScriptDef<OcppTrigger>>,
     interval: Duration,
     log: SharedLog,
     status: StatusCell,
@@ -319,8 +323,8 @@ pub fn run_server_sim<V: ServerVersion>(
             .with_module(LogModule::init(LuaLogSink(log.clone())))
             .with_print_sink(LuaLogSink(log.clone()))
             .with_stop_flag(thread_stop.clone());
-        for (name, code) in &scripts {
-            builder = builder.with_script(name.clone(), code);
+        for script in &scripts {
+            builder = builder.with_script(script.name.clone(), &script.code);
         }
         let mut context = match builder.build() {
             Ok(context) => context,
@@ -328,19 +332,33 @@ pub fn run_server_sim<V: ServerVersion>(
                 emit(
                     &log,
                     Level::Error,
-                    &format!("[lua] failed to build context: {e}"),
+                    &format!("[sim] failed to build context: {e}"),
                 );
                 return;
             }
         };
-        while !thread_stop.load(Ordering::Relaxed) {
-            if let Err(errors) = context.refresh_all(interval) {
-                for e in errors {
-                    emit(&log, Level::Error, &format!("[lua] {e}"));
-                }
-            }
-            sleep_responsive(Duration::from_millis(50), &thread_stop);
-        }
+        let planned = scripts
+            .iter()
+            .map(|script| PlannedScript {
+                id: ScriptId {
+                    owner: ScriptOwner::Module,
+                    name: Arc::from(script.name.as_str()),
+                },
+                schedule: match &script.trigger {
+                    None => ScriptSchedule::EveryCycle,
+                    Some(trigger) => match *trigger {},
+                },
+            })
+            .collect();
+        SimScheduler::new(
+            planned,
+            interval,
+            CyclePolicy::AtMostOncePerInterval,
+            SimWake::default(),
+            thread_stop.clone(),
+            Box::new(move |level, line| emit(&log, level, line)),
+        )
+        .run(&mut context);
     });
     Some(OcppSimHandle::from_parts(stop, handle))
 }
@@ -451,6 +469,46 @@ mod tests {
         Arc::new(tokio::sync::RwLock::new(crate::app::LogRing::init()))
     }
 
+    fn script(name: &str, code: &str) -> ScriptDef<OcppTrigger> {
+        ScriptDef {
+            name: name.to_string(),
+            code: code.to_string(),
+            enabled: true,
+            trigger: None,
+        }
+    }
+
+    #[test]
+    /// SC-R-032 — a server sim script error is logged at Error level with the `[sim]` prefix.
+    fn ut_server_sim_error_logged_with_sim_prefix() {
+        let states: SharedServerStates<V1_6> = Arc::new(RwLock::new(ServerStates::default()));
+        let queue: ServerActionQueue = Arc::new(Mutex::new(VecDeque::new()));
+        let sim_log = log();
+        let mut handle = run_server_sim(
+            states,
+            queue,
+            vec![script("bad", r#"error("boom")"#)],
+            Duration::from_millis(50),
+            sim_log.clone(),
+            StatusCell::default(),
+        )
+        .expect("a non-empty script set spawns a sim thread");
+        ferrowl_test_support::wait_until_blocking(
+            "the script error is logged",
+            Duration::from_millis(5),
+            Duration::from_secs(5),
+            || {
+                sim_log
+                    .blocking_read()
+                    .peek_n(crate::app::LOG_SIZE)
+                    .into_iter()
+                    .any(|(_, level, line)| level == Level::Error && line.starts_with("[sim] "))
+                    .then_some(())
+            },
+        );
+        handle.stop();
+    }
+
     #[test]
     /// SC-R-012 — stopping a runaway OCPP server sim completes promptly via the execution hook
     /// (SC-R-034) instead of blocking the join on a between-cycles-only stop check.
@@ -460,11 +518,8 @@ mod tests {
         let mut handle = run_server_sim(
             states,
             queue,
-            vec![("runaway".to_string(), "while true do end".to_string())],
-            // `interval` is refresh_all's per-script throttle window (SC-R-014), not the loop's
-            // own sleep (fixed 50ms via sleep_responsive) — Duration::ZERO makes the just-loaded
-            // script eligible to run on the very first cycle, deterministically.
-            Duration::ZERO,
+            vec![script("runaway", "while true do end")],
+            Duration::from_millis(50),
             log(),
             StatusCell::default(),
         )
@@ -495,11 +550,11 @@ mod tests {
         let mut handle = run_server_sim(
             states,
             queue,
-            vec![(
-                "status".to_string(),
-                r#"C_Log:Info("status=" .. C_OCPP:ConnectionStatus())"#.to_string(),
+            vec![script(
+                "status",
+                r#"C_Log:Info("status=" .. C_OCPP:ConnectionStatus())"#,
             )],
-            Duration::ZERO,
+            Duration::from_millis(50),
             log.clone(),
             status,
         )

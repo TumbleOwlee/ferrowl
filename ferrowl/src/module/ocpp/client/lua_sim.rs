@@ -20,9 +20,13 @@ use ferrowl_lua::{ContextBuilder, Error};
 use ferrowl_ocpp::{V1_6, V2_0_1, Version};
 
 use crate::app::Level;
+use crate::config::script::{OcppTrigger, ScriptDef};
 use crate::module::ocpp::lock::{with_state, with_state_mut};
 use crate::module::ocpp::scope::Scope;
 use crate::module::view::SharedLog;
+use crate::sim::events::SimWake;
+use crate::sim::scheduler::{CyclePolicy, PlannedScript, ScriptSchedule, SimScheduler};
+use crate::sim::script_id::{ScriptId, ScriptOwner};
 use crate::view::status_bar::StatusCell;
 
 /// A version's observed-state type, addressable by field name and exposing its action set. The
@@ -242,7 +246,7 @@ impl ClientFields for crate::module::ocpp::client::v1_6::state::CsState {
 /// `Connector(id)` = one connector).
 /// Run one client script exactly once on a short-lived detached thread, outside the sim
 /// (SC-R-035). Fresh context, same `C_*` modules as [`run_client_sim`], one script, no enabled
-/// filter and no loop. Errors log under `[run]`, distinct from the sim's `[lua]` lines.
+/// filter and no loop. Errors log under `[run]`, distinct from the sim's `[sim]` lines.
 pub fn run_client_script_once<S>(
     state: Arc<RwLock<S>>,
     queue: ScopedActionQueue,
@@ -282,7 +286,7 @@ pub fn run_client_script_once<S>(
 pub fn run_client_sim<S>(
     state: Arc<RwLock<S>>,
     queue: ScopedActionQueue,
-    scripts: Vec<(String, String)>,
+    scripts: Vec<ScriptDef<OcppTrigger>>,
     interval: Duration,
     log: SharedLog,
     status: StatusCell,
@@ -305,8 +309,8 @@ where
             .with_module(LogModule::init(LuaLogSink(log.clone())))
             .with_print_sink(LuaLogSink(log.clone()))
             .with_stop_flag(thread_stop.clone());
-        for (name, code) in &scripts {
-            builder = builder.with_script(name.clone(), code);
+        for script in &scripts {
+            builder = builder.with_script(script.name.clone(), &script.code);
         }
         let mut context = match builder.build() {
             Ok(context) => context,
@@ -314,19 +318,33 @@ where
                 emit(
                     &log,
                     Level::Error,
-                    &format!("[lua] failed to build context: {e}"),
+                    &format!("[sim] failed to build context: {e}"),
                 );
                 return;
             }
         };
-        while !thread_stop.load(Ordering::Relaxed) {
-            if let Err(errors) = context.refresh_all(interval) {
-                for e in errors {
-                    emit(&log, Level::Error, &format!("[lua] {e}"));
-                }
-            }
-            sleep_responsive(Duration::from_millis(50), &thread_stop);
-        }
+        let planned = scripts
+            .iter()
+            .map(|script| PlannedScript {
+                id: ScriptId {
+                    owner: ScriptOwner::Module,
+                    name: Arc::from(script.name.as_str()),
+                },
+                schedule: match &script.trigger {
+                    None => ScriptSchedule::EveryCycle,
+                    Some(trigger) => match *trigger {},
+                },
+            })
+            .collect();
+        SimScheduler::new(
+            planned,
+            interval,
+            CyclePolicy::AtMostOncePerInterval,
+            SimWake::default(),
+            thread_stop.clone(),
+            Box::new(move |level, line| emit(&log, level, line)),
+        )
+        .run(&mut context);
     });
     Some(OcppSimHandle {
         stop,
@@ -537,6 +555,45 @@ mod tests {
         Arc::new(tokio::sync::RwLock::new(crate::app::LogRing::init()))
     }
 
+    fn script(name: &str, code: &str) -> ScriptDef<OcppTrigger> {
+        ScriptDef {
+            name: name.to_string(),
+            code: code.to_string(),
+            enabled: true,
+            trigger: None,
+        }
+    }
+
+    #[test]
+    /// SC-R-032 — a client sim script error is logged at Error level with the `[sim]` prefix.
+    fn ut_client_sim_error_logged_with_sim_prefix() {
+        let state = Arc::new(RwLock::new(Cs201::default()));
+        let sim_log = log();
+        let mut handle = run_client_sim(
+            state,
+            queue(),
+            vec![script("bad", r#"error("boom")"#)],
+            Duration::from_millis(50),
+            sim_log.clone(),
+            StatusCell::default(),
+        )
+        .expect("a non-empty script set spawns a sim thread");
+        ferrowl_test_support::wait_until_blocking(
+            "the script error is logged",
+            Duration::from_millis(5),
+            Duration::from_secs(5),
+            || {
+                sim_log
+                    .blocking_read()
+                    .peek_n(crate::app::LOG_SIZE)
+                    .into_iter()
+                    .any(|(_, level, line)| level == Level::Error && line.starts_with("[sim] "))
+                    .then_some(())
+            },
+        );
+        handle.stop();
+    }
+
     #[test]
     /// SC-R-012 — stopping a runaway OCPP client sim completes promptly via the execution hook
     /// (SC-R-034) instead of blocking the join on a between-cycles-only stop check.
@@ -546,11 +603,8 @@ mod tests {
         let mut handle = run_client_sim(
             state,
             q,
-            vec![("runaway".to_string(), "while true do end".to_string())],
-            // `interval` here is refresh_all's per-script throttle window (SC-R-014), not the
-            // loop's own sleep (that's a fixed 50ms via sleep_responsive) — Duration::ZERO makes
-            // the just-loaded script eligible to run on the very first cycle, deterministically.
-            Duration::ZERO,
+            vec![script("runaway", "while true do end")],
+            Duration::from_millis(50),
             log(),
             StatusCell::default(),
         )
