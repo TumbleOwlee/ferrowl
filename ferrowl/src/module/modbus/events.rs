@@ -10,7 +10,7 @@ use ferrowl_modbus::{Key, SlaveKey};
 use ferrowl_store::{Memory, StoreWrite, WriteSource, WriteTap};
 use mlua::IntoLua;
 
-use crate::config::script::{ModbusTrigger, Selection};
+use crate::config::script::Selection;
 use crate::lua::SharedRegisters;
 use crate::lua::value_conv::value_to_type;
 use crate::module::modbus::registers::register_mem_binding;
@@ -141,11 +141,12 @@ pub fn publish_virtual(
 }
 
 /// Selects the events a script's trigger asks for.
-pub fn register_selector(trigger: &ModbusTrigger, me: ScriptId) -> EventSelector<RegisterEvent> {
-    let ModbusTrigger::Register {
-        registers,
-        every_write,
-    } = trigger.clone();
+pub fn register_selector(
+    registers: &Selection,
+    every_write: bool,
+    me: ScriptId,
+) -> EventSelector<RegisterEvent> {
+    let registers = registers.clone();
     Arc::new(move |event| {
         let named = match &registers {
             Selection::All(_) => true,
@@ -542,11 +543,8 @@ mod tests {
         }
     }
 
-    fn trigger(names: &[&str], every_write: bool) -> ModbusTrigger {
-        ModbusTrigger::Register {
-            registers: Selection::Names(names.iter().map(|n| n.to_string()).collect()),
-            every_write,
-        }
+    fn names(names: &[&str]) -> Selection {
+        Selection::Names(names.iter().map(|n| n.to_string()).collect())
     }
 
     fn me() -> ScriptId {
@@ -559,7 +557,7 @@ mod tests {
     #[test]
     /// SC-R-091 — a selection holds a register by name; `all` holds every register.
     fn ut_selector_matches_names_or_all() {
-        let named = register_selector(&trigger(&["temp"], false), me());
+        let named = register_selector(&names(&["temp"]), false, me());
         assert!(named(&sel_event("temp", true, RegisterEventSource::Remote)));
         assert!(!named(&sel_event(
             "other",
@@ -567,10 +565,8 @@ mod tests {
             RegisterEventSource::Remote
         )));
         let all = register_selector(
-            &ModbusTrigger::Register {
-                registers: Selection::All(crate::config::script::AllMarker::All),
-                every_write: false,
-            },
+            &Selection::All(crate::config::script::AllMarker::All),
+            false,
             me(),
         );
         assert!(all(&sel_event(
@@ -583,8 +579,8 @@ mod tests {
     #[test]
     /// SC-R-092 — an unchanged write selects only for an every-write trigger.
     fn ut_selector_requires_change_unless_every_write() {
-        let changes = register_selector(&trigger(&["temp"], false), me());
-        let every = register_selector(&trigger(&["temp"], true), me());
+        let changes = register_selector(&names(&["temp"]), false, me());
+        let every = register_selector(&names(&["temp"]), true, me());
         let same = sel_event("temp", false, RegisterEventSource::Poll);
         assert!(!changes(&same));
         assert!(every(&same));
@@ -593,7 +589,7 @@ mod tests {
     #[test]
     /// SC-R-093 — a script's own write is the only one its trigger leaves out.
     fn ut_selector_excludes_only_the_writing_script() {
-        let selector = register_selector(&trigger(&["temp"], false), me());
+        let selector = register_selector(&names(&["temp"]), false, me());
         let from =
             |id: Option<ScriptId>| sel_event("temp", true, RegisterEventSource::Lua { script: id });
         assert!(!selector(&from(Some(me()))));
@@ -608,7 +604,7 @@ mod tests {
     #[test]
     /// SC-R-094 — a same-named script of another owner still fires.
     fn ut_selector_same_name_other_owner_still_fires() {
-        let selector = register_selector(&trigger(&["temp"], false), me());
+        let selector = register_selector(&names(&["temp"]), false, me());
         let session = ScriptId {
             owner: ScriptOwner::Session,
             name: "me".into(),

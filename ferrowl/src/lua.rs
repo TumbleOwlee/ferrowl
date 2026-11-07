@@ -17,6 +17,7 @@ use ferrowl_modbus::{Key, SlaveKey};
 use ferrowl_store::{Range, WriteSource};
 
 use crate::app::Level;
+use crate::config::MIN_SCRIPT_INTERVAL_SECS;
 use crate::config::script::{ModbusTrigger, ScriptDef, Selection};
 use crate::module::modbus::{
     FileSink, ModuleLog, ModuleMemory, RegisterEvent, RegisterEventSource, VirtualStore, append,
@@ -239,12 +240,17 @@ pub fn run_sim(
             };
             let schedule = match &script.trigger {
                 None => ScriptSchedule::EveryCycle,
-                Some(trigger) => {
-                    let ModbusTrigger::Register { registers, .. } = trigger;
+                Some(ModbusTrigger::Interval { seconds }) => {
+                    ScriptSchedule::interval(*seconds, MIN_SCRIPT_INTERVAL_SECS)
+                }
+                Some(ModbusTrigger::Register {
+                    registers,
+                    every_write,
+                }) => {
                     watched.push((script.name.clone(), registers.clone()));
                     ScriptSchedule::Events(Box::new(QueueFeed::attach(
                         events.clone(),
-                        register_selector(trigger, id.clone()),
+                        register_selector(registers, *every_write, id.clone()),
                         wake.clone(),
                     )))
                 }

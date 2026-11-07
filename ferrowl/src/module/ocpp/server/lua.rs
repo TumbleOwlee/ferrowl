@@ -19,6 +19,7 @@ use ferrowl_lua::module::{
 use ferrowl_lua::{ContextBuilder, Error};
 
 use crate::app::Level;
+use crate::config::MIN_SCRIPT_INTERVAL_SECS;
 use crate::config::script::{OcppTrigger, ScriptDef};
 use crate::module::ocpp::client::lua_sim::{
     LuaLogSink, OcppFields, OcppSimHandle, emit, vt_to_json,
@@ -346,7 +347,9 @@ pub fn run_server_sim<V: ServerVersion>(
                 },
                 schedule: match &script.trigger {
                     None => ScriptSchedule::EveryCycle,
-                    Some(trigger) => match *trigger {},
+                    Some(OcppTrigger::Interval { seconds }) => {
+                        ScriptSchedule::interval(*seconds, MIN_SCRIPT_INTERVAL_SECS)
+                    }
                 },
             })
             .collect();

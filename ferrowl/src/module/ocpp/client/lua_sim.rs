@@ -20,6 +20,7 @@ use ferrowl_lua::{ContextBuilder, Error};
 use ferrowl_ocpp::{V1_6, V2_0_1, Version};
 
 use crate::app::Level;
+use crate::config::MIN_SCRIPT_INTERVAL_SECS;
 use crate::config::script::{OcppTrigger, ScriptDef};
 use crate::module::ocpp::lock::{with_state, with_state_mut};
 use crate::module::ocpp::scope::Scope;
@@ -332,7 +333,9 @@ where
                 },
                 schedule: match &script.trigger {
                     None => ScriptSchedule::EveryCycle,
-                    Some(trigger) => match *trigger {},
+                    Some(OcppTrigger::Interval { seconds }) => {
+                        ScriptSchedule::interval(*seconds, MIN_SCRIPT_INTERVAL_SECS)
+                    }
                 },
             })
             .collect();

@@ -27,10 +27,14 @@ fn no_trigger<T>() -> Option<T> {
     None
 }
 
-/// Trigger of a Modbus device script.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Trigger of a Modbus device script: a fixed period or a register event.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ModbusTrigger {
+    Interval {
+        #[serde(deserialize_with = "seconds")]
+        seconds: f64,
+    },
     Register {
         registers: Selection,
         #[serde(default)]
@@ -38,15 +42,74 @@ pub enum ModbusTrigger {
     },
 }
 
-/// OCPP scripts take no trigger yet.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Trigger of an OCPP device script: a fixed period.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum OcppTrigger {}
+pub enum OcppTrigger {
+    Interval {
+        #[serde(deserialize_with = "seconds")]
+        seconds: f64,
+    },
+}
 
-/// Session scripts take no trigger yet.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Trigger of a session script: a fixed period.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum SessionTrigger {}
+pub enum SessionTrigger {
+    Interval {
+        #[serde(deserialize_with = "seconds")]
+        seconds: f64,
+    },
+}
+
+/// Key under which `serde_json`'s `arbitrary_precision` mode carries a number's digits.
+const NUMBER_TOKEN: &str = "$serde_json::private::Number";
+
+/// Reads an interval's `seconds` from an integer or a float.
+///
+/// A direct visitor, because an internally tagged enum buffers its fields and `serde_json`'s
+/// `arbitrary_precision` mode (enabled transitively by `rust-ocpp`'s dependencies) turns a
+/// buffered JSON number into a single-entry map that `f64`'s own deserializer rejects.
+fn seconds<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{Error, MapAccess, Visitor};
+
+    struct SecondsVisitor;
+
+    impl<'de> Visitor<'de> for SecondsVisitor {
+        type Value = f64;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a number of seconds")
+        }
+
+        fn visit_i64<E>(self, v: i64) -> Result<f64, E> {
+            Ok(v as f64)
+        }
+
+        fn visit_u64<E>(self, v: u64) -> Result<f64, E> {
+            Ok(v as f64)
+        }
+
+        fn visit_f64<E>(self, v: f64) -> Result<f64, E> {
+            Ok(v)
+        }
+
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<f64, A::Error> {
+            let key: Option<String> = map.next_key()?;
+            if key.as_deref() != Some(NUMBER_TOKEN) {
+                return Err(A::Error::custom("expected a number of seconds"));
+            }
+            let raw: String = map.next_value()?;
+            raw.parse()
+                .map_err(|_| A::Error::custom(format!("invalid number: {raw}")))
+        }
+    }
+
+    deserializer.deserialize_any(SecondsVisitor)
+}
 
 /// The registers a register trigger watches: named, or every register.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,7 +127,7 @@ pub enum AllMarker {
 }
 
 /// A module's script list, typed by the trigger kind it holds.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ScriptList {
     Modbus(Vec<ScriptDef<ModbusTrigger>>),
     Ocpp(Vec<ScriptDef<OcppTrigger>>),
@@ -90,7 +153,9 @@ impl ScriptList {
     pub fn into_modbus(self) -> Result<Vec<ScriptDef<ModbusTrigger>>, TriggerMismatch> {
         match self {
             Self::Modbus(s) => Ok(s),
-            Self::Ocpp(s) => retype(s, |t| match t {}),
+            Self::Ocpp(s) => retype(s, |OcppTrigger::Interval { seconds }| {
+                Some(ModbusTrigger::Interval { seconds })
+            }),
         }
     }
 
@@ -98,7 +163,10 @@ impl ScriptList {
     pub fn into_ocpp(self) -> Result<Vec<ScriptDef<OcppTrigger>>, TriggerMismatch> {
         match self {
             Self::Ocpp(s) => Ok(s),
-            Self::Modbus(s) => retype(s, |_| None),
+            Self::Modbus(s) => retype(s, |t| match t {
+                ModbusTrigger::Interval { seconds } => Some(OcppTrigger::Interval { seconds }),
+                ModbusTrigger::Register { .. } => None,
+            }),
         }
     }
 }
@@ -212,8 +280,9 @@ mod tests {
     }
 
     #[test]
-    /// SC-R-086 — a script's trigger is none or a register event, nothing else.
-    fn ut_trigger_is_none_or_register() {
+    /// SC-R-086, SC-R-100 — a script's trigger is none, an interval or a register event,
+    /// nothing else; the interval's `seconds` parses from a float or an integer.
+    fn ut_trigger_is_none_interval_or_register() {
         use crate::convert::FileType;
         let reg: ScriptDef<ModbusTrigger> = parse(
             "reg.toml",
@@ -222,18 +291,103 @@ mod tests {
         )
         .unwrap();
         assert_eq!(reg.trigger, Some(register(&["a"], false)));
-        let interval = parse::<ScriptDef<ModbusTrigger>>(
-            "interval.toml",
-            "name = \"s\"\n[trigger]\nkind = \"interval\"\nevery = 5\n",
+        let every = Some(ModbusTrigger::Interval { seconds: 5.0 });
+        for (name, text, ty) in [
+            (
+                "float.toml",
+                "name = \"s\"\n[trigger]\nkind = \"interval\"\nseconds = 5.0\n",
+                FileType::Toml,
+            ),
+            (
+                "int.toml",
+                "name = \"s\"\n[trigger]\nkind = \"interval\"\nseconds = 5\n",
+                FileType::Toml,
+            ),
+            (
+                "float.json",
+                r#"{"name":"s","trigger":{"kind":"interval","seconds":5.0}}"#,
+                FileType::Json,
+            ),
+            (
+                "int.json",
+                r#"{"name":"s","trigger":{"kind":"interval","seconds":5}}"#,
+                FileType::Json,
+            ),
+        ] {
+            let def: ScriptDef<ModbusTrigger> = parse(name, text, ty).unwrap();
+            assert_eq!(def.trigger, every, "{name}");
+        }
+        let unknown = parse::<ScriptDef<ModbusTrigger>>(
+            "unknown.toml",
+            "name = \"s\"\n[trigger]\nkind = \"message\"\n",
             FileType::Toml,
         );
-        assert!(interval.is_err());
+        assert!(unknown.is_err());
         let missing_kind = parse::<ScriptDef<ModbusTrigger>>(
             "nokind.toml",
             "name = \"s\"\n[trigger]\nregisters = [\"a\"]\n",
             FileType::Toml,
         );
         assert!(missing_kind.is_err());
+    }
+
+    #[test]
+    /// SC-R-086 — `seconds` must be a number: a table or a string is rejected.
+    fn ut_interval_seconds_rejects_non_numbers() {
+        use crate::convert::FileType;
+        for (name, text, ty) in [
+            (
+                "table.toml",
+                "name = \"s\"\n[trigger]\nkind = \"interval\"\nseconds = { a = \"5\" }\n",
+                FileType::Toml,
+            ),
+            (
+                "str.toml",
+                "name = \"s\"\n[trigger]\nkind = \"interval\"\nseconds = \"5\"\n",
+                FileType::Toml,
+            ),
+            (
+                "table.json",
+                r#"{"name":"s","trigger":{"kind":"interval","seconds":{"a":"5"}}}"#,
+                FileType::Json,
+            ),
+        ] {
+            assert!(
+                parse::<ScriptDef<ModbusTrigger>>(name, text, ty).is_err(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    /// SC-R-086 — an interval trigger needs `seconds` and takes no other key.
+    fn ut_interval_trigger_requires_seconds() {
+        use crate::convert::FileType;
+        let missing = parse::<ScriptDef<ModbusTrigger>>(
+            "missing.toml",
+            "name = \"s\"\n[trigger]\nkind = \"interval\"\n",
+            FileType::Toml,
+        );
+        assert!(missing.is_err());
+        let extra = parse::<ScriptDef<ModbusTrigger>>(
+            "extra.toml",
+            "name = \"s\"\n[trigger]\nkind = \"interval\"\nseconds = 5\nevery_write = true\n",
+            FileType::Toml,
+        );
+        assert!(extra.is_err());
+    }
+
+    #[test]
+    /// SC-R-086 — an interval script copies between a Modbus and an OCPP list, keeping its
+    /// period.
+    fn ut_interval_script_copies_between_modbus_and_ocpp() {
+        let modbus = vec![script(Some(ModbusTrigger::Interval { seconds: 2.5 }))];
+        let ocpp = ScriptList::Modbus(modbus.clone()).into_ocpp().unwrap();
+        assert_eq!(
+            ocpp,
+            vec![script(Some(OcppTrigger::Interval { seconds: 2.5 }))]
+        );
+        assert_eq!(ScriptList::Ocpp(ocpp).into_modbus().unwrap(), modbus);
     }
 
     #[test]

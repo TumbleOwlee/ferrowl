@@ -145,7 +145,9 @@ impl SessionSim {
                     },
                     schedule: match &script.trigger {
                         None => ScriptSchedule::EveryCycle,
-                        Some(trigger) => match *trigger {},
+                        Some(SessionTrigger::Interval { seconds }) => {
+                            ScriptSchedule::interval(*seconds, 0.0)
+                        }
                     },
                 })
                 .collect();
