@@ -54,11 +54,11 @@ Lua API surface and semantics owned here. The in-TUI code editor (vim-modal edit
 
 **SC-R-012** — A sim thread is controlled by a stop flag observed between cycles, between event-triggered runs and, during a cycle or run, at each firing of the execution hook (SC-R-034, SC-R-046). Setting the flag and joining stops the sim; the sim handle's destruction also stops and joins.
 
-**SC-R-013** — Within each cycle the thread sleeps up to the cycle interval in small chunks, re-checking the stop flag between chunks, and ends the sleep early when an event is queued.
+**SC-R-013** — Within each cycle the thread sleeps up to the cycle interval in small chunks, re-checking the stop flag between chunks, and ends the sleep early when an event is queued or an interval script is due.
 
 **SC-R-014** — A per-module Modbus sim and the session-level sim run **every** enabled script with no trigger on **every** cycle, so such a script's observable cadence is approximately one execution per cycle interval.
 
-**SC-R-044** — A per-module OCPP sim runs each enabled script at most once per cycle interval, skipping any that ran more recently than the interval, so a script's observable cadence is approximately one execution per cycle interval, as under SC-R-014.
+**SC-R-044** — A per-module OCPP sim runs each enabled script with no trigger at most once per cycle interval, skipping any that ran more recently than the interval, so such a script's observable cadence is approximately one execution per cycle interval, as under SC-R-014.
 
 **SC-R-015** — Execution within a cycle is sequential on the sim thread. Relative order within a cycle is unspecified (SC-E-034).
 
@@ -90,7 +90,7 @@ Lua API surface and semantics owned here. The in-TUI code editor (vim-modal edit
 
 **SC-R-060** — An on-demand run (SC-R-035) ignores the script's enabled flag; a disabled script runs.
 
-**SC-R-049** — Errors of an on-demand run (SC-R-035) are logged under a `[run]` prefix, distinct from the `[sim]` prefix of sim diagnostics (SC-R-032), since `ferrowl run --exit-on-error` keys its exit code off `[sim]` (CL-R-031).
+**SC-R-049** — Errors of an on-demand run (SC-R-035) are logged under a `[run]` prefix, distinct from the `[sim]` prefix of sim diagnostics (SC-R-032), so the log shows which kind of run raised them; neither prefix affects any exit code (CL-R-060).
 
 ---
 
@@ -154,7 +154,7 @@ Lua API surface and semantics owned here. The in-TUI code editor (vim-modal edit
 
 ## Script triggers
 
-**SC-R-086** — A script's trigger is one of: none, register event.
+**SC-R-086** — A script's trigger is one of: none, interval, register event.
 
 **SC-R-087** — An event-triggered script runs as soon as the sim thread is free, without waiting for the cycle interval.
 
@@ -178,6 +178,28 @@ Lua API surface and semantics owned here. The in-TUI code editor (vim-modal edit
 
 **SC-R-096** — An event arriving at a full queue (SC-R-095) drops that queue's oldest event and never blocks the event's source.
 
+**SC-R-100** — An interval trigger carries its own period, independent of the owner's cycle interval.
+
+**SC-R-101** — An interval trigger's period resolves as the cycle interval does: SC-R-016's fallback for every owner, SC-R-045's floor for a per-module owner.
+
+**SC-R-102** — An interval script runs once when its sim thread starts, without waiting for its first period.
+
+**SC-R-103** — After its first run (SC-R-102), an interval script runs as soon as its period, measured from the start of its previous run, has elapsed and the sim thread is free.
+
+**SC-R-104** — A period elapsing while the sim thread is busy yields one run of the interval script, with no catch-up run for further elapsed periods.
+
+**SC-R-105** — A script with no trigger or an interval trigger receives no arguments.
+
+**SC-R-106** — The first drop (SC-R-096) after a script last took an event writes an Error-level `[sim]` line to the owner's log before the sim thread starts its next script execution, naming the script, so `--exit-on-error` trips under CL-R-031.
+
+**SC-R-107** — Further drops before the script next takes an event write no line of their own; when the script next takes an event, one Error-level `[sim]` line names the script and the number of those further drops.
+
+**SC-R-108** — The next event delivered after a drop (SC-R-096) carries the number of events dropped since the last delivery to that script.
+
+**SC-R-109** — An event delivered with no drop since the previous delivery to that script carries a dropped count of 0.
+
+**SC-R-110** — A runtime error in an event or interval script follows SC-R-032: it is logged at Error level with the `[sim]` prefix, and the script's next event or period still runs it.
+
 ---
 
 ## Script templates
@@ -193,8 +215,6 @@ Lua API surface and semantics owned here. The in-TUI code editor (vim-modal edit
 **SC-R-038** — `C_Test` exposes `Assert(cond, msg)`, which raises runtime error `assertion failed: <msg>` when `cond` is Lua-falsy (`nil` or `false`), otherwise returns with no effect; every other value, including `0` and `""`, passes.
 
 **SC-R-050** — `C_Test` exposes `Fail(msg)`, which always raises `assertion failed: <msg>`.
-
-**SC-R-051** — The `assertion failed:` prefix (SC-R-038, SC-R-050) is the text a headless runner keys its exit code off ([`../cli-headless/requirements.md`](../cli-headless/requirements.md)).
 
 ---
 
@@ -234,7 +254,7 @@ Lua API surface and semantics owned here. The in-TUI code editor (vim-modal edit
 
 **SC-R-031** — `C_Log:Info/Warn/Error` and `print` output from a module's sim route to that module's dedicated **script** log (distinct from its connection/traffic log), and, for a Modbus module, also to the module's file log sink when configured.
 
-**SC-R-032** — A runtime error raised by one script (uncaught `error`, failed `C_Test:Assert`/`Fail`, rejected state write, malformed OCPP override table) does not crash the sim thread and does not prevent other scripts in the context from running that cycle. Every such error is written to the owner's log at Error level with a sim/Lua prefix.
+**SC-R-032** — A runtime error raised by one script (uncaught `error`, failed `C_Test:Assert`/`Fail`, rejected state write, malformed OCPP override table) does not crash the sim thread and does not prevent other scripts in the context from running that cycle. Every such error is written to the owner's log at Error level with the `[sim]` prefix.
 
 **SC-R-033** — If building the context itself fails (a Lua **syntax** error in any script, or a duplicate name, SC-R-005), the sim thread logs a single "failed to build Lua context" error and does not loop; **no** script in that context runs. Load-time failure is all-or-nothing per context; run-time failure (SC-R-032) is isolated per script.
 
@@ -242,7 +262,7 @@ Lua API surface and semantics owned here. The in-TUI code editor (vim-modal edit
 
 **SC-R-046** — On each firing of the execution hook (SC-R-034), a sim-thread context checks the stop flag and, if set, raises a Lua error to unwind the executing script.
 
-**SC-R-047** — On each firing of the execution hook (SC-R-034), every context unconditionally checks elapsed wall-clock since the current cycle, the current event-triggered run, or the on-demand run's single execution began, raising a Lua error past a fixed 1,000 ms cap. The cap is fixed, not exposed as config key or CLI flag.
+**SC-R-047** — On each firing of the execution hook (SC-R-034), every context unconditionally checks elapsed wall-clock since the current script execution began, raising a Lua error past a fixed 100 ms cap. The cap is fixed, not exposed as config key or CLI flag.
 
 **SC-R-048** — The execution hook (SC-R-034) enforces no memory ceiling (SC-E-032).
 
@@ -250,4 +270,4 @@ Lua API surface and semantics owned here. The in-TUI code editor (vim-modal edit
 
 **SC-R-065** — A hook-raised error in one script (SC-R-039) does not stop the cycle: the sim thread's other scripts still run that cycle.
 
-**SC-R-066** — A hook-raised stop (SC-R-039) lets a pending stop-and-join complete within SC-R-047's fixed 1,000 ms cap, measured from the hook firing.
+**SC-R-066** — A hook-raised stop (SC-R-039) lets a pending stop-and-join complete within SC-R-047's fixed 100 ms cap, measured from the hook firing.
