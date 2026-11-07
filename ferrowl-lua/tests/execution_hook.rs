@@ -61,18 +61,18 @@ fn it_wall_clock_cap_interrupts_infinite_loop_without_stop_flag() {
         "expected an execution-cap error, got: {err}"
     );
     assert!(
-        elapsed >= Duration::from_millis(1_000),
-        "hook fired before the 1,000ms cap was reached: {elapsed:?}"
+        elapsed >= Duration::from_millis(100),
+        "hook fired before the 100ms cap was reached: {elapsed:?}"
     );
     assert!(
-        elapsed < Duration::from_millis(3_000),
+        elapsed < Duration::from_millis(1_000),
         "hook did not bound the runaway loop promptly: {elapsed:?}"
     );
 }
 
 #[test]
 /// SC-R-012, SC-R-046 — an already-set stop flag interrupts a runaway script almost
-/// immediately, well before the 1,000ms wall-clock cap would fire on its own.
+/// immediately, before the 100 ms cap could fire.
 fn it_stop_flag_interrupts_infinite_loop_almost_immediately() {
     let stop = Arc::new(AtomicBool::new(true));
     let mut ctx = ContextBuilder::<String>::default()
@@ -143,7 +143,7 @@ fn it_hook_error_isolated_other_script_in_same_cycle_still_runs() {
 #[test]
 /// SC-R-066 — a stop flag set *while a call is already running* (not before it starts, unlike
 /// `it_stop_flag_interrupts_infinite_loop_almost_immediately`) is still caught well within
-/// `SC-R-047`'s fixed 1,000ms cap, measured from the moment the flag is actually set (the hook
+/// SC-R-047's fixed 100 ms cap, measured from the moment the flag is actually set (the hook
 /// firing that observes it), not from the call's own start.
 fn it_stop_set_mid_call_completes_within_cap_from_when_set() {
     let stop = Arc::new(AtomicBool::new(false));
@@ -156,7 +156,7 @@ fn it_stop_set_mid_call_completes_within_cap_from_when_set() {
     let set_at = Arc::new(Mutex::new(None::<Instant>));
     let set_at_writer = set_at.clone();
     std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(30));
         *set_at_writer.lock().unwrap() = Some(Instant::now());
         stop.store(true, std::sync::atomic::Ordering::SeqCst);
     });
@@ -166,8 +166,8 @@ fn it_stop_set_mid_call_completes_within_cap_from_when_set() {
 
     assert!(err.to_string().contains("stop"));
     assert!(
-        elapsed_from_set < Duration::from_millis(1_000),
-        "stop-and-join did not complete within the 1,000ms cap measured from the flag being \
+        elapsed_from_set < Duration::from_millis(100),
+        "stop-and-join did not complete within the 100 ms cap measured from the flag being \
          set: {elapsed_from_set:?}"
     );
 }
@@ -184,13 +184,13 @@ fn it_normal_short_script_unaffected_by_hook() {
     assert!(ctx.call_all().is_ok());
 }
 
-/// A `Read` double whose `read` takes 400 ms, so a few runs together outlast the 1,000 ms cap.
+/// A `Read` double whose `read` takes 40 ms, so three reads outlast the 100 ms cap and one stays under it.
 #[derive(Clone)]
 struct SlowRead;
 
 impl Read for SlowRead {
     fn read(&self, _name: String) -> ferrowl_lua::Result<ValueType> {
-        std::thread::sleep(Duration::from_millis(400));
+        std::thread::sleep(Duration::from_millis(40));
         Ok(ValueType::Int(0))
     }
 }
@@ -235,18 +235,29 @@ fn it_call_with_gives_each_run_its_own_cap_origin() {
 }
 
 #[test]
-/// SC-R-047 — a batch shares one cap origin, so scripts that together outlast the cap hit it.
-fn it_call_each_shares_one_cap_origin() {
+/// SC-R-047 — each script of a batch starts its own cap origin, so scripts that together
+/// outlast the cap each complete.
+fn it_call_each_gives_each_script_its_own_cap_origin() {
     let mut ctx = slow_context();
     let keys = ["a", "b", "c"].map(String::from);
-    let errors = ctx
-        .call_each(keys.iter())
-        .expect_err("batch must hit the cap");
-    assert!(
-        errors
-            .iter()
-            .any(|e| e.to_string().contains("execution cap"))
-    );
+    ctx.call_each(keys.iter())
+        .unwrap_or_else(|e| panic!("a script hit the cap: {e:?}"));
+}
+
+#[test]
+/// SC-R-047 — `call_all` and `refresh_all` give each script its own cap origin.
+fn it_call_all_and_refresh_all_give_each_script_its_own_cap_origin() {
+    let mut ctx = ContextBuilder::<String>::default()
+        .with_module(RegisterModule::init(SlowRead))
+        .with_script("a".to_string(), SLOW_SCRIPT)
+        .with_script("b".to_string(), SLOW_SCRIPT)
+        .with_script("c".to_string(), SLOW_SCRIPT)
+        .build()
+        .expect("context build failed");
+    ctx.call_all()
+        .unwrap_or_else(|e| panic!("call_all hit the cap: {e:?}"));
+    ctx.refresh_all(Duration::ZERO)
+        .unwrap_or_else(|e| panic!("refresh_all hit the cap: {e:?}"));
 }
 
 #[test]

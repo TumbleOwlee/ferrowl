@@ -558,8 +558,8 @@ mod tests {
             "s".to_string(),
             // A busy Lua loop, slow enough to measure, that only finishes by writing "done".
             r#"
-                local n = 0
-                for i = 1, 8000000 do n = n + 1 end
+                local t = C_Time:GetMs()
+                while C_Time:GetMs() - t < 50 do end
                 C_Module:Get("m"):Register():Set("x", "done")
             "#
             .to_string(),

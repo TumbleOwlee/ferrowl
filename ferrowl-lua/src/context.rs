@@ -14,8 +14,8 @@ use std::{
 
 /// SC-R-034 — the execution hook fires this often, in VM instructions.
 const HOOK_INSTRUCTION_INTERVAL: u32 = 1_000;
-/// SC-R-034 — wall-clock cap on one cycle, one event-triggered run or one on-demand run (SC-R-035).
-const HOOK_WALL_CLOCK_CAP: Duration = Duration::from_millis(1_000);
+/// SC-R-047 — wall-clock cap on one script execution, on a sim thread or an on-demand run (SC-R-035).
+const HOOK_WALL_CLOCK_CAP: Duration = Duration::from_millis(100);
 
 /// Lua context handling module and script loading
 pub struct Context<K>
@@ -24,10 +24,9 @@ where
 {
     lua: Lua,
     scripts: HashMap<K, Script>,
-    /// SC-R-034 — wall-clock origin of the cycle, event-triggered run or on-demand run currently executing; read by
-    /// the hook installed in `install_execution_hook`, reset by every script-invoking method
-    /// below before it runs anything.
-    cycle_start: Rc<Cell<Instant>>,
+    /// SC-R-047 — wall-clock origin of the script execution currently running; read by the hook
+    /// installed in `install_execution_hook`, reset before every script execution.
+    execution_start: Rc<Cell<Instant>>,
 }
 
 impl<K> Default for Context<K>
@@ -38,7 +37,7 @@ where
         Self {
             lua: Lua::default(),
             scripts: HashMap::default(),
-            cycle_start: Rc::new(Cell::new(Instant::now())),
+            execution_start: Rc::new(Cell::new(Instant::now())),
         }
     }
 }
@@ -54,7 +53,7 @@ where
     /// `Script::exec` and reaches the caller (`call`/`call_all`/`refresh`/`refresh_all`) through
     /// the existing per-script error path — no new error-handling code is needed for SC-R-039.
     pub(crate) fn install_execution_hook(&mut self, stop: Option<Arc<AtomicBool>>) -> Result<()> {
-        let cycle_start = self.cycle_start.clone();
+        let execution_start = self.execution_start.clone();
         self.lua.set_hook(
             HookTriggers::new().every_nth_instruction(HOOK_INSTRUCTION_INTERVAL),
             move |_lua, _debug| {
@@ -65,7 +64,7 @@ where
                         "sim thread stop requested".to_string(),
                     ));
                 }
-                if cycle_start.get().elapsed() > HOOK_WALL_CLOCK_CAP {
+                if execution_start.get().elapsed() > HOOK_WALL_CLOCK_CAP {
                     return Err(mlua::Error::RuntimeError(format!(
                         "script exceeded the {}ms execution cap",
                         HOOK_WALL_CLOCK_CAP.as_millis()
@@ -76,10 +75,10 @@ where
         )
     }
 
-    /// SC-R-034 — resets the wall-clock origin the hook measures "since the current cycle began"
-    /// against. Called by every script-invoking method below, before it runs anything.
-    fn begin_cycle(&self) {
-        self.cycle_start.set(Instant::now());
+    /// SC-R-047 — resets the wall-clock origin the hook measures "since the current script
+    /// execution began" against. Called before every script execution.
+    fn begin_execution(&self) {
+        self.execution_start.set(Instant::now());
     }
 
     /// Add a new module to the lua context
@@ -154,7 +153,7 @@ where
 
     /// Execute a loaded script specified by specific key
     pub fn call(&mut self, key: &K) -> Result<()> {
-        self.begin_cycle();
+        self.begin_execution();
         match self.scripts.get_mut(key) {
             Some(script) => script.exec(),
             None => Ok(()),
@@ -164,14 +163,14 @@ where
     /// Executes the script under `key` as one run with its own cap origin, passing `args` as
     /// the chunk's `...`. An absent key is `Ok(())`.
     pub fn call_with<A: mlua::IntoLuaMulti>(&mut self, key: &K, args: A) -> Result<()> {
-        self.begin_cycle();
+        self.begin_execution();
         match self.scripts.get_mut(key) {
             Some(script) => script.exec_with(args),
             None => Ok(()),
         }
     }
 
-    /// Executes every present script of `keys` as one batch sharing a cap origin, collecting the
+    /// Executes every present script of `keys`, each with its own cap origin, collecting the
     /// errors of the failing ones.
     pub fn call_each<'a>(
         &mut self,
@@ -180,13 +179,13 @@ where
     where
         K: 'a,
     {
-        self.begin_cycle();
         let mut errors = Vec::new();
         for key in keys {
-            if let Some(script) = self.scripts.get_mut(key)
-                && let Err(e) = script.exec()
-            {
-                errors.push(e);
+            if let Some(script) = self.scripts.get_mut(key) {
+                self.execution_start.set(Instant::now());
+                if let Err(e) = script.exec() {
+                    errors.push(e);
+                }
             }
         }
         if errors.is_empty() {
@@ -199,16 +198,17 @@ where
     /// Execute a loaded script specified by specific key while skipping it if it has been executed
     /// in the last timeframe of given duration
     pub fn refresh(&mut self, key: &K, since: std::time::Duration) -> Result<()> {
-        self.begin_cycle();
         match self.scripts.get_mut(key) {
-            Some(script) if script.since_last_execution() >= since => script.exec(),
+            Some(script) if script.since_last_execution() >= since => {
+                self.execution_start.set(Instant::now());
+                script.exec()
+            }
             _ => Ok(()),
         }
     }
 
     pub fn call_all(&mut self) -> std::result::Result<(), Vec<Error>> {
-        self.begin_cycle();
-        Self::exec_collecting_errors(self.iter_mut())
+        Self::exec_collecting_errors(&self.execution_start, self.scripts.iter_mut())
     }
 
     /// Execute all loaded scripts while skipping all scripts executed in the last timeframe of
@@ -217,22 +217,27 @@ where
         &mut self,
         since: std::time::Duration,
     ) -> std::result::Result<(), Vec<Error>> {
-        self.begin_cycle();
         Self::exec_collecting_errors(
-            self.iter_mut()
+            &self.execution_start,
+            self.scripts
+                .iter_mut()
                 .filter(|(_, v)| v.since_last_execution() >= since),
         )
     }
 
     /// Execute every script yielded by `scripts`, collecting the errors of the failing ones
     fn exec_collecting_errors<'a>(
+        execution_start: &Cell<Instant>,
         scripts: impl Iterator<Item = (&'a K, &'a mut Script)>,
     ) -> std::result::Result<(), Vec<Error>>
     where
         K: 'a,
     {
         let errors: Vec<_> = scripts
-            .map(|(_, v)| v.exec())
+            .map(|(_, v)| {
+                execution_start.set(Instant::now());
+                v.exec()
+            })
             .filter(std::result::Result::is_err)
             .map(|e| e.expect_err("filter kept only Err results"))
             .collect();
