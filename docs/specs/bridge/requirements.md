@@ -76,7 +76,7 @@ Per [`../README.md`](../README.md)'s ownership rules, this area does **not** own
 
 **BR-R-025** — The bridge exits 0 on `--duration` deadline or Ctrl-C (exit codes mirror `run`, BR-R-013).
 
-**BR-R-026** — With `--exit-on-error`, the bridge exits 3 on a drained `[bridge]`-sourced line whose producer-chosen level is Error (CL-R-060; exit codes mirror `run`, BR-R-013).
+**BR-R-026** — With `--exit-on-error`, the bridge exits 3 on a drained line the bridge itself produced whose producer-chosen level is Error (CL-R-060; exit codes mirror `run`, BR-R-013).
 
 **BR-R-014** — `bridge` accepts an optional `--duration <secs>`, identical semantics to `run`'s (CL-R-013 family).
 

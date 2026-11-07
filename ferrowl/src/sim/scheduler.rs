@@ -1,6 +1,5 @@
 //! Sim-thread loop: every-cycle scripts on the cycle interval, event scripts as events arrive.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -13,6 +12,20 @@ use crate::sim::script_id::{ExecutionGuard, ScriptId};
 
 /// Longest the loop sleeps before it re-checks `stop`.
 const STOP_POLL: Duration = Duration::from_millis(50);
+
+/// How long the loop may sleep at `now`: up to the stop poll, ended early by the next cycle
+/// (when it has scripts to run) and by the earliest interval due time.
+fn sleep_for(
+    now: Instant,
+    next_cycle: Option<Instant>,
+    interval_dues: impl Iterator<Item = Instant>,
+) -> Duration {
+    next_cycle
+        .into_iter()
+        .chain(interval_dues)
+        .map(|due| due.saturating_duration_since(now))
+        .fold(STOP_POLL, Duration::min)
+}
 
 /// Source of the events one script consumes.
 pub trait ScriptFeed: Send {
@@ -60,7 +73,27 @@ impl<E> Drop for QueueFeed<E> {
 /// When a script runs.
 pub enum ScriptSchedule {
     EveryCycle,
+    Interval { period: Duration },
     Events(Box<dyn ScriptFeed>),
+}
+
+impl ScriptSchedule {
+    /// An interval schedule for a period in seconds: SC-R-016's fallback, then `floor_secs`
+    /// (SC-R-045 for a module, 0 for the session).
+    pub fn interval(seconds: f64, floor_secs: f64) -> Self {
+        Self::Interval {
+            period: crate::config::sanitize_interval_secs(seconds, 1.0, floor_secs),
+        }
+    }
+}
+
+/// How the scripts with no trigger share a cycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CyclePolicy {
+    /// Every such script runs on every cycle (SC-R-014).
+    EveryCycle,
+    /// Each such script runs only when it last ran at least one cycle interval ago (SC-R-044).
+    AtMostOncePerInterval,
 }
 
 /// A script and the schedule it runs on.
@@ -78,10 +111,19 @@ struct EventScript {
     key: String,
 }
 
+/// A script on a fixed period. `due` is `None` once the period runs past the clock's range.
+struct IntervalScript {
+    key: String,
+    period: Duration,
+    due: Option<Instant>,
+}
+
 pub struct SimScheduler {
-    every_cycle: HashSet<String>,
+    every_cycle: Vec<String>,
+    intervals: Vec<IntervalScript>,
     events: Vec<EventScript>,
     cycle: Duration,
+    policy: CyclePolicy,
     wake: SimWake,
     stop: Arc<AtomicBool>,
     log: SimLog,
@@ -91,18 +133,25 @@ impl SimScheduler {
     pub fn new(
         scripts: Vec<PlannedScript>,
         cycle: Duration,
+        policy: CyclePolicy,
         wake: SimWake,
         stop: Arc<AtomicBool>,
         log: SimLog,
     ) -> Self {
-        let mut every_cycle = HashSet::new();
+        let mut every_cycle = Vec::new();
+        let mut intervals = Vec::new();
         let mut events = Vec::new();
         for script in scripts {
             let key = script.id.name.to_string();
             match script.schedule {
                 ScriptSchedule::EveryCycle => {
-                    every_cycle.insert(key);
+                    every_cycle.push(key);
                 }
+                ScriptSchedule::Interval { period } => intervals.push(IntervalScript {
+                    key,
+                    period,
+                    due: Some(Instant::now()),
+                }),
                 ScriptSchedule::Events(feed) => events.push(EventScript {
                     id: script.id,
                     feed,
@@ -112,8 +161,10 @@ impl SimScheduler {
         }
         Self {
             every_cycle,
+            intervals,
             events,
             cycle,
+            policy,
             wake,
             stop,
             log,
@@ -123,8 +174,10 @@ impl SimScheduler {
     pub fn run(self, context: &mut Context<String>) {
         let Self {
             every_cycle,
+            mut intervals,
             mut events,
             cycle,
+            policy,
             wake,
             stop,
             log,
@@ -132,12 +185,32 @@ impl SimScheduler {
         let mut next_cycle = Some(Instant::now());
         while !stop.load(Ordering::Relaxed) {
             if !every_cycle.is_empty() && next_cycle.is_some_and(|t| Instant::now() >= t) {
-                if let Err(errors) = context.call_each(every_cycle.iter()) {
-                    for e in errors {
+                for key in &every_cycle {
+                    if stop.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let result = match policy {
+                        CyclePolicy::EveryCycle => context.call(key),
+                        CyclePolicy::AtMostOncePerInterval => context.refresh(key, cycle),
+                    };
+                    if let Err(e) = result {
                         log(Level::Error, &format!("[sim] {e}"));
                     }
                 }
                 next_cycle = Instant::now().checked_add(cycle);
+            }
+            for script in &mut intervals {
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                if script.due.is_none_or(|due| Instant::now() < due) {
+                    continue;
+                }
+                let start = Instant::now();
+                if let Err(e) = context.call(&script.key) {
+                    log(Level::Error, &format!("[sim] {e}"));
+                }
+                script.due = start.checked_add(script.period);
             }
             let mut ran = false;
             for script in &mut events {
@@ -155,11 +228,9 @@ impl SimScheduler {
             if ran {
                 continue;
             }
-            let until_cycle = match next_cycle {
-                Some(t) if !every_cycle.is_empty() => t.saturating_duration_since(Instant::now()),
-                _ => Duration::MAX,
-            };
-            wake.wait(STOP_POLL.min(until_cycle));
+            let cycle_due = next_cycle.filter(|_| !every_cycle.is_empty());
+            let dues = intervals.iter().filter_map(|script| script.due);
+            wake.wait(sleep_for(Instant::now(), cycle_due, dues));
         }
     }
 }
@@ -169,7 +240,7 @@ mod tests {
     use super::*;
     use crate::sim::script_id::ScriptOwner;
     use ferrowl_lua::ContextBuilder;
-    use ferrowl_lua::module::{LogLevel, LogSink};
+    use ferrowl_lua::module::{LogLevel, LogSink, TimeModule};
     use ferrowl_test_support::wait_until_blocking;
     use parking_lot::Mutex;
     use std::thread::JoinHandle;
@@ -180,11 +251,13 @@ mod tests {
     /// Collects `print` output; once `stop_at` lines are in, raises `stop`.
     struct Capture {
         lines: Lines,
+        timeline: Lines,
         stop_at: Option<(usize, Arc<AtomicBool>)>,
     }
 
     impl LogSink for Capture {
         fn log(&self, _level: LogLevel, line: &str) {
+            self.timeline.lock().push(line.to_string());
             let mut lines = self.lines.lock();
             lines.push(line.to_string());
             if let Some((count, stop)) = &self.stop_at
@@ -220,6 +293,8 @@ mod tests {
         stop: Arc<AtomicBool>,
         lines: Lines,
         logged: Logged,
+        /// Printed and scheduler-logged lines in the order they happened.
+        timeline: Lines,
         handle: Option<JoinHandle<()>>,
     }
 
@@ -229,12 +304,15 @@ mod tests {
             codes: &[(&str, &str)],
             planned: Vec<PlannedScript>,
             cycle: Duration,
+            policy: CyclePolicy,
             wake: SimWake,
             stop_at: Option<usize>,
         ) -> Self {
             let stop = Arc::new(AtomicBool::new(false));
             let lines: Lines = Arc::default();
             let logged: Logged = Arc::default();
+            let timeline: Lines = Arc::default();
+            let (t_timeline, l_timeline) = (timeline.clone(), timeline.clone());
             let codes: Vec<(String, String)> = codes
                 .iter()
                 .map(|(n, c)| (n.to_string(), c.to_string()))
@@ -243,6 +321,7 @@ mod tests {
             let handle = std::thread::spawn(move || {
                 let sink = Capture {
                     lines: t_lines,
+                    timeline: t_timeline,
                     stop_at: stop_at.map(|n| (n, t_stop.clone())),
                 };
                 let mut builder = ContextBuilder::<String>::default()
@@ -254,14 +333,16 @@ mod tests {
                 }
                 let mut context = builder.build().unwrap();
                 let log: SimLog = Box::new(move |level, line| {
+                    l_timeline.lock().push(line.to_string());
                     t_logged.lock().push((level, line.to_string()));
                 });
-                SimScheduler::new(planned, cycle, wake, t_stop, log).run(&mut context);
+                SimScheduler::new(planned, cycle, policy, wake, t_stop, log).run(&mut context);
             });
             Self {
                 stop,
                 lines,
                 logged,
+                timeline,
                 handle: Some(handle),
             }
         }
@@ -298,6 +379,7 @@ mod tests {
             &[("e", RECORD)],
             vec![events_script("e", feed(&stream, &wake))],
             Duration::from_secs(3600),
+            CyclePolicy::EveryCycle,
             wake,
             None,
         );
@@ -315,6 +397,7 @@ mod tests {
             &[("e", RECORD)],
             vec![events_script("e", feed(&stream, &wake))],
             Duration::from_secs(3600),
+            CyclePolicy::EveryCycle,
             wake,
             None,
         );
@@ -346,6 +429,7 @@ mod tests {
                 events_script("b", feed(&stream, &wake)),
             ],
             Duration::from_secs(3600),
+            CyclePolicy::EveryCycle,
             wake,
             None,
         );
@@ -370,6 +454,7 @@ mod tests {
             &[("e", RECORD)],
             vec![events_script("e", feed(&stream, &wake))],
             Duration::from_secs(3600),
+            CyclePolicy::EveryCycle,
             wake,
             None,
         );
@@ -389,6 +474,7 @@ mod tests {
             &[("c", "print('tick')")],
             vec![every_cycle("c")],
             Duration::from_secs(3600),
+            CyclePolicy::EveryCycle,
             SimWake::default(),
             None,
         );
@@ -412,6 +498,7 @@ mod tests {
             &[("a", "print('a')"), ("b", "print('b')")],
             vec![events_script("a", feed_a), events_script("b", feed_b)],
             Duration::from_secs(3600),
+            CyclePolicy::EveryCycle,
             wake,
             Some(3),
         );
@@ -427,6 +514,7 @@ mod tests {
             &[("c", "print('tick')")],
             vec![every_cycle("c")],
             Duration::MAX,
+            CyclePolicy::EveryCycle,
             SimWake::default(),
             None,
         );
@@ -445,6 +533,7 @@ mod tests {
             &[("c", "print('tick')")],
             vec![every_cycle("c")],
             Duration::from_millis(20),
+            CyclePolicy::EveryCycle,
             SimWake::default(),
             Some(3),
         );
@@ -463,6 +552,7 @@ mod tests {
             &[("c", "error('cycle boom')"), ("e", "error('event boom')")],
             vec![every_cycle("c"), events_script("e", feed(&stream, &wake))],
             Duration::from_secs(3600),
+            CyclePolicy::EveryCycle,
             wake,
             None,
         );
@@ -481,6 +571,372 @@ mod tests {
         }
         assert!(logged.iter().any(|(_, l)| l.contains("cycle boom")));
         assert!(logged.iter().any(|(_, l)| l.contains("event boom")));
+    }
+
+    #[test]
+    /// SC-R-044 — under `AtMostOncePerInterval` a script not yet an interval old is skipped,
+    /// so it runs about once per interval and never twice within one.
+    fn ut_at_most_once_policy_skips_a_script_that_ran_within_the_interval() {
+        let stamps: Arc<Mutex<Vec<Instant>>> = Arc::default();
+        let started = Instant::now();
+        let (stop, t_stamps) = (Arc::new(AtomicBool::new(false)), stamps.clone());
+        let t_stop = stop.clone();
+        let handle = std::thread::spawn(move || {
+            let sink = StampSink(t_stamps);
+            let mut context = ContextBuilder::<String>::default()
+                .with_stdlib()
+                .with_print_sink(sink)
+                .with_stop_flag(t_stop.clone())
+                .with_script("c".to_string(), "print('tick')")
+                .build()
+                .unwrap();
+            let log: SimLog = Box::new(|_, _| {});
+            SimScheduler::new(
+                vec![every_cycle("c")],
+                Duration::from_millis(100),
+                CyclePolicy::AtMostOncePerInterval,
+                SimWake::default(),
+                t_stop,
+                log,
+            )
+            .run(&mut context);
+        });
+        std::thread::sleep(Duration::from_millis(550));
+        stop.store(true, Ordering::Relaxed);
+        handle.join().unwrap();
+        let stamps = stamps.lock().clone();
+        assert!(
+            stamps[0].duration_since(started) >= Duration::from_millis(95),
+            "a script that never ran ran before one interval elapsed"
+        );
+        assert!((4..=6).contains(&stamps.len()), "{} runs", stamps.len());
+        for pair in stamps.windows(2) {
+            assert!(
+                pair[1].duration_since(pair[0]) >= Duration::from_millis(95),
+                "two runs within one interval"
+            );
+        }
+    }
+
+    /// Records the instant of every `print`.
+    struct StampSink(Arc<Mutex<Vec<Instant>>>);
+
+    impl LogSink for StampSink {
+        fn log(&self, _level: LogLevel, _line: &str) {
+            self.0.lock().push(Instant::now());
+        }
+    }
+
+    #[test]
+    /// SC-R-047, SC-R-032 — a script running past the cap is cut off with an Error-level `[sim]` line soon
+    /// after the cap, and the other scripts and queued events still run.
+    fn ut_slow_script_is_cut_off_and_the_others_still_run() {
+        let stream = EventStream::new();
+        let wake = SimWake::default();
+        let sim = Sim::spawn(
+            &[
+                ("runaway", "while true do end"),
+                ("ok", "print('ok ran')"),
+                ("e", RECORD),
+            ],
+            vec![
+                every_cycle("runaway"),
+                every_cycle("ok"),
+                events_script("e", feed(&stream, &wake)),
+            ],
+            Duration::from_secs(3600),
+            CyclePolicy::EveryCycle,
+            wake,
+            None,
+        );
+        stream.publish_with(|_| 3);
+        wait_until_blocking(
+            "the cap's Error line",
+            Duration::from_millis(5),
+            Duration::from_secs(1),
+            || {
+                sim.logged
+                    .lock()
+                    .iter()
+                    .any(|(level, line)| *level == Level::Error && line.starts_with("[sim] "))
+                    .then_some(())
+            },
+        );
+        sim.wait_lines("ok and event scripts ran", 2);
+        let timeline = sim.timeline.clone();
+        sim.finish();
+        let timeline = timeline.lock().clone();
+        let cap = timeline
+            .iter()
+            .position(|l| l.starts_with("[sim] "))
+            .expect("the cap line");
+        for printed in ["ok ran", "ran 3"] {
+            let at = timeline.iter().position(|l| l == printed);
+            assert!(at.is_some_and(|at| at > cap), "{printed}: {timeline:?}");
+        }
+    }
+
+    fn interval(name: &str, period: Duration) -> PlannedScript {
+        PlannedScript {
+            id: id(name),
+            schedule: ScriptSchedule::Interval { period },
+        }
+    }
+
+    /// Records the instant and text of every `print`.
+    struct TaggedSink(Arc<Mutex<Vec<(Instant, String)>>>);
+
+    impl LogSink for TaggedSink {
+        fn log(&self, _level: LogLevel, line: &str) {
+            self.0.lock().push((Instant::now(), line.to_string()));
+        }
+    }
+
+    /// Runs a scheduler over `codes` for `run_for`, returning every `print` with its instant.
+    fn run_stamped(
+        codes: &[(&str, &str)],
+        planned: Vec<PlannedScript>,
+        cycle: Duration,
+        run_for: Duration,
+    ) -> Vec<(Instant, String)> {
+        let prints: Arc<Mutex<Vec<(Instant, String)>>> = Arc::default();
+        let stop = Arc::new(AtomicBool::new(false));
+        let codes: Vec<(String, String)> = codes
+            .iter()
+            .map(|(n, c)| (n.to_string(), c.to_string()))
+            .collect();
+        let (t_stop, t_prints) = (stop.clone(), prints.clone());
+        let handle = std::thread::spawn(move || {
+            let mut builder = ContextBuilder::<String>::default()
+                .with_stdlib()
+                .with_module(TimeModule::default())
+                .with_print_sink(TaggedSink(t_prints))
+                .with_stop_flag(t_stop.clone());
+            for (name, code) in &codes {
+                builder = builder.with_script(name.clone(), code);
+            }
+            let mut context = builder.build().unwrap();
+            let log: SimLog = Box::new(|_, _| {});
+            SimScheduler::new(
+                planned,
+                cycle,
+                CyclePolicy::EveryCycle,
+                SimWake::default(),
+                t_stop,
+                log,
+            )
+            .run(&mut context);
+        });
+        std::thread::sleep(run_for);
+        stop.store(true, Ordering::Relaxed);
+        handle.join().unwrap();
+        prints.lock().clone()
+    }
+
+    const BUSY_60_MS: &str = "local t = C_Time:GetMs(); while C_Time:GetMs() - t < 60 do end";
+    const BUSY_80_MS: &str = "local t = C_Time:GetMs(); while C_Time:GetMs() - t < 80 do end";
+
+    fn count(prints: &[(Instant, String)], tag: &str) -> usize {
+        prints.iter().filter(|(_, l)| l == tag).count()
+    }
+
+    #[test]
+    /// SC-R-102 — an interval script runs once at start, without waiting for its period.
+    fn ut_interval_script_runs_at_start() {
+        let sim = Sim::spawn(
+            &[("i", "print('i')")],
+            vec![interval("i", Duration::from_secs(3600))],
+            Duration::from_secs(3600),
+            CyclePolicy::EveryCycle,
+            SimWake::default(),
+            None,
+        );
+        sim.wait_lines("first run", 1);
+        std::thread::sleep(Duration::from_millis(150));
+        assert_eq!(sim.finish(), vec!["i".to_string()]);
+    }
+
+    #[test]
+    /// SC-R-103 — the period runs from the start of the previous run: a 60 ms body inside a
+    /// 250 ms period leaves starts 250 ms apart, where an end-anchored period gives 310 ms.
+    fn ut_interval_period_is_measured_from_run_start() {
+        let code = format!("print('i'); {BUSY_60_MS}");
+        let prints = run_stamped(
+            &[("i", &code)],
+            vec![interval("i", Duration::from_millis(250))],
+            Duration::from_secs(3600),
+            Duration::from_millis(1400),
+        );
+        assert!(prints.len() >= 4, "{} runs", prints.len());
+        for pair in prints.windows(2) {
+            let gap = pair[1].0.duration_since(pair[0].0);
+            assert!(gap >= Duration::from_millis(250), "{gap:?}");
+            assert!(gap < Duration::from_millis(300), "{gap:?}");
+        }
+    }
+
+    #[test]
+    /// SC-R-104 — periods that elapse while the thread is busy yield one late run, never a
+    /// back-to-back catch-up.
+    fn ut_late_interval_run_does_not_catch_up() {
+        let busy = format!("print('c'); {BUSY_80_MS}");
+        let prints = run_stamped(
+            &[("i", "print('i')"), ("c", &busy)],
+            vec![interval("i", Duration::from_millis(50)), every_cycle("c")],
+            Duration::from_millis(50),
+            Duration::from_millis(1000),
+        );
+        let starts: Vec<Instant> = prints
+            .iter()
+            .filter(|(_, l)| l == "i")
+            .map(|(at, _)| *at)
+            .collect();
+        assert!(starts.len() >= 3, "{} runs", starts.len());
+        assert!(starts.len() <= 11, "{} runs", starts.len());
+        for pair in starts.windows(2) {
+            let gap = pair[1].duration_since(pair[0]);
+            assert!(gap >= Duration::from_millis(50), "{gap:?}");
+        }
+    }
+
+    #[test]
+    /// SC-R-100 — a no-trigger script keeps its own cycle beside an interval script: 50 ms
+    /// cycle, 250 ms period.
+    fn ut_untriggered_script_still_runs_every_cycle_beside_interval_script() {
+        let prints = run_stamped(
+            &[("i", "print('i')"), ("c", "print('c')")],
+            vec![interval("i", Duration::from_millis(250)), every_cycle("c")],
+            Duration::from_millis(50),
+            Duration::from_millis(1300),
+        );
+        assert!(
+            count(&prints, "c") >= 15,
+            "{} cycle runs",
+            count(&prints, "c")
+        );
+        assert!(
+            (5..=6).contains(&count(&prints, "i")),
+            "{} interval runs",
+            count(&prints, "i")
+        );
+    }
+
+    #[test]
+    /// SC-R-013 — the sleep ends by the earliest due time: an interval due soon beats a far
+    /// cycle, a past one is no sleep, and with nothing due the stop poll bounds it.
+    fn ut_sleep_bound_covers_the_earliest_due_time() {
+        let now = Instant::now();
+        let hour = now + Duration::from_secs(3600);
+        assert_eq!(
+            sleep_for(
+                now,
+                Some(hour),
+                [now + Duration::from_millis(10)].into_iter()
+            ),
+            Duration::from_millis(10)
+        );
+        assert_eq!(
+            sleep_for(now + Duration::from_secs(1), None, [now].into_iter()),
+            Duration::ZERO
+        );
+        assert_eq!(sleep_for(now, Some(hour), std::iter::empty()), STOP_POLL);
+        assert_eq!(sleep_for(now, None, std::iter::empty()), STOP_POLL);
+    }
+
+    #[test]
+    /// SC-R-105 — neither an interval nor a no-trigger script is called with an argument.
+    fn ut_interval_and_untriggered_scripts_get_no_argument() {
+        let sim = Sim::spawn(
+            &[
+                ("i", "print(select('#', ...))"),
+                ("c", "print(select('#', ...))"),
+            ],
+            vec![interval("i", Duration::from_secs(3600)), every_cycle("c")],
+            Duration::from_secs(3600),
+            CyclePolicy::EveryCycle,
+            SimWake::default(),
+            None,
+        );
+        sim.wait_lines("both ran", 2);
+        assert_eq!(sim.finish(), vec!["0".to_string(), "0".to_string()]);
+    }
+
+    #[test]
+    /// SC-R-110 — an error in an interval or an event script is logged at error level with
+    /// the `[sim]` prefix, and the script's next run still happens.
+    fn ut_error_in_event_or_interval_script_is_logged_and_next_run_still_happens() {
+        let stream = EventStream::new();
+        let wake = SimWake::default();
+        let sim = Sim::spawn(
+            &[
+                ("i", "error('interval boom')"),
+                ("e", "error('event boom')"),
+            ],
+            vec![
+                interval("i", Duration::from_millis(50)),
+                events_script("e", feed(&stream, &wake)),
+            ],
+            Duration::from_secs(3600),
+            CyclePolicy::EveryCycle,
+            wake,
+            None,
+        );
+        stream.publish_with(|_| 1);
+        stream.publish_with(|_| 2);
+        let seen = |text: &str| {
+            sim.logged
+                .lock()
+                .iter()
+                .filter(|(_, l)| l.contains(text))
+                .count()
+        };
+        wait_until_blocking(
+            "two errors per script",
+            Duration::from_millis(5),
+            Duration::from_secs(3),
+            || (seen("interval boom") >= 2 && seen("event boom") >= 2).then_some(()),
+        );
+        let logged = sim.logged.lock().clone();
+        sim.finish();
+        for (level, line) in &logged {
+            assert_eq!(*level, Level::Error);
+            assert!(line.starts_with("[sim] "), "{line}");
+        }
+    }
+
+    #[test]
+    /// SC-R-101 — an interval period resolves as the cycle interval does: fallback to 1 s for
+    /// a non-finite or non-positive value, then the floor.
+    fn ut_interval_schedule_resolves_like_the_cycle_interval() {
+        let period = |seconds, floor| match ScriptSchedule::interval(seconds, floor) {
+            ScriptSchedule::Interval { period } => period,
+            _ => unreachable!("an interval schedule"),
+        };
+        for bad in [f64::NAN, 0.0, -1.0, f64::INFINITY] {
+            assert_eq!(period(bad, 0.05), Duration::from_secs(1), "{bad}");
+        }
+        assert_eq!(period(0.01, 0.05), Duration::from_millis(50));
+        assert_eq!(period(0.01, 0.0), Duration::from_millis(10));
+        assert_eq!(period(2.5, 0.05), Duration::from_millis(2500));
+    }
+
+    #[test]
+    /// SC-R-044 — the at-most-once-per-interval policy gates the no-trigger scripts only: an
+    /// interval script keeps its own period.
+    fn ut_at_most_once_policy_applies_only_to_untriggered_scripts() {
+        let sim = Sim::spawn(
+            &[("i", "print('i')"), ("c", "print('c')")],
+            vec![interval("i", Duration::from_millis(100)), every_cycle("c")],
+            Duration::from_millis(400),
+            CyclePolicy::AtMostOncePerInterval,
+            SimWake::default(),
+            None,
+        );
+        std::thread::sleep(Duration::from_millis(1000));
+        let lines = sim.finish();
+        let runs = |tag: &str| lines.iter().filter(|l| *l == tag).count();
+        assert!(runs("i") >= 6, "{} interval runs", runs("i"));
+        assert!((1..=2).contains(&runs("c")), "{} cycle runs", runs("c"));
     }
 
     #[test]

@@ -42,7 +42,8 @@ A script's `trigger` (`requirements.md` SC-R-086). Absent: the script runs per i
 
 | Field | Type | Default | Notes | Req |
 |---|---|---|---|---|
-| `kind` | string | — (required) | `register` | SC-R-086 |
+| `kind` | string | — (required) | `interval` or `register` | SC-R-086 |
+| `seconds` | number | — (required with `interval`) | the period in seconds | SC-R-100, SC-R-101 |
 | `registers` | list of names, or `all` | — (required) | the registers whose events run the script | SC-R-091 |
 | `every_write` | bool | `false` | fire on every write, not only on a value change | SC-R-092 |
 
@@ -55,12 +56,14 @@ A script reads its trigger's arguments as the chunk's `...` (SC-R-003, SC-R-090)
 | Trigger | Argument | Fields | Req |
 |---|---|---|---|
 | none | — | — | SC-R-003 |
-| `register` | `local event = ...` | `name`, `old`, `new`, `source`, `seq`, `timestamp` | SC-R-090, MB-R-303 |
+| `interval` | — | — | SC-R-105 |
+| `register` | `local event = ...` | `name`, `old`, `new`, `source`, `seq`, `timestamp`, `dropped` | SC-R-090, SC-R-108, SC-R-109, MB-R-303 |
 
 - `old` and `new` are shaped as `C_Register:Get` returns them (MB-R-303).
 - `source` is one of `remote`, `poll`, `set`, `lua` (MB-R-303).
 - `timestamp` is milliseconds since the Unix epoch (MB-R-303).
-- An on-demand run passes no argument (SC-E-054).
+- `dropped` is the number of events dropped since the previous delivery, 0 when none (SC-R-108, SC-R-109).
+- An on-demand run passes no argument, whatever the trigger (SC-E-054).
 
 ---
 

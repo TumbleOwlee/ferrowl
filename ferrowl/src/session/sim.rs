@@ -5,7 +5,7 @@
 //! per-register `update` scripts.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use ferrowl_lua::ContextBuilder;
@@ -14,8 +14,10 @@ use ferrowl_lua::module::{LogModule, ModuleDirModule, ModuleDirectory, TestModul
 use crate::app::Level;
 use crate::config::script::{ScriptDef, SessionTrigger};
 use crate::lua::SimHandle;
-use crate::module::ocpp::client::lua_sim::{LuaLogSink, emit, sleep_responsive};
+use crate::module::ocpp::client::lua_sim::{LuaLogSink, emit};
 use crate::module::view::SharedLog;
+use crate::sim::events::SimWake;
+use crate::sim::scheduler::{CyclePolicy, PlannedScript, ScriptSchedule, SimScheduler};
 use crate::sim::script_id::{ExecutionGuard, ScriptId, ScriptOwner};
 
 /// Owns the session-level Lua sim thread, restarting it whenever the script list or interval
@@ -99,12 +101,8 @@ impl SessionSim {
     fn ensure(&mut self) {
         self.handle = None;
 
-        let enabled: Vec<(String, String)> = self
-            .scripts
-            .iter()
-            .filter(|s| s.enabled)
-            .map(|s| (s.name.clone(), s.code.clone()))
-            .collect();
+        let enabled: Vec<ScriptDef<SessionTrigger>> =
+            self.scripts.iter().filter(|s| s.enabled).cloned().collect();
         if enabled.is_empty() {
             return;
         }
@@ -123,8 +121,8 @@ impl SessionSim {
                 .with_module(LogModule::init(LuaLogSink(log.clone())))
                 .with_print_sink(LuaLogSink(log.clone()))
                 .with_stop_flag(thread_stop.clone());
-            for (name, code) in &enabled {
-                builder = builder.with_script(name.clone(), code);
+            for script in &enabled {
+                builder = builder.with_script(script.name.clone(), &script.code);
             }
             let mut context = match builder.build() {
                 Ok(context) => context,
@@ -138,14 +136,31 @@ impl SessionSim {
                 }
             };
 
-            while !thread_stop.load(Ordering::Relaxed) {
-                if let Err(errors) = context.call_all() {
-                    for e in errors {
-                        emit(&log, Level::Error, &format!("[sim] {e}"));
-                    }
-                }
-                sleep_responsive(interval, &thread_stop);
-            }
+            let planned = enabled
+                .iter()
+                .map(|script| PlannedScript {
+                    id: ScriptId {
+                        owner: ScriptOwner::Session,
+                        name: Arc::from(script.name.as_str()),
+                    },
+                    schedule: match &script.trigger {
+                        None => ScriptSchedule::EveryCycle,
+                        Some(SessionTrigger::Interval { seconds }) => {
+                            ScriptSchedule::interval(*seconds, 0.0)
+                        }
+                    },
+                })
+                .collect();
+            let scheduler_log = log.clone();
+            SimScheduler::new(
+                planned,
+                interval,
+                CyclePolicy::EveryCycle,
+                SimWake::default(),
+                thread_stop.clone(),
+                Box::new(move |level, line| emit(&scheduler_log, level, line)),
+            )
+            .run(&mut context);
             emit(&log, Level::Info, "[sim] stopped completely ");
         });
 
@@ -558,8 +573,8 @@ mod tests {
             "s".to_string(),
             // A busy Lua loop, slow enough to measure, that only finishes by writing "done".
             r#"
-                local n = 0
-                for i = 1, 8000000 do n = n + 1 end
+                local t = C_Time:GetMs()
+                while C_Time:GetMs() - t < 50 do end
                 C_Module:Get("m"):Register():Set("x", "done")
             "#
             .to_string(),

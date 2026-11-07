@@ -1,4 +1,4 @@
-//! Binary-level register-event-script tests: a trigger the module cannot take fails the load,
+//! Binary-level register-event-script tests: a trigger kind the module cannot take fails the load,
 //! and a remote write runs the script watching it. The Modbus frames are hand-built per the
 //! Modbus Application Protocol specification (MBAP header, unit id, function code, big-endian
 //! address and value).
@@ -14,14 +14,14 @@ fn bin() -> Command {
 }
 
 #[test]
-/// SC-E-050 — an interval trigger on a Modbus device script exits 1, naming the line and
-/// the key path of the trigger.
-fn it_interval_trigger_fails_the_load_with_line_and_key_path() {
-    let dir = reserve_temp_dir("ferrowl_it_interval_trigger");
+/// SC-E-050 — a trigger of an unknown kind on a Modbus device script exits 1, naming the
+/// line and the key path of the trigger.
+fn it_unknown_trigger_kind_fails_the_load_with_line_and_key_path() {
+    let dir = reserve_temp_dir("ferrowl_it_unknown_trigger");
     let device = dir.join("device.toml");
     std::fs::write(
         &device,
-        "[definitions.reg]\ntype = \"U16\"\n\n[[scripts]]\nname = \"s\"\n[scripts.trigger]\nkind = \"interval\"\n",
+        "[definitions.reg]\ntype = \"U16\"\n\n[[scripts]]\nname = \"s\"\n[scripts.trigger]\nkind = \"message\"\n",
     )
     .unwrap();
     let port = reserve_tcp_port().release();

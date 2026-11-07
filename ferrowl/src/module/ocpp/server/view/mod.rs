@@ -34,7 +34,7 @@ use ferrowl_ocpp::Version;
 use ferrowl_ocpp::csms::{ConnectionId, CsmsActionHandler};
 
 use crate::app::LogRing;
-use crate::config::script::{OcppTrigger, ScriptList};
+use crate::config::script::{OcppTrigger, ScriptDef, ScriptList};
 use crate::dialog::scripts::ScriptDialog;
 use crate::module::modbus::dialog::ConfirmDeleteDialog;
 use crate::module::ocpp::action_dialog::ActionDialog;
@@ -472,13 +472,13 @@ where
         view
     }
 
-    /// Enabled scripts as `(name, code)` pairs for the simulation thread.
-    fn enabled_scripts(&self) -> Vec<(String, String)> {
+    /// Enabled scripts for the simulation thread.
+    fn enabled_scripts(&self) -> Vec<ScriptDef<OcppTrigger>> {
         self.device
             .scripts
             .iter()
             .filter(|s| s.enabled)
-            .map(|s| (s.name.clone(), s.code.clone()))
+            .cloned()
             .collect()
     }
 }

@@ -102,7 +102,7 @@ Per [`../README.md`](../README.md)'s ownership rules, this area does **not** own
 
 **CL-R-033** — `migrate` exits **0** on success and **1** on failure (unrecognized input/output extension, input parse failure, output write failure), writing a diagnostic beginning `error:` to stderr. Never exit code 2 or 3.
 
-**CL-R-034** — A `C_Test:Assert` failure (or any Lua sim error) does **not** by itself fail a headless run: it surfaces only as an Error-level log line (`[sim]`-prefixed), influencing the exit code only with `--exit-on-error` (code 3, CL-R-031).
+**CL-R-034** — A `C_Test:Assert` failure (or any Lua sim error) does **not** by itself fail a headless run: it surfaces only as an Error-level log line, influencing the exit code only with `--exit-on-error` (code 3, CL-R-031), through that line's level alone, never its prefix or text (CL-R-060).
 
 **CL-R-035** — An argument-parsing error (unknown flag, missing required subcommand option, malformed option value) aborts before any run, printing a usage diagnostic to stderr and exiting with the parser's standard usage code (2).
 

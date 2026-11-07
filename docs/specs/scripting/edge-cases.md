@@ -71,13 +71,15 @@
 
 **SC-E-049** — A register trigger naming a register not defined at context build logs a Warn line, is not an error, and fires once a register of that name exists (SC-R-067, SC-R-068).
 
-**SC-E-050** — A trigger on a session script or an OCPP module script, or of any kind but register on a Modbus module script, is rejected at config load with a parse error locating the script by line and key path, never ignored silently.
+**SC-E-050** — A trigger on a session script or an OCPP module script of any kind but interval, or of any kind but register or interval on a Modbus module script, is rejected at config load with a parse error locating the script by line and key path, never ignored silently.
 
 **SC-E-051** — A per-module trigger carrying a `module` key is rejected at config load, as under SC-E-050.
 
 **SC-E-052** — An empty name list in a register trigger (SC-R-091) loads, logs a Warn line at context build and never fires.
 
-**SC-E-054** — An on-demand run (SC-R-035) of a register-triggered script passes no argument, so a script reading its event argument sees `nil`.
+**SC-E-054** — An on-demand run (SC-R-035) of a script passes no argument, whatever its trigger, so a script reading its event argument sees `nil`.
+
+**SC-E-055** — An event produced while no sim thread holds the script (restart under SC-R-024, script disabled) is not delivered to it and is not counted as dropped; delivery starts from events produced after the sim thread is started, and the gap shows in the sequence number (MB-R-304).
 
 ---
 
@@ -85,7 +87,7 @@
 
 ### Execution ceiling — an infinite loop is interrupted mid-cycle
 
-**SC-E-032** — Every context installs an execution hook (SC-R-034, `every_nth_instruction` every 1,000 instructions) checking the stop flag (SC-R-046) and enforcing a fixed 1,000 ms wall-clock cap (SC-R-047). A script looping forever is interrupted the first time the hook fires after either condition is met: a pending stop-and-join (script edit, tab close, Modbus `:reload`, OCPP role or version change, app shutdown) makes the hook raise to unwind the runaway script, so the cycle ends and the join completes promptly — before this hook the stop flag was observed only *between* cycles, so a runaway script blocked any thread joining it, typically the UI thread; independent of any stop request, the 1,000 ms cap aborts a cycle, an event-triggered run (or on-demand run, SC-R-035) that runs long, bounding worst-case CPU pinning to just over the cap with no operator action. Both constants fixed (SC-R-034, SC-R-047), not configurable. No memory ceiling (SC-R-048): a script allocating without bound (ever-growing table) is not stopped — the hook checks instruction count and wall-clock only.
+**SC-E-032** — Every context installs an execution hook (SC-R-034, `every_nth_instruction` every 1,000 instructions) checking the stop flag (SC-R-046) and enforcing a fixed 100 ms wall-clock cap (SC-R-047). A script looping forever is interrupted the first time the hook fires after either condition is met: a pending stop-and-join (script edit, tab close, Modbus `:reload`, OCPP role or version change, app shutdown) makes the hook raise to unwind the runaway script, so the execution ends and the join completes promptly — before this hook the stop flag was observed only *between* cycles, so a runaway script blocked any thread joining it, typically the UI thread; independent of any stop request, the 100 ms cap aborts a script execution, on a sim thread or an on-demand run (SC-R-035), that runs long, bounding worst-case CPU pinning per execution to just over the cap with no operator action. Both constants fixed (SC-R-034, SC-R-047), not configurable. No memory ceiling (SC-R-048): a script allocating without bound (ever-growing table) is not stopped — the hook checks instruction count and wall-clock only.
 
 ### Lua register writes are store-only (client)
 

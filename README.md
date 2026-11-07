@@ -443,6 +443,10 @@ C_Register:Set("power", C_Register:Get("setpoint"))
 """
 enabled = true
 
+# A script with an interval trigger runs at start, then every `seconds`:
+#   [scripts.trigger]
+#   kind = "interval"
+#   seconds = 5
 # A script with a register trigger runs once per matching register event instead.
 [[scripts]]
 name = "log setpoint"
@@ -662,13 +666,17 @@ rather than being silently ignored.
 
 As an additional feature, the tool also includes a Lua runtime to execute custom scripts that drive a simulation. For **Modbus** modules scripts are attached to the device config as a global, toggleable list managed from the `:script` dialog (legacy per-register `update` snippets are migrated into it on load); enabled scripts with no trigger run each simulation cycle, while a script with a register trigger runs once per register event instead (see below), interacting with the registers through `C_Register` and able to print to the module log via `C_Log`. For **OCPP** modules — in both the Charging Station (client) and CSMS (server) roles — scripts are attached to the device config and managed from the *Lua Scripts* dialog (the button under the state table); all enabled scripts run about once per second and interact with the OCPP state and actions through `C_OCPP`, and may print to the module log via `C_Log`. Besides the standard Lua libraries, the exposed modules are `C_Time`, `C_Log` and `C_Test` (all module types), `C_Register` (Modbus only), and `C_OCPP` (OCPP only).
 
+Interval triggers (Modbus, OCPP and session scripts):
+
+- Shape: `kind = "interval"` and `seconds`. The script runs when its sim thread starts, then each time `seconds` have passed since the start of its previous run, with no catch-up for periods missed while the thread was busy. It takes no argument. `seconds` resolves like the cycle interval: a non-finite or non-positive value falls back to 1.0, and a module script's period has the same 0.05 s floor.
+
 Modbus register triggers:
 
 - Shape: `kind = "register"`, `registers` a list of register names or `"all"`, and `every_write` (default `false`: only writes that change the value fire).
 - The event is the script's only argument, a table with `name`, `old`, `new`, `source` (`remote`, `poll`, `set` or `lua`), `seq` and `timestamp` (milliseconds).
 - A script's own writes never trigger itself; other scripts selecting the register fire.
 - Each triggered script has a queue of 4096 events; when it is full, the oldest event is dropped.
-- Triggers exist on Modbus module scripts only; on a session or OCPP script, or any other kind, the config fails to load.
+- Interval triggers exist on every script (Modbus, OCPP and session); register triggers on Modbus module scripts only. Any other combination fails to load.
 
 ### Session Scripts
 
