@@ -674,9 +674,9 @@ Interval triggers (Modbus, OCPP and session scripts):
 Modbus register triggers:
 
 - Shape: `kind = "register"`, `registers` a list of register names or `"all"`, and `every_write` (default `false`: only writes that change the value fire).
-- The event is the script's only argument, a table with `name`, `old`, `new`, `source` (`remote`, `poll`, `set` or `lua`), `seq` and `timestamp` (milliseconds).
+- The event is the script's only argument, a table with `name`, `old`, `new`, `source` (`remote`, `poll`, `set` or `lua`), `seq`, `timestamp` (milliseconds) and `dropped` (events dropped from the script's queue since its previous event; 0 when none).
 - A script's own writes never trigger itself; other scripts selecting the register fire.
-- Each triggered script has a queue of 4096 events; when it is full, the oldest event is dropped.
+- Each triggered script has a queue of 4096 events; when it is full, the oldest event is dropped. A drop writes one Error `[sim]` line at the first drop of a burst (this trips `--exit-on-error`), and one more naming the further drops when the script next takes an event.
 - Interval triggers exist on every script (Modbus, OCPP and session); register triggers on Modbus module scripts only. Any other combination fails to load.
 
 ### Session Scripts

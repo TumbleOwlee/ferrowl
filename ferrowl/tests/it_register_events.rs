@@ -227,3 +227,84 @@ every_write = true
     wait_register(server.port, 1, 3 + 1);
     wait_register(server.port, 2, 3 + 2);
 }
+
+#[test]
+/// SC-R-106, S6 — a register-event queue that overflows writes an Error `[sim]` line naming the
+/// script, which fails a `--exit-on-error` run with exit 3 long before `--duration`.
+fn it_queue_overflow_fails_a_strict_run() {
+    let dir = reserve_temp_dir("ferrowl_it_queue_overflow");
+    let device = dir.join("device.toml");
+    std::fs::write(
+        &device,
+        r#"script_interval = 3600.0
+
+[definitions.w]
+slave_id = 1
+kind = "HoldingRegister"
+address = 0
+type = "U16"
+access = "ReadWrite"
+default = 0
+
+[definitions.n]
+slave_id = 1
+kind = "HoldingRegister"
+address = 1
+type = "U16"
+access = "ReadWrite"
+default = 0
+
+[[scripts]]
+name = "burst"
+code = '''
+for i = 1, 200 do C_Register:Set("w", i) end
+'''
+[scripts.trigger]
+kind = "interval"
+seconds = 0.05
+
+[[scripts]]
+name = "slow"
+code = '''
+local started = C_Time:GetMs()
+while C_Time:GetMs() - started < 20 do end
+'''
+[scripts.trigger]
+kind = "register"
+registers = ["w"]
+every_write = true
+"#,
+    )
+    .unwrap();
+    let port = reserve_tcp_port().release();
+    let module = format!(
+        "name=it-overflow,device={},transport=tcp,ip=127.0.0.1,port={port},role=server",
+        device.display()
+    );
+    let started = Instant::now();
+    let output = bin()
+        .args([
+            "run",
+            "--module",
+            &module,
+            "--exit-on-error",
+            "--duration",
+            "30",
+        ])
+        .output()
+        .expect("failed to run ferrowl binary");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(3), "{stdout}");
+    assert!(
+        stdout.lines().any(|l| l.contains("/script |")
+            && l.contains("[sim]")
+            && l.contains("'slow'")
+            && l.contains("dropped")),
+        "{stdout}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(25),
+        "ran to the end"
+    );
+}

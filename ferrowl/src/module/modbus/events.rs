@@ -288,7 +288,7 @@ mod tests {
         }
 
         fn drain(&self) -> Vec<RegisterEvent> {
-            std::iter::from_fn(|| self.queue.pop()).collect()
+            std::iter::from_fn(|| self.queue.pop().map(|d| d.event)).collect()
         }
     }
 
@@ -486,7 +486,7 @@ mod tests {
             f32_value(1.0),
             RegisterEventSource::Set,
         );
-        let changed: Vec<bool> = std::iter::from_fn(|| queue.pop())
+        let changed: Vec<bool> = std::iter::from_fn(|| queue.pop().map(|d| d.event))
             .map(|e| e.changed)
             .collect();
         assert_eq!(changed, vec![false, true]);
@@ -498,7 +498,7 @@ mod tests {
         let stream = EventStream::new();
         let queue = capture_events(&stream);
         publish_virtual(&stream, "v", None, f32_value(2.0), RegisterEventSource::Set);
-        let e = queue.pop().unwrap();
+        let e = queue.pop().unwrap().event;
         assert!(e.old.is_none());
         assert!(e.changed);
         assert!(e.new.is_some());

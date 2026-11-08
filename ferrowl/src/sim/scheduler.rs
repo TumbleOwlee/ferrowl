@@ -29,14 +29,27 @@ fn sleep_for(
 
 /// Source of the events one script consumes.
 pub trait ScriptFeed: Send {
-    /// Pops one event and runs `key` with it; `None` when the queue is empty.
+    /// Pops one event, calls `on_take` when it carries drops, then runs `key` with it; `None`
+    /// when the queue is empty.
     // `Context<String>::call_with` takes `&String`; lifts when it takes a borrowed key.
     #[allow(clippy::ptr_arg)]
     fn run_next(
         &mut self,
         context: &mut Context<String>,
         key: &String,
+        on_take: &mut dyn FnMut(DropReport),
     ) -> Option<ferrowl_lua::Result<()>>;
+
+    /// True once per burst: the first drop that no line has reported yet.
+    fn take_first_drop(&self) -> bool;
+}
+
+/// Drops a taken event carries that still need a log line.
+pub struct DropReport {
+    /// The burst's first drop was not yet reported.
+    pub first_unlogged: bool,
+    /// Drops beyond the first since the previous delivery.
+    pub further: u64,
 }
 
 /// A queue attached to a stream; detaches when dropped.
@@ -58,9 +71,20 @@ impl<E: Clone + Send + mlua::IntoLua + 'static> ScriptFeed for QueueFeed<E> {
         &mut self,
         context: &mut Context<String>,
         key: &String,
+        on_take: &mut dyn FnMut(DropReport),
     ) -> Option<ferrowl_lua::Result<()>> {
-        let event = self.queue.pop()?;
-        Some(context.call_with(key, event))
+        let delivered = self.queue.pop()?;
+        if delivered.dropped > 0 {
+            on_take(DropReport {
+                first_unlogged: delivered.first_unlogged,
+                further: delivered.dropped - 1,
+            });
+        }
+        Some(context.call_with(key, delivered))
+    }
+
+    fn take_first_drop(&self) -> bool {
+        self.queue.take_first_drop()
     }
 }
 
@@ -182,6 +206,13 @@ impl SimScheduler {
             stop,
             log,
         } = self;
+        let report_first_drops = |events: &[EventScript]| {
+            for script in events {
+                if script.feed.take_first_drop() {
+                    log(Level::Error, &first_drop_line(&script.id));
+                }
+            }
+        };
         let mut next_cycle = Some(Instant::now());
         while !stop.load(Ordering::Relaxed) {
             if !every_cycle.is_empty() && next_cycle.is_some_and(|t| Instant::now() >= t) {
@@ -189,6 +220,7 @@ impl SimScheduler {
                     if stop.load(Ordering::Relaxed) {
                         break;
                     }
+                    report_first_drops(&events);
                     let result = match policy {
                         CyclePolicy::EveryCycle => context.call(key),
                         CyclePolicy::AtMostOncePerInterval => context.refresh(key, cycle),
@@ -206,6 +238,7 @@ impl SimScheduler {
                 if script.due.is_none_or(|due| Instant::now() < due) {
                     continue;
                 }
+                report_first_drops(&events);
                 let start = Instant::now();
                 if let Err(e) = context.call(&script.key) {
                     log(Level::Error, &format!("[sim] {e}"));
@@ -213,12 +246,31 @@ impl SimScheduler {
                 script.due = start.checked_add(script.period);
             }
             let mut ran = false;
-            for script in &mut events {
+            for index in 0..events.len() {
                 if stop.load(Ordering::Relaxed) {
                     break;
                 }
+                report_first_drops(&events);
+                let script = &mut events[index];
                 let _guard = ExecutionGuard::enter(script.id.clone());
-                if let Some(result) = script.feed.run_next(context, &script.key) {
+                let id = &script.id;
+                let mut on_take = |report: DropReport| {
+                    if report.first_unlogged {
+                        log(Level::Error, &first_drop_line(id));
+                    }
+                    if report.further > 0 {
+                        log(
+                            Level::Error,
+                            &format!(
+                                "[sim] script '{}' dropped {} further event{}: queue full",
+                                id.name,
+                                report.further,
+                                if report.further == 1 { "" } else { "s" }
+                            ),
+                        );
+                    }
+                };
+                if let Some(result) = script.feed.run_next(context, &script.key, &mut on_take) {
                     ran = true;
                     if let Err(e) = result {
                         log(Level::Error, &format!("[sim] {e}"));
@@ -233,6 +285,10 @@ impl SimScheduler {
             wake.wait(sleep_for(Instant::now(), cycle_due, dues));
         }
     }
+}
+
+fn first_drop_line(id: &ScriptId) -> String {
+    format!("[sim] script '{}' dropped 1 event: queue full", id.name)
 }
 
 #[cfg(test)]
@@ -952,5 +1008,144 @@ mod tests {
             n as i64
         });
         assert!(!built.load(Ordering::Relaxed));
+    }
+
+    #[derive(Clone)]
+    struct Ev(i64);
+
+    impl mlua::IntoLua for Ev {
+        fn into_lua(self, lua: &mlua::Lua) -> mlua::Result<mlua::Value> {
+            let table = lua.create_table()?;
+            table.set("n", self.0)?;
+            Ok(mlua::Value::Table(table))
+        }
+    }
+
+    fn overflowed_feed(stream: &EventStream<Ev>, wake: &SimWake, extra: i64) -> QueueFeed<Ev> {
+        let feed = QueueFeed::attach(stream.clone(), Arc::new(|_| true), wake.clone());
+        for n in 0..4096 + extra {
+            stream.publish_with(|_| Ev(n));
+        }
+        feed
+    }
+
+    fn error_lines(sim: &Sim) -> Vec<String> {
+        sim.logged
+            .lock()
+            .iter()
+            .filter(|(level, line)| *level == Level::Error && line.starts_with("[sim] "))
+            .map(|(_, line)| line.clone())
+            .collect()
+    }
+
+    #[test]
+    /// SC-R-107, SC-R-108, SC-R-109 — a burst of 100 drops logs one Error line for the first
+    /// drop and one for the other 99 when the script takes its next event, and the script sees
+    /// the total on that event, then 0.
+    fn ut_overflow_burst_logs_first_drop_then_total() {
+        let stream = EventStream::new();
+        let wake = SimWake::default();
+        let feed = overflowed_feed(&stream, &wake, 100);
+        let sim = Sim::spawn(
+            &[("e", "local e = ...; print(e.dropped)")],
+            vec![events_script("e", feed)],
+            Duration::from_secs(3600),
+            CyclePolicy::EveryCycle,
+            wake,
+            Some(2),
+        );
+        let errors = {
+            wait_until_blocking(
+                "both drop lines",
+                Duration::from_millis(5),
+                Duration::from_secs(2),
+                || (sim.lines.lock().len() >= 2).then_some(()),
+            );
+            error_lines(&sim)
+        };
+        let lines = sim.finish();
+        assert_eq!(lines[..2], ["100", "0"]);
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert!(
+            errors[0].contains("'e'") && errors[0].contains(" 1 "),
+            "{errors:?}"
+        );
+        assert!(
+            errors[1].contains("'e'") && errors[1].contains("99"),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    /// SC-R-106 — the first-drop line is written before the next script execution, whichever
+    /// script that is.
+    fn ut_first_drop_line_written_before_next_execution() {
+        let stream = EventStream::new();
+        let wake = SimWake::default();
+        let feed = overflowed_feed(&stream, &wake, 1);
+        let sim = Sim::spawn(
+            &[("e", "local e = ..."), ("c", "print('tick')")],
+            vec![events_script("e", feed), every_cycle("c")],
+            Duration::from_secs(3600),
+            CyclePolicy::EveryCycle,
+            wake,
+            None,
+        );
+        sim.wait_lines("tick", 1);
+        let timeline = sim.timeline.lock().clone();
+        sim.finish();
+        let first = timeline.iter().position(|l| l.contains("dropped"));
+        let tick = timeline.iter().position(|l| l == "tick");
+        assert!(first.is_some() && first < tick, "{timeline:?}");
+    }
+
+    /// A feed whose first-drop flag was already taken by the time its event is popped.
+    struct RacedFeed(bool);
+
+    impl ScriptFeed for RacedFeed {
+        fn run_next(
+            &mut self,
+            _context: &mut Context<String>,
+            _key: &String,
+            on_take: &mut dyn FnMut(DropReport),
+        ) -> Option<ferrowl_lua::Result<()>> {
+            if std::mem::replace(&mut self.0, true) {
+                return None;
+            }
+            on_take(DropReport {
+                first_unlogged: true,
+                further: 4,
+            });
+            Some(Ok(()))
+        }
+
+        fn take_first_drop(&self) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    /// SC-R-107 — a drop reported only at the pop writes both lines there: the first drop and
+    /// the further ones.
+    fn ut_raced_pop_writes_both_lines() {
+        let sim = Sim::spawn(
+            &[("e", "local e = ...")],
+            vec![events_script("e", RacedFeed(false))],
+            Duration::from_secs(3600),
+            CyclePolicy::EveryCycle,
+            SimWake::default(),
+            None,
+        );
+        wait_until_blocking(
+            "both lines",
+            Duration::from_millis(5),
+            Duration::from_secs(2),
+            || (error_lines(&sim).len() >= 2).then_some(()),
+        );
+        let errors = error_lines(&sim);
+        sim.finish();
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert!(errors[0].contains(" 1 "), "{errors:?}");
+        assert!(errors[1].contains(" 4 "), "{errors:?}");
     }
 }

@@ -1830,7 +1830,7 @@ if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
         assert!(queue.pop().is_none());
 
         write_marker(&module, 9);
-        let event = queue.pop().expect("an event for the write");
+        let event = queue.pop().expect("an event for the write").event;
         assert_eq!(event.seq, 1);
         assert_eq!(&*event.name, "marker");
     }
@@ -1863,7 +1863,9 @@ if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
             .expect("reconfigure");
         write_marker(&module, 3);
 
-        let seqs: Vec<u64> = std::iter::from_fn(|| queue.pop()).map(|e| e.seq).collect();
+        let seqs: Vec<u64> = std::iter::from_fn(|| queue.pop().map(|d| d.event))
+            .map(|e| e.seq)
+            .collect();
         assert_eq!(seqs, vec![1, 2, 3]);
     }
 

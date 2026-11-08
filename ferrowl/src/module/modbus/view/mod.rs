@@ -4196,7 +4196,7 @@ mod tests {
             }
 
             let _ = view.handle_command("set reg 1").await;
-            let before = queue.pop().expect("event before the reload").seq;
+            let before = queue.pop().expect("event before the reload").event.seq;
             assert!(queue.pop().is_none());
 
             let _ = view.handle_command("reload").await;
@@ -4217,7 +4217,7 @@ mod tests {
             );
 
             let _ = view.handle_command("set reg 2").await;
-            let after = queue.pop().expect("event after the reload").seq;
+            let after = queue.pop().expect("event after the reload").event.seq;
             assert_eq!(after, before + 1);
             let _ = view.module.stop().await;
         }
@@ -4270,7 +4270,7 @@ mod tests {
             "first poll event",
             std::time::Duration::from_millis(5),
             std::time::Duration::from_secs(10),
-            || client_queue.pop(),
+            || client_queue.pop().map(|d| d.event),
         )
         .await;
         while client_queue.pop().is_some() {}
@@ -4281,7 +4281,7 @@ mod tests {
             "server sees the remote write",
             std::time::Duration::from_millis(5),
             std::time::Duration::from_secs(10),
-            || server_queue.pop(),
+            || server_queue.pop().map(|d| d.event),
         )
         .await;
         assert!(matches!(remote.source, RegisterEventSource::Remote));
@@ -4290,13 +4290,13 @@ mod tests {
             "client polls the new value",
             std::time::Duration::from_millis(5),
             std::time::Duration::from_secs(10),
-            || client_queue.pop().filter(|e| e.changed),
+            || client_queue.pop().map(|d| d.event).filter(|e| e.changed),
         )
         .await;
         assert!(matches!(polled.source, RegisterEventSource::Poll));
 
         let _ = server.handle_command("set hold 6").await;
-        let set = server_queue.pop().expect("server `:set` event");
+        let set = server_queue.pop().expect("server `:set` event").event;
         assert!(matches!(set.source, RegisterEventSource::Set));
         assert!(server_queue.pop().is_none());
 
@@ -4314,7 +4314,7 @@ mod tests {
         .await
         .unwrap();
         for name in ["hold", "v"] {
-            let event = server_queue.pop().expect("bridge event");
+            let event = server_queue.pop().expect("bridge event").event;
             assert_eq!(&*event.name, name);
             assert!(matches!(event.source, RegisterEventSource::Lua { .. }));
         }
