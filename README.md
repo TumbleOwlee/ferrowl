@@ -86,7 +86,8 @@ The bundled `session.toml` wires up a CSMS plus a Charging Station pair (`csms-d
 `ferrowl run` starts the same modules the TUI would, without ever drawing a screen — useful for
 CI pipelines and scripted smoke tests. It accepts the same `--session`/`--module` specs as the
 TUI, plus an ad-hoc `--ocpp` flag, and streams every module's log to stdout as
-`[<timestamp>] <module-name> | <line>`.
+`[<timestamp>] <module-name> | <line>`. A module's script output (`print`, `C_Log`, `[sim]`
+errors) streams as `<module-name>/script`.
 
 ```bash
 # Run a session file for 30 seconds, mirroring the log to a file too

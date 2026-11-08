@@ -151,6 +151,11 @@ pub trait ModuleView: SetFocus + IsFocus {
     /// The log channel written by this view's backend.
     fn log(&self) -> SharedLog;
 
+    /// The log of this module's Lua script output, or `None` when the module runs no scripts.
+    fn script_log(&self) -> Option<SharedLog> {
+        None
+    }
+
     /// Serialize this module's config for session persistence, or `None` if unsupported.
     /// The returned value should include a `"type"` field so the loader can dispatch to
     /// the right deserializer (e.g. `"modbus"`, `"ocpp"`). `base` is the directory the

@@ -543,6 +543,10 @@ where
         self.log.clone()
     }
 
+    fn script_log(&self) -> Option<SharedLog> {
+        Some(self.script_log.clone())
+    }
+
     fn clone_setup(&self, name: &str) -> Box<dyn SetupView> {
         Box::new(OcppSetupView::from_dialog(
             self.edit_dialog().into_clone(name),

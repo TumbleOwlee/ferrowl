@@ -1129,6 +1129,10 @@ impl ModuleView for ModbusModuleView {
         self.module.log()
     }
 
+    fn script_log(&self) -> Option<SharedLog> {
+        Some(self.module.script_log())
+    }
+
     fn lifecycle_pending(&self) -> bool {
         self.pending_lifecycle.is_some()
     }

@@ -341,3 +341,62 @@ baud_rate = 9600
         "expected an `Error:`-prefixed load-failure line, got: {stderr}"
     );
 }
+
+/// Runs `ferrowl run` on a Modbus server whose single script holds `code`, polled every 0.1 s.
+fn run_scripted(code: &str, extra: &[&str]) -> (std::process::Output, std::time::Duration) {
+    let dir = reserve_temp_dir("ferrowl_it_headless_script");
+    let device = dir.join("device.toml");
+    std::fs::write(
+        &device,
+        format!(
+            "script_interval = 0.1\n[definitions.n]\nslave_id = 1\nkind = \"HoldingRegister\"\naddress = 0\ntype = \"U16\"\naccess = \"ReadWrite\"\ndefault = 3\n\n[[scripts]]\nname = \"s\"\ncode = \"{code}\"\nenabled = true\n"
+        ),
+    )
+    .expect("write device");
+    let port = reserve_tcp_port().release();
+    let module = format!(
+        "name=m,device={},transport=tcp,ip=127.0.0.1,port={port},role=server",
+        device.display()
+    );
+    let started = std::time::Instant::now();
+    let output = bin()
+        .args(["run", "--module", &module])
+        .args(extra)
+        .output()
+        .expect("failed to run ferrowl binary");
+    (output, started.elapsed())
+}
+
+#[test]
+/// CL-R-048, CL-R-040 — a module's script output streams under `<name>/script`, never under the
+/// module's own name.
+fn it_headless_prints_module_script_output_under_script_source() {
+    let (output, _) = run_scripted("print('hello-script')", &["--duration", "2"]);
+    assert_eq!(output.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout
+            .lines()
+            .any(|l| l.contains("m/script | hello-script")),
+        "expected a script-source line, got: {stdout}"
+    );
+    assert!(
+        !stdout.lines().any(|l| l.contains("m | hello-script")),
+        "script output leaked under the module source: {stdout}"
+    );
+}
+
+#[test]
+/// CL-R-031 — a script error fails a strict run with exit 3, well before --duration.
+fn it_script_error_fails_a_strict_run() {
+    let (output, elapsed) = run_scripted("error('boom')", &["--exit-on-error", "--duration", "30"]);
+    assert_eq!(output.status.code(), Some(3));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout
+            .lines()
+            .any(|l| l.contains("m/script |") && l.contains("[sim]") && l.contains("boom")),
+        "expected a script-source [sim] error line, got: {stdout}"
+    );
+    assert!(elapsed < std::time::Duration::from_secs(20), "{elapsed:?}");
+}

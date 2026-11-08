@@ -54,6 +54,14 @@ struct RunModule {
     /// every tick, e.g.), silently skipping real lines. The only way this can still lose lines
     /// is a full ring-eviction between ticks, which is detected and reported (see [`drain_log`]).
     last_written: u64,
+    script: Option<ScriptLogDrain>,
+}
+
+/// A module's script log and how many of its lines have been drained, tracked apart from the
+/// module's general log so each ring's overflow is detected and reported on its own.
+struct ScriptLogDrain {
+    log: SharedLog,
+    last_written: u64,
 }
 
 /// Build every configured module, starting each one and failing hard (unlike the TUI's
@@ -126,6 +134,10 @@ async fn build_ocpp_module(module: OcppModuleSpec, name: String) -> Result<RunMo
 /// failure here.
 async fn start_module(name: String, mut view: Box<dyn ModuleView>) -> Result<RunModule, String> {
     let log = view.log();
+    let script = view.script_log().map(|log| ScriptLogDrain {
+        log,
+        last_written: 0,
+    });
     if let CommandResult::Handled(Some((level, msg))) = view.handle_command("start").await {
         if level == Level::Error {
             return Err(format!("'{name}': {msg}"));
@@ -137,13 +149,14 @@ async fn start_module(name: String, mut view: Box<dyn ModuleView>) -> Result<Run
         view,
         log,
         last_written: 0,
+        script,
     })
 }
 
 /// Drain newly-appended lines from one module's log, returning them pre-formatted as
 /// `[<timestamp>] <name> | <line>` (the caller just prints/writes them — keeps this testable
 /// without capturing stdout). The second return value is `true` when `exit_on_error` is set and
-/// one of the drained lines looked like a Lua sim error.
+/// one of the drained lines is at [`Level::Error`] (CL-R-031).
 ///
 /// New-line count is computed exactly from [`LogRing::written`] deltas, not by matching the
 /// last-seen line's content — content matching breaks when a message repeats verbatim within one
@@ -193,6 +206,30 @@ async fn drain_log(
     }
 
     (lines, hit_error)
+}
+
+/// Drain a module's log, then its script log under source `<name>/script` (CL-R-048). The flag is
+/// set when either drain saw an Error-level line.
+async fn drain_module(module: &mut RunModule, exit_on_error: bool) -> (Vec<String>, bool) {
+    let (mut lines, hit_error) = drain_log(
+        &module.log,
+        &module.name,
+        &mut module.last_written,
+        exit_on_error,
+    )
+    .await;
+    let Some(script) = module.script.as_mut() else {
+        return (lines, hit_error);
+    };
+    let (script_lines, script_hit) = drain_log(
+        &script.log,
+        &format!("{}/script", module.name),
+        &mut script.last_written,
+        exit_on_error,
+    )
+    .await;
+    lines.extend(script_lines);
+    (lines, hit_error || script_hit)
 }
 
 /// Build the session-level `C_Module` registry from every running module's
@@ -377,13 +414,7 @@ pub async fn run(args: &RunArgs) -> i32 {
 
         let mut should_stop = false;
         for module in modules.iter_mut() {
-            let (lines, hit_error) = drain_log(
-                &module.log,
-                &module.name,
-                &mut module.last_written,
-                args.exit_on_error,
-            )
-            .await;
+            let (lines, hit_error) = drain_module(module, args.exit_on_error).await;
             emit_drained(
                 &lines,
                 &mut log_file,
@@ -1046,12 +1077,14 @@ mod tests {
                 view: view_a.boxed(),
                 log: new_log(),
                 last_written: 0,
+                script: None,
             },
             RunModule {
                 name: "a (2)".to_string(),
                 view: view_b.boxed(),
                 log: new_log(),
                 last_written: 0,
+                script: None,
             },
         ];
         let lines = stop_all(&mut modules).await;
@@ -1074,6 +1107,7 @@ mod tests {
             view: view_b.boxed(),
             log: log.clone(),
             last_written: 0,
+            script: None,
         }];
         let lines = stop_all(&mut modules).await;
         assert_eq!(
@@ -1104,6 +1138,7 @@ mod tests {
             view: view_b,
             log,
             last_written: 0,
+            script: None,
         }];
         let lines = stop_all(&mut modules).await;
         assert_eq!(
@@ -1128,6 +1163,7 @@ mod tests {
             view: view_b,
             log,
             last_written: 0,
+            script: None,
         }];
         let lines = stop_all(&mut modules).await;
         assert_eq!(lines, vec!["Stopped 'b'".to_string()]);
@@ -1208,6 +1244,7 @@ mod tests {
                 }),
                 log: new_log(),
                 last_written: 0,
+                script: None,
             },
             RunModule {
                 name: "b".to_string(),
@@ -1217,6 +1254,7 @@ mod tests {
                 }),
                 log: new_log(),
                 last_written: 0,
+                script: None,
             },
         ];
 
@@ -1354,6 +1392,84 @@ mod tests {
             "must exit on the first failed bind, not at the deadline"
         );
         drop(occupier);
+    }
+
+    fn run_module_with_script_log(name: &str, script: Option<SharedLog>) -> (RunModule, SharedLog) {
+        let (view, _handle) = crate::app::testkit::MockView::pair(name);
+        let log = new_log();
+        let module = RunModule {
+            name: name.to_string(),
+            view: view.boxed(),
+            log: log.clone(),
+            last_written: 0,
+            script: script.map(|log| ScriptLogDrain {
+                log,
+                last_written: 0,
+            }),
+        };
+        (module, log)
+    }
+
+    #[tokio::test]
+    /// CL-E-032 — within one tick a module's log lines come before its script log lines, even
+    /// when the script line was written first.
+    async fn ut_drain_module_emits_log_before_script_log() {
+        let script = new_log();
+        let (mut module, log) = run_module_with_script_log("m", Some(script.clone()));
+        script.write().await.write(Level::Info, "s1");
+        log.write().await.write(Level::Info, "l1");
+        let (lines, hit) = drain_module(&mut module, false).await;
+        assert!(!hit);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(lines[0].ends_with("m | l1"), "{lines:?}");
+        assert!(lines[1].ends_with("m/script | s1"), "{lines:?}");
+    }
+
+    #[tokio::test]
+    /// CL-R-031 — an Error line in the script log alone flags exit-on-error, only when requested.
+    async fn ut_drain_module_script_log_error_flags_exit_on_error() {
+        let script = new_log();
+        let (mut module, _log) = run_module_with_script_log("m", Some(script.clone()));
+        script.write().await.write(Level::Error, "[sim] boom");
+        let (lines, hit) = drain_module(&mut module, false).await;
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(!hit, "not flagged when --exit-on-error is off");
+
+        script.write().await.write(Level::Error, "[sim] boom");
+        let (_, hit) = drain_module(&mut module, true).await;
+        assert!(hit);
+    }
+
+    #[tokio::test]
+    /// CL-R-052 — a script-log overflow between ticks is reported once, under the script source.
+    async fn ut_drain_module_reports_script_log_overflow_under_script_source() {
+        let script = new_log();
+        let (mut module, _log) = run_module_with_script_log("m", Some(script.clone()));
+        {
+            let mut guard = script.write().await;
+            for i in 0..LOG_PEEK + 5 {
+                guard.write(Level::Info, &format!("s{i}"));
+            }
+        }
+        let (lines, _) = drain_module(&mut module, false).await;
+        let dropped: Vec<_> = lines
+            .iter()
+            .filter(|l| l.contains("(5 lines dropped"))
+            .collect();
+        assert_eq!(dropped.len(), 1, "{lines:?}");
+        assert!(dropped[0].contains("m/script |"), "{dropped:?}");
+        assert!(!lines.iter().any(|l| l.contains("m | (")), "{lines:?}");
+    }
+
+    #[tokio::test]
+    /// CL-R-048 — a module with no script log drains its log only.
+    async fn ut_drain_module_without_script_log_drains_log_only() {
+        let (mut module, log) = run_module_with_script_log("m", None);
+        log.write().await.write(Level::Info, "l1");
+        let (lines, hit) = drain_module(&mut module, true).await;
+        assert!(!hit);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].ends_with("m | l1"), "{lines:?}");
     }
 
     #[tokio::test]

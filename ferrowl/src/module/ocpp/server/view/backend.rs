@@ -1986,4 +1986,12 @@ mod tests {
         }
         assert!(max > before, "counter stopped advancing");
     }
+
+    /// CL-R-048 — the server view exposes its script log for the headless drain.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_server_view_exposes_its_script_log() {
+        let v = server_view(0);
+        let l = v.script_log().expect("server view has a script log");
+        assert!(Arc::ptr_eq(&l, &v.script_log));
+    }
 }
