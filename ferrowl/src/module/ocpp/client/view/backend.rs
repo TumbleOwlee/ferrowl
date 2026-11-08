@@ -2058,6 +2058,14 @@ mod tests {
             .collect()
     }
 
+    /// CL-R-048 — the client view exposes its script log for the headless drain.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ut_client_view_exposes_its_script_log() {
+        let v = client_view::<ferrowl_ocpp::V1_6>(OcppVersion::V1_6, 0);
+        let l = v.script_log().expect("client view has a script log");
+        assert!(Arc::ptr_eq(&l, &v.script_log));
+    }
+
     /// SC-R-072, SC-R-073, SC-R-075 — an in-place edit leaves the running client sim, its globals
     /// and its `C_OCPP` field access untouched.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2101,7 +2109,7 @@ mod tests {
             !script_lines(&v.script_log)
                 .await
                 .iter()
-                .any(|l| l.contains("[lua]")),
+                .any(|l| l.contains("[sim]")),
             "field access errored after the edit"
         );
     }

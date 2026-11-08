@@ -64,7 +64,7 @@ Per [`../README.md`](../README.md)'s ownership rules, this area does **not** own
 
 **CL-R-022** — After all modules start, the runner loops on a fixed ~100 ms tick.
 
-**CL-R-048** — Each tick of the headless runner loop (CL-R-022): refresh every module, drain each module's newly appended log lines to stdout (and, if configured, the log file), evaluate stop conditions.
+**CL-R-048** — Each tick of the headless runner loop (CL-R-022): refresh every module, drain each module's newly appended log lines and, for a module that runs scripts, its script log's (SC-R-031) to stdout (and, if configured, the log file), evaluate stop conditions.
 
 **CL-R-023** — When `--session` files supply at least one **enabled** session-level script, the runner also runs the session-level sim (resolved cycle interval) and drains its log under source name `session`. No enabled script → no session sim.
 
@@ -102,7 +102,7 @@ Per [`../README.md`](../README.md)'s ownership rules, this area does **not** own
 
 **CL-R-033** — `migrate` exits **0** on success and **1** on failure (unrecognized input/output extension, input parse failure, output write failure), writing a diagnostic beginning `error:` to stderr. Never exit code 2 or 3.
 
-**CL-R-034** — A `C_Test:Assert` failure (or any Lua sim error) does **not** by itself fail a headless run: it surfaces only as an Error-level log line (`[sim]`-prefixed), influencing the exit code only with `--exit-on-error` (code 3, CL-R-031).
+**CL-R-034** — A `C_Test:Assert` failure (or any Lua sim error) does **not** by itself fail a headless run: it surfaces only as an Error-level log line, influencing the exit code only with `--exit-on-error` (code 3, CL-R-031), through that line's level alone, never its prefix or text (CL-R-060).
 
 **CL-R-035** — An argument-parsing error (unknown flag, missing required subcommand option, malformed option value) aborts before any run, printing a usage diagnostic to stderr and exiting with the parser's standard usage code (2).
 
@@ -112,7 +112,7 @@ Per [`../README.md`](../README.md)'s ownership rules, this area does **not** own
 
 ## Output contract (headless)
 
-**CL-R-040** — Each drained log line prints to stdout as `[<timestamp>] <source> | <message>`, `<source>` = the module's (deduped) name, or `session` for session-sim lines.
+**CL-R-040** — Each drained log line prints to stdout as `[<timestamp>] <source> | <message>`, `<source>` = the module's (deduped) name, `<name>/script` for a line from that module's script log (CL-R-048), or `session` for session-sim lines.
 
 **CL-R-041** — With `--log-file <path>`, every stdout line is also appended to that file, opened create-and-append.
 
@@ -120,6 +120,6 @@ Per [`../README.md`](../README.md)'s ownership rules, this area does **not** own
 
 **CL-R-043** — Per-module draining is exact-by-count (tracking total lines written), so a message repeated verbatim within one drain window is emitted every time.
 
-**CL-R-052** — If more lines were written to a module's log between ticks than the ring holds, the per-module drain (CL-R-043) reports the overflow with a synthetic `(<n> lines dropped: ring overflowed between ticks)` line.
+**CL-R-052** — If more lines were written to one of a module's logs (CL-R-048) between ticks than the ring holds, the drain of that log (CL-R-043) reports the overflow with a synthetic `(<n> lines dropped: ring overflowed between ticks)` line.
 
 **CL-R-060** — A module line drained by `ferrowl run` or `ferrowl bridge` keeps the level its producer passed (MB-R-258, OC-R-180), which is the level `--exit-on-error` tests (CL-R-031, BR-R-026), never re-derived from the message text.

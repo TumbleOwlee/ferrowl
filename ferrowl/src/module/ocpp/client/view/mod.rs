@@ -39,7 +39,7 @@ use ferrowl_ocpp::Version;
 use ferrowl_ocpp::cs::CsActionHandler;
 
 use crate::app::LogRing;
-use crate::config::script::{OcppTrigger, ScriptList};
+use crate::config::script::{OcppTrigger, ScriptDef, ScriptList};
 use crate::dialog::scripts::ScriptDialog;
 use crate::module::ocpp::action_dialog::ActionDialog;
 use crate::module::ocpp::client::backend::{
@@ -638,12 +638,12 @@ impl<V: ClientVersion> ClientView<V> {
         }
     }
 
-    fn enabled_scripts(&self) -> Vec<(String, String)> {
+    fn enabled_scripts(&self) -> Vec<ScriptDef<OcppTrigger>> {
         self.device
             .scripts
             .iter()
             .filter(|s| s.enabled)
-            .map(|s| (s.name.clone(), s.code.clone()))
+            .cloned()
             .collect()
     }
 }
@@ -702,6 +702,10 @@ impl<V: ClientVersion> ModuleView for ClientView<V> {
 
     fn log(&self) -> SharedLog {
         self.log.clone()
+    }
+
+    fn script_log(&self) -> Option<SharedLog> {
+        Some(self.script_log.clone())
     }
 
     fn clone_setup(&self, name: &str) -> Box<dyn SetupView> {
