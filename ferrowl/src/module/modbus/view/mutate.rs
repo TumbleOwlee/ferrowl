@@ -1124,7 +1124,7 @@ mod tests {
             "first poll event",
             std::time::Duration::from_millis(5),
             std::time::Duration::from_secs(10),
-            || queue.pop(),
+            || queue.pop().map(|d| d.event),
         )
         .await;
         drain(&queue);
@@ -1139,7 +1139,7 @@ mod tests {
             std::time::Duration::from_millis(5),
             std::time::Duration::from_secs(10),
             || {
-                while let Some(event) = queue.pop() {
+                while let Some(event) = queue.pop().map(|d| d.event) {
                     assert!(
                         !matches!(event.source, RegisterEventSource::Set),
                         "the `:set` itself publishes nothing"
@@ -1169,7 +1169,7 @@ mod tests {
             .set_register_value("hold", "5", ValueWrite::Command)
             .await;
         assert!(msg(&result).contains("(sent)"));
-        let event = queue.pop().expect("event at once");
+        let event = queue.pop().expect("event at once").event;
         assert!(matches!(event.source, RegisterEventSource::Set));
         assert!(queue.pop().is_none());
         client.module.stop().await.expect("stop");
@@ -1266,13 +1266,13 @@ mod tests {
             let mut v = view(Role::Server);
             let queue = capture_events(&v.module.events());
             v.apply_add(edited("r", register.clone(), Some("7"))).await;
-            let event = queue.pop().expect("add event");
+            let event = queue.pop().expect("add event").event;
             assert!(matches!(event.source, RegisterEventSource::Set));
             assert!(queue.pop().is_none());
 
             v.apply_edit(edited("r", register, Some("9")), 0, "r".into())
                 .await;
-            let event = queue.pop().expect("edit event");
+            let event = queue.pop().expect("edit event").event;
             assert!(matches!(event.source, RegisterEventSource::Set));
             assert!(queue.pop().is_none());
         }

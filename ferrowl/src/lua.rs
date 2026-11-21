@@ -17,13 +17,14 @@ use ferrowl_modbus::{Key, SlaveKey};
 use ferrowl_store::{Range, WriteSource};
 
 use crate::app::Level;
+use crate::config::MIN_SCRIPT_INTERVAL_SECS;
 use crate::config::script::{ModbusTrigger, ScriptDef, Selection};
 use crate::module::modbus::{
     FileSink, ModuleLog, ModuleMemory, RegisterEvent, RegisterEventSource, VirtualStore, append,
     publish_virtual, register_selector,
 };
 use crate::sim::events::{EventStream, SimWake};
-use crate::sim::scheduler::{PlannedScript, QueueFeed, ScriptSchedule, SimScheduler};
+use crate::sim::scheduler::{CyclePolicy, PlannedScript, QueueFeed, ScriptSchedule, SimScheduler};
 use crate::sim::script_id::{ExecutionGuard, ScriptId, ScriptOwner, executing_script};
 use crate::view::status_bar::StatusCell;
 
@@ -239,12 +240,17 @@ pub fn run_sim(
             };
             let schedule = match &script.trigger {
                 None => ScriptSchedule::EveryCycle,
-                Some(trigger) => {
-                    let ModbusTrigger::Register { registers, .. } = trigger;
+                Some(ModbusTrigger::Interval { seconds }) => {
+                    ScriptSchedule::interval(*seconds, MIN_SCRIPT_INTERVAL_SECS)
+                }
+                Some(ModbusTrigger::Register {
+                    registers,
+                    every_write,
+                }) => {
                     watched.push((script.name.clone(), registers.clone()));
                     ScriptSchedule::Events(Box::new(QueueFeed::attach(
                         events.clone(),
-                        register_selector(trigger, id.clone()),
+                        register_selector(registers, *every_write, id.clone()),
                         wake.clone(),
                     )))
                 }
@@ -312,6 +318,7 @@ pub fn run_sim(
         SimScheduler::new(
             planned,
             interval,
+            CyclePolicy::EveryCycle,
             wake,
             thread_stop.clone(),
             Box::new(move |level, line| emit(&scheduler_log, &scheduler_sink, level, line)),
@@ -329,8 +336,8 @@ pub fn run_sim(
 /// Run one script exactly once on a short-lived thread, outside any sim (SC-R-035). Unlike
 /// [`run_sim`] there is no enabled filter and no loop: the script is executed on a fresh context
 /// with the same `C_*` modules, whether or not it is enabled and whether or not a sim is running.
-/// Errors are logged under `[run]`, not `[sim]`, so a dialog-driven test run is never mistaken for
-/// a sim failure by headless `--exit-on-error` (CL-R-031). The thread is detached — a script with
+/// Errors are logged under `[run]`, not `[sim]`, so the log shows a dialog-driven test run apart
+/// from a sim failure (SC-R-049). The thread is detached — a script with
 /// no execution ceiling (SC-R-034) must not be able to block the UI by hanging.
 // Lifted once the module handles (memory, virtual store, registers, status) travel as one bundle.
 #[allow(clippy::too_many_arguments)]
@@ -665,7 +672,7 @@ mod tests {
     // A failing `C_Test` assertion surfaces through the same `call_all` error path the sim loop
     // logs (and headless `--exit-on-error` keys off), mirroring the wiring in `run_sim`.
     #[test]
-    /// SC-R-032, SC-R-051 — a failed C_Test assertion surfaces through the sim's collected-error path with its `assertion failed:` prefix intact.
+    /// SC-R-032, SC-R-038 — a failed C_Test assertion surfaces through the sim's collected-error path with its `assertion failed:` prefix intact.
     fn ut_sim_script_test_assertion_failure_surfaces() {
         let bridge = RegisterBridge::new(
             evse_memory(),
@@ -753,8 +760,8 @@ mod tests {
     }
 
     #[test]
-    /// SC-R-049, SC-R-056 — a failing one-shot logs under `[run]`, never `[sim]`: headless `--exit-on-error`
-    /// keys its exit code off `[sim]` (CL-R-031) and must not see an interactive test run.
+    /// SC-R-049, SC-R-056 — a failing one-shot logs under `[run]`, never `[sim]`, so the log shows an
+    /// interactive test run apart from a sim failure.
     fn ut_run_script_once_error_logged_with_run_prefix() {
         let log = script_log();
         run_script_once(
@@ -1131,9 +1138,7 @@ mod tests {
 
         let start = std::time::Instant::now();
         handle.stop();
-        // Tight enough to distinguish "the stop flag itself interrupted the runaway script" from
-        // the unconditional ~1,000ms wall-clock cap alone (SC-R-034(b), which every context gets
-        // for free regardless of whether a stop flag is attached) still bounding it eventually.
+        // The bound shows the join is not blocked on the runaway script.
         assert!(
             start.elapsed() < Duration::from_millis(500),
             "stop() blocked on the join instead of the hook interrupting the runaway script"

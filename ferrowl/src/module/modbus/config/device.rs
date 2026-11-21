@@ -80,11 +80,6 @@ fn default_script_interval() -> f64 {
     1.0
 }
 
-/// Floor for the script sim cycle: below this, a Lua script would busy-loop the sim thread with
-/// no benefit (register I/O and Lua execution themselves take real time). Well under the old
-/// fixed 1s device-poll-derived floor this replaces, so genuinely fast cycles are still possible.
-const MIN_SCRIPT_INTERVAL_SECS: f64 = 0.05;
-
 impl DeviceConfig {
     /// The script sim cycle interval as a `Duration`; see
     /// [`crate::config::sanitize_interval_secs`] for the sanitization rule.
@@ -92,7 +87,7 @@ impl DeviceConfig {
         crate::config::sanitize_interval_secs(
             self.script_interval,
             default_script_interval(),
-            MIN_SCRIPT_INTERVAL_SECS,
+            crate::config::MIN_SCRIPT_INTERVAL_SECS,
         )
     }
 

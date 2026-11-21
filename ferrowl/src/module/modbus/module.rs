@@ -1830,7 +1830,7 @@ if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
         assert!(queue.pop().is_none());
 
         write_marker(&module, 9);
-        let event = queue.pop().expect("an event for the write");
+        let event = queue.pop().expect("an event for the write").event;
         assert_eq!(event.seq, 1);
         assert_eq!(&*event.name, "marker");
     }
@@ -1863,7 +1863,9 @@ if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
             .expect("reconfigure");
         write_marker(&module, 3);
 
-        let seqs: Vec<u64> = std::iter::from_fn(|| queue.pop()).map(|e| e.seq).collect();
+        let seqs: Vec<u64> = std::iter::from_fn(|| queue.pop().map(|d| d.event))
+            .map(|e| e.seq)
+            .collect();
         assert_eq!(seqs, vec![1, 2, 3]);
     }
 
@@ -1878,6 +1880,15 @@ if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
                 registers: Selection::Names(registers.iter().map(|r| r.to_string()).collect()),
                 every_write,
             }),
+        }
+    }
+
+    fn interval(name: &str, code: &str, seconds: f64) -> Def<Trig> {
+        Def {
+            name: name.into(),
+            code: code.into(),
+            enabled: true,
+            trigger: Some(Trig::Interval { seconds }),
         }
     }
 
@@ -2109,6 +2120,73 @@ if C_Register:Has("marker") then C_Register:Set("marker", 3) end"#,
         let module = ModbusModule::new(&test_spec("ev6", 0), &device);
         module.run_script_once("a".into(), code.into());
         wait_reg(&module, 1, 10);
+    }
+
+    #[test]
+    /// SC-E-054 — an on-demand run of an interval script gets no argument.
+    fn ut_on_demand_run_of_interval_script_gets_no_argument() {
+        use super::ModbusModule;
+        let code = r#"C_Register:Set("n", select('#', ...) + 10)"#;
+        let device = event_device(
+            vec![interval("i", "-- idle", 3600.0)],
+            &[("n", Some(1))],
+            3600.0,
+        );
+        let module = ModbusModule::new(&test_spec("ev6i", 0), &device);
+        module.run_script_once("i".into(), code.into());
+        wait_reg(&module, 1, 10);
+    }
+
+    #[test]
+    /// SC-E-054, SC-R-049 — an on-demand run of an event script that reads its argument unguarded fails: the
+    /// script log gets an Error line tagged `[run]`, and the register is untouched.
+    fn ut_on_demand_run_of_event_script_logs_unguarded_read_under_run() {
+        use super::ModbusModule;
+        let code = r#"local e = ...; C_Register:Set("n", e.new)"#;
+        let device = event_device(
+            vec![trig("a", code, &["watch"], false)],
+            &[("n", Some(1)), ("watch", Some(2))],
+            3600.0,
+        );
+        let module = ModbusModule::new(&test_spec("ev6e", 0), &device);
+        module.run_script_once("a".into(), code.into());
+        wait_until_blocking(
+            "the [run] error line",
+            std::time::Duration::from_millis(5),
+            std::time::Duration::from_secs(10),
+            || {
+                module
+                    .script_log()
+                    .try_read()
+                    .is_ok_and(|log| {
+                        log.peek_n(crate::app::LOG_SIZE)
+                            .into_iter()
+                            .any(|(_, level, line)| {
+                                level == crate::app::Level::Error && line.starts_with("[run] ")
+                            })
+                    })
+                    .then_some(())
+            },
+        );
+        assert_eq!(read_at(&module, 1), 0);
+    }
+
+    #[test]
+    /// SC-R-100 — an interval script runs on its own period inside a 3600 s device cycle,
+    /// while the no-trigger script runs only the once of its first cycle.
+    fn ut_interval_script_runs_on_its_own_period() {
+        use super::ModbusModule;
+        let device = event_device(
+            vec![
+                interval("i", r#"C_Register:Set("n", C_Register:Get("n") + 1)"#, 0.1),
+                plain("c", r#"C_Register:Set("c", C_Register:Get("c") + 1)"#),
+            ],
+            &[("n", Some(1)), ("c", Some(2))],
+            3600.0,
+        );
+        let module = ModbusModule::new(&test_spec("ev6p", 0), &device);
+        wait_reg(&module, 1, 3);
+        assert_eq!(read_at(&module, 2), 1, "the cycle script ran once");
     }
 
     #[test]

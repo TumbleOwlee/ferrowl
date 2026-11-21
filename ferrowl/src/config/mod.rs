@@ -44,6 +44,11 @@ pub(crate) fn sanitize_interval_secs(
     std::time::Duration::from_secs_f64(secs)
 }
 
+/// SC-R-045's floor for a per-module owner's cycle interval and interval-trigger periods: below
+/// this, a Lua script would busy-loop the sim thread with no benefit (register I/O and Lua
+/// execution themselves take real time).
+pub(crate) const MIN_SCRIPT_INTERVAL_SECS: f64 = 0.05;
+
 /// Error type for config loading.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -958,21 +963,42 @@ self_signed = true
     }
 
     #[test]
-    /// SC-E-050 — a Modbus device script trigger of any kind but register fails the load,
-    /// naming its line and key path.
-    fn ut_load_device_rejects_non_register_trigger() {
-        let text = format!(
-            "{DEVICE_HEAD}\n[[scripts]]\nname = \"s\"\n[scripts.trigger]\nkind = \"interval\"\n"
+    /// SC-E-050 — a Modbus device script loads an interval trigger; a kind that is neither
+    /// register nor interval fails the load, naming its line and key path.
+    fn ut_load_device_accepts_interval_and_rejects_other_kinds() {
+        let ok = format!(
+            "{DEVICE_HEAD}\n[[scripts]]\nname = \"s\"\n[scripts.trigger]\nkind = \"interval\"\nseconds = 5\n"
         );
-        let msg = load_error_text("interval.toml", &text, |p| load_device(p).unwrap_err());
+        let dir = reserve_temp_dir("ferrowl_cfgmod_trigger_ok");
+        let path = dir.join("interval.toml").to_string_lossy().into_owned();
+        std::fs::write(&path, ok).unwrap();
+        let device = load_device(&path).unwrap();
+        assert_eq!(
+            device.scripts[0].trigger,
+            Some(crate::config::script::ModbusTrigger::Interval { seconds: 5.0 })
+        );
+        let text = format!(
+            "{DEVICE_HEAD}\n[[scripts]]\nname = \"s\"\n[scripts.trigger]\nkind = \"message\"\n"
+        );
+        let msg = load_error_text("message.toml", &text, |p| load_device(p).unwrap_err());
         assert!(msg.contains("scripts[0].trigger"), "{msg}");
         assert!(msg.contains("line 7"), "{msg}");
     }
 
     #[test]
-    /// SC-E-050 — a session script trigger of any kind fails the load, naming its line and key
-    /// path.
-    fn ut_load_session_rejects_any_trigger() {
+    /// SC-E-050 — a session script loads an interval trigger; any other kind fails the load,
+    /// naming its line and key path.
+    fn ut_load_session_rejects_any_trigger_but_interval() {
+        let ok =
+            "[[scripts]]\nname = \"s\"\n[scripts.trigger]\nkind = \"interval\"\nseconds = 2.5\n";
+        let dir = reserve_temp_dir("ferrowl_cfgmod_trigger_ok");
+        let path = dir.join("session_ok.toml").to_string_lossy().into_owned();
+        std::fs::write(&path, ok).unwrap();
+        let session = load_session(&path).unwrap();
+        assert_eq!(
+            session.scripts[0].trigger,
+            Some(crate::config::script::SessionTrigger::Interval { seconds: 2.5 })
+        );
         let text = "[[scripts]]\nname = \"s\"\n[scripts.trigger]\nkind = \"register\"\nregisters = \"all\"\n";
         let msg = load_error_text("session.toml", text, |p| load_session(p).unwrap_err());
         assert!(msg.contains("scripts[0].trigger"), "{msg}");
@@ -980,9 +1006,18 @@ self_signed = true
     }
 
     #[test]
-    /// SC-E-050 — an OCPP device script trigger of any kind fails the load, naming its line and
-    /// key path.
-    fn ut_load_ocpp_device_rejects_any_trigger() {
+    /// SC-E-050 — an OCPP device script loads an interval trigger; any other kind fails the
+    /// load, naming its line and key path.
+    fn ut_load_ocpp_device_rejects_any_trigger_but_interval() {
+        let ok = "[[scripts]]\nname = \"s\"\n[scripts.trigger]\nkind = \"interval\"\nseconds = 1\n";
+        let dir = reserve_temp_dir("ferrowl_cfgmod_trigger_ok");
+        let path = dir.join("ocpp_ok.toml").to_string_lossy().into_owned();
+        std::fs::write(&path, ok).unwrap();
+        let device = load_ocpp_device(&path).unwrap();
+        assert_eq!(
+            device.scripts[0].trigger,
+            Some(crate::config::script::OcppTrigger::Interval { seconds: 1.0 })
+        );
         let text = "[[scripts]]\nname = \"s\"\n[scripts.trigger]\nkind = \"register\"\nregisters = \"all\"\n";
         let msg = load_error_text("ocpp.toml", text, |p| load_ocpp_device(p).unwrap_err());
         assert!(msg.contains("scripts[0].trigger"), "{msg}");

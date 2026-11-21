@@ -21,7 +21,34 @@ struct StreamInner<E> {
 struct QueueShared<E> {
     selector: EventSelector<E>,
     wake: SimWake,
-    events: Mutex<VecDeque<E>>,
+    events: Mutex<QueueState<E>>,
+}
+
+struct QueueState<E> {
+    events: VecDeque<E>,
+    /// Events dropped since the last delivery.
+    dropped: u64,
+    /// The burst's first drop has not been reported through [`ScriptQueue::take_first_drop`].
+    first_unlogged: bool,
+}
+
+/// An event popped from a queue, with the drops that preceded it.
+pub struct Delivered<E> {
+    pub event: E,
+    /// Events dropped since the previous delivery.
+    pub dropped: u64,
+    /// The burst's first drop has not been reported by `take_first_drop`.
+    pub first_unlogged: bool,
+}
+
+impl<E: mlua::IntoLua> mlua::IntoLua for Delivered<E> {
+    fn into_lua(self, lua: &mlua::Lua) -> mlua::Result<mlua::Value> {
+        let value = self.event.into_lua(lua)?;
+        if let mlua::Value::Table(table) = &value {
+            table.set("dropped", self.dropped)?;
+        }
+        Ok(value)
+    }
 }
 
 /// Fan-out of events to the attached queues. Lock order: stream, queue, wake.
@@ -83,11 +110,15 @@ impl<E> QueueShared<E> {
             return;
         }
         {
-            let mut events = self.events.lock();
-            if events.len() >= QUEUE_CAPACITY {
-                events.pop_front();
+            let mut state = self.events.lock();
+            if state.events.len() >= QUEUE_CAPACITY {
+                state.events.pop_front();
+                state.dropped += 1;
+                if state.dropped == 1 {
+                    state.first_unlogged = true;
+                }
             }
-            events.push_back(event);
+            state.events.push_back(event);
         }
         self.wake.notify();
     }
@@ -104,13 +135,29 @@ impl<E: Clone + Send + 'static> ScriptQueue<E> {
             shared: Arc::new(QueueShared {
                 selector,
                 wake,
-                events: Mutex::new(VecDeque::new()),
+                events: Mutex::new(QueueState {
+                    events: VecDeque::new(),
+                    dropped: 0,
+                    first_unlogged: false,
+                }),
             }),
         }
     }
 
-    pub fn pop(&self) -> Option<E> {
-        self.shared.events.lock().pop_front()
+    /// Pops the oldest event with the drop count since the previous delivery.
+    pub fn pop(&self) -> Option<Delivered<E>> {
+        let mut state = self.shared.events.lock();
+        let event = state.events.pop_front()?;
+        Some(Delivered {
+            event,
+            dropped: std::mem::take(&mut state.dropped),
+            first_unlogged: std::mem::take(&mut state.first_unlogged),
+        })
+    }
+
+    /// True once per burst: the first drop since the last `pop` that no line has reported yet.
+    pub fn take_first_drop(&self) -> bool {
+        std::mem::take(&mut self.shared.events.lock().first_unlogged)
     }
 }
 
@@ -164,7 +211,7 @@ mod tests {
         }
         let mut seen = Vec::new();
         while let Some(e) = queue.pop() {
-            seen.push(e);
+            seen.push(e.event);
         }
         assert_eq!(seen.len(), 4096);
         assert_eq!(seen.first(), Some(&1));
@@ -181,10 +228,10 @@ mod tests {
             stream.publish_with(|seq| seq);
         }
         assert!(start.elapsed() < Duration::from_secs(2));
-        assert_eq!(queue.pop(), Some(2));
+        assert_eq!(queue.pop().map(|d| d.event), Some(2));
         let mut last = 0;
         while let Some(e) = queue.pop() {
-            last = e;
+            last = e.event;
         }
         assert_eq!(last, 4097);
     }
@@ -202,7 +249,7 @@ mod tests {
         let queue = ScriptQueue::new(accept_all(), SimWake::default());
         stream.attach(&queue);
         stream.publish_with(|seq| seq);
-        assert_eq!(queue.pop(), Some(2));
+        assert_eq!(queue.pop().map(|d| d.event), Some(2));
     }
 
     #[test]
@@ -212,9 +259,9 @@ mod tests {
         for _ in 0..4 {
             stream.publish_with(|seq| seq);
         }
-        assert_eq!(queue.pop(), Some(2));
-        assert_eq!(queue.pop(), Some(4));
-        assert_eq!(queue.pop(), None);
+        assert_eq!(queue.pop().map(|d| d.event), Some(2));
+        assert_eq!(queue.pop().map(|d| d.event), Some(4));
+        assert!(queue.pop().is_none());
     }
 
     #[test]
@@ -224,8 +271,8 @@ mod tests {
         stream.publish_with(|seq| seq);
         stream.detach(&queue);
         stream.publish_with(|seq| seq);
-        assert_eq!(queue.pop(), Some(1));
-        assert_eq!(queue.pop(), None);
+        assert_eq!(queue.pop().map(|d| d.event), Some(1));
+        assert!(queue.pop().is_none());
     }
 
     #[test]
@@ -241,5 +288,78 @@ mod tests {
         wake.wait(Duration::from_secs(30));
         assert!(start.elapsed() < Duration::from_secs(5));
         handle.join().unwrap();
+    }
+
+    #[test]
+    /// SC-R-108, SC-R-109 — a pop reports the drops since the previous delivery, then 0.
+    fn ut_pop_reports_drops_since_previous_delivery() {
+        let (stream, queue) = attached(accept_all());
+        for _ in 0..4096 + 3 {
+            stream.publish_with(|seq| seq);
+        }
+        let first = queue.pop().unwrap();
+        assert_eq!(
+            (first.event, first.dropped, first.first_unlogged),
+            (4, 3, true)
+        );
+        let second = queue.pop().unwrap();
+        assert_eq!((second.dropped, second.first_unlogged), (0, false));
+    }
+
+    #[test]
+    /// SC-R-106 — the first drop of a burst is reported once; a new burst after a delivery is
+    /// reported again.
+    fn ut_take_first_drop_reports_once_per_burst() {
+        let (stream, queue) = attached(accept_all());
+        assert!(!queue.take_first_drop());
+        for _ in 0..4096 + 2 {
+            stream.publish_with(|seq| seq);
+        }
+        assert!(queue.take_first_drop());
+        assert!(!queue.take_first_drop());
+        queue.pop().unwrap();
+        stream.publish_with(|seq| seq);
+        stream.publish_with(|seq| seq);
+        assert!(queue.take_first_drop());
+    }
+
+    #[test]
+    /// SC-E-055 — an event published while no queue is attached is neither delivered nor
+    /// counted as dropped.
+    fn ut_event_published_without_an_attached_queue_is_neither_delivered_nor_dropped() {
+        let stream = EventStream::<u64>::new();
+        for _ in 0..3 {
+            stream.publish_with(|seq| seq);
+        }
+        let queue = ScriptQueue::new(accept_all(), SimWake::default());
+        stream.attach(&queue);
+        stream.publish_with(|seq| seq);
+        let delivered = queue.pop().unwrap();
+        assert_eq!((delivered.event, delivered.dropped), (4, 0));
+        assert!(queue.pop().is_none());
+    }
+
+    #[test]
+    /// SC-R-108 — a delivered event that converts to a table carries the drop count as `dropped`.
+    fn ut_delivered_event_table_carries_dropped() {
+        struct Ev(i64);
+        impl mlua::IntoLua for Ev {
+            fn into_lua(self, lua: &mlua::Lua) -> mlua::Result<mlua::Value> {
+                let table = lua.create_table()?;
+                table.set("n", self.0)?;
+                Ok(mlua::Value::Table(table))
+            }
+        }
+        let lua = mlua::Lua::new();
+        let delivered = Delivered {
+            event: Ev(1),
+            dropped: 7,
+            first_unlogged: false,
+        };
+        let table: mlua::Table = lua
+            .unpack(mlua::IntoLua::into_lua(delivered, &lua).unwrap())
+            .unwrap();
+        assert_eq!(table.get::<i64>("dropped").unwrap(), 7);
+        assert_eq!(table.get::<i64>("n").unwrap(), 1);
     }
 }

@@ -67,6 +67,7 @@ Boundary and error behavior of the process command line and headless runner, plu
 
 - **CL-E-022** — Exact-by-count from a monotonic written-line counter, so a message repeated verbatim within one window is fully emitted.
 - **CL-E-023** — If more lines are written between ticks than the ring holds (~80), the oldest overflow is gone; the runner emits a synthetic `(<n> lines dropped: ring overflowed between ticks)` line rather than under-counting. A sim logging faster than one tick drains loses the *content* of the oldest lines while accounting for their count.
+- **CL-E-032** — Within one tick, a module's log lines are emitted before its script log lines (CL-R-048), so stdout is ordered per log, not by timestamp across the two logs.
 
 ---
 
